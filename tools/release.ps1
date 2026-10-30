@@ -7,7 +7,7 @@ param(
 
     [string]$BuildScript = 'tools/build.ps1',
 
-    [string]$Remote = 'origin',
+    [string]$Remote = 'github',
 
     [string]$Repository = 'GIT-S-A/LocalVault',
 
@@ -44,7 +44,7 @@ if (-not $Unsigned) {
 
 git -C $root fetch --quiet $Remote
 if ($LASTEXITCODE -ne 0) { throw "git fetch $Remote failed." }
-if (-not (git -C $root branch --remotes --contains $sha)) {
+if (-not (git -C $root branch --remotes --contains $sha --list "$Remote/*")) {
     throw "$($sha.Substring(0, 7)) is not on $Remote yet. Push it first; nothing was tagged."
 }
 
