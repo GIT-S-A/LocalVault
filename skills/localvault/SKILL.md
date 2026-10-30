@@ -1,0 +1,167 @@
+---
+name: localvault
+description: Install, update or use LocalVault, the per-project DPAPI secret store (PowerShell module, `lv`). Use when a project needs secrets stored locally, when scripts use Get-VaultEntry/Set-VaultEntry/Use-VaultEnv or `lv`, when migrating scripts that keep secrets with Import-Clixml/Export-Clixml (DPAPI .clixml files), when setting up a new machine, or when secrets are shared through a store (KeePass).
+---
+
+# LocalVault
+
+PowerShell 7.6+ module, Windows only. Source: https://github.com/GIT-S-A/LocalVault.
+`Get-Help about_LocalVault` and `Get-Help <cmdlet> -Full` are the reference; `lv` alone lists the
+commands; `lv start` in a project prints its state and the commands to run next.
+
+## Rules
+
+- Never print, log or echo a secret value, never put one on a command line, never write one to a
+  file outside the vault. Read names with `Get-VaultEntryList`; never open a vault or .clixml file to
+  look at values.
+- Ask the person before: the first write to a real vault; `lv store use` and `lv store add --project`
+  (they write `localvault.json`, a committed file); `lv save` / `Export-VaultToStore`; `Clear-Vault`;
+  `-ReplaceAll`; `-Overwrite`; `-Downgrade`; deleting or renaming an old .clixml file; editing scripts
+  that other people run.
+- Install with the line below; update with `lv update`. Never run `git checkout`, `pull`, `reset` or
+  `clean` in a LocalVault clone: it is someone's working copy.
+- The vault file must be ignored by git (`secrets.local.*` in `.gitignore`) before its first write;
+  the module refuses otherwise.
+
+## Facts that shape a migration
+
+- **Vault files.** Default: `secrets.local.lv` at the git root. Any other place: `-Path` (cmdlets),
+  `--path` (`lv`), or `$env:LOCALVAULT_PATH`. A repository may hold several vaults, each created
+  with an explicit path, e.g. `infra\secrets.local.lv` and `migration\secrets.local.lv`. Without a
+  path, creating a vault fails when the repository already has one elsewhere.
+- **Names.** `key` or `scope/key`, at most one `/`. Characters: letters, digits, `. _ : - @ +`, so an
+  email address is a valid key. Case-insensitive, case kept. Not allowed: spaces, `\`, `$`, accents,
+  a second `/`. A name that doesn't fit has to be renamed, and the scripts with it.
+- **Kinds.** Secret (text), file (bytes plus the path it is restored to), required (declared by the
+  project, value set by each person, see below).
+- **Who sees what.** Every entry is *shared* by default: `lv save` copies it to the vault's store (a
+  KeePass database). `--local` / `-Local` keeps an entry on this PC; `lv mark <name> local|shared`
+  changes it later. `lv require <name> --note "..."` declares a personal value: the store gets the
+  declaration, never the value; until set, the entry is `Missing` and reading it fails with the note.
+- **Stores.** A store is a KeePass `.kdbx` file. *Common* stores belong to the PC (`lv store add <name>
+  <kdbx> [--default] [--unlock-with <store>] [--mirror]`, in `%LOCALAPPDATA%\LocalVault\stores.json`), read
+  first; *project* stores belong to the repository (`lv store add <name> [<kdbx>] --project [--mirror]`,
+  in `localvault.json`, no key file); a project entry without a target refers to each PC's common store
+  of that name. `localvault.json` at the repo root lists the repository's vaults (filled automatically
+  on write) and the project's primary store (`lv store use <name>`), by name and internal id; a vault's
+  own primary (`lv store use <name> --path <vault>`) is a rare override. Commit it. A store marked
+  `--mirror` (either level) is also written by every `lv save`; the vault's value wins there; an
+  unreachable mirror only warns; `lv load` reads the primary only. `lv save` / `lv load`
+  handle every listed vault at once, asking the password once per store; a vault whose store isn't
+  defined on this PC is skipped with a message. In a console, reading an entry this PC lacks loads the
+  vaults from their stores first. Each vault has its own KeePass group:
+  `LocalVault/<repo>[/<vault folder>]`. `--unlock-with <store>` opens a store with the password kept
+  in another store's `AutoOpen` group (usually the person's own database), so one password opens all.
+- **Files that need secrets.** When a tool insists on a file (`clouds.yaml`, `terraform.tfvars`,
+  cloud-init, a `.env` it reads itself), use a template rather than a file entry:
+  `lv template add <file> [--capture KEY,...]` writes `<file>.template` (commit it, with
+  `localvault.json`) with `{{name}}` placeholders and moves captured values into the vault; without
+  the file it starts from `<file>.example`. `lv template render` / `clear` write or delete the real,
+  git-ignored file; `lv template update [--accept]` carries edits of the real file into the template.
+  `lv run [VAR=name ...] -- <command>` sets variables and writes the files only while the command
+  runs. When the tool reads environment variables (`docker compose` `${VAR}`, `OS_PASSWORD`), prefer
+  `Use-VaultEnv` / `lv run VAR=name` and no file at all.
+- **The local vault is a cache**, sealed to the Windows account (DPAPI). It disappears with the
+  folder; `lv load` rebuilds it. Optional automatic local backups: `lv backup enable`.
+- **Old files.** A `secrets.local.clixml` beside `secrets.local.lv` is read until the first write,
+  which moves its entries into the vault and renames it `.migrated-<time>`. Other .clixml files are
+  imported with `Import-Vault -Source <file>`; the file itself stays where it is.
+
+## Install or update
+
+`$d=New-Item -ItemType Directory "$env:TEMP\lv-$(New-Guid)"; irm https://github.com/GIT-S-A/LocalVault/releases/latest/download/install.ps1 -OutFile "$d\install.ps1"; & "$d\install.ps1"`
+
+Afterwards `lv update` (or `lv update <tag>`); it does nothing when the newest release is already
+installed. `lv --version` prints the installed release. Releases are signed by GIT; the installer
+refuses unsigned files. Only active in new PowerShell windows.
+Check: `Get-Module LocalVault -ListAvailable | Select-Object Version, Path`. The module lives in
+`%LOCALAPPDATA%\LocalVault\Modules` (on the user `PSModulePath`), never in OneDrive `Documents`.
+
+## Migrating scripts that use DPAPI .clixml files
+
+1. **Inventory, names only.** Find the .clixml files and the scripts that read or write them
+   (`Import-Clixml`, `Export-Clixml`, `SecureString`). For each file, count and list its keys
+   without values: import it into a throwaway vault and list it, then delete the throwaway folder.
+   ```powershell
+   $t = Join-Path $env:TEMP "lv-inventory-$(Get-Random)"
+   Import-Vault -Path "$t\v.lv" -Source <file.clixml> | Out-Null   # prints "Not imported: <name> (<reason>)" for misfits
+   Get-VaultEntryList -Path "$t\v.lv" | Select-Object Name, Kind
+   Remove-Item -Recurse -Force $t
+   ```
+2. **Check the names** against the rules above; list the ones that need renaming, and the keys that
+   start with `__` (`__File:<name>` becomes a file entry; SSH keys stay out of the vault).
+3. **Decide with the person**, per old file: which vault it becomes (one vault per old file, with an
+   explicit path), and per entry: shared (default), local, or required personal value.
+4. **Rehearse** steps 5 and 6 on a copy of the repository folder, never on the real one.
+5. **Create each vault** with its path: for a `secrets.local.clixml` beside it, the first write
+   migrates it; otherwise `Import-Vault -Path <vault> -Source <old file>`. Then apply the decisions:
+   `lv mark <name> local --path <vault>`, `lv require <name> --note "..." --path <vault>`.
+6. **Rewrite the scripts** (patterns below), pin the module, and run them once with the person.
+7. **Stores**, with the person: `lv store use <name>` once per repository (the primary store;
+   `--path <vault>` only for a vault that goes to another store, e.g. a personal one), mirrors if the
+   person wants extra copies (`lv store add <name> <kdbx> --project --mirror`), then `lv save` (all
+   vaults, one password per store). Commit `localvault.json`.
+8. Leave the old .clixml files in place until the person decides; they are the fallback.
+
+## Script patterns
+
+```powershell
+#Requires -Modules @{ ModuleName = 'LocalVault'; ModuleVersion = '1.0.0' }
+$vault = Join-Path $PSScriptRoot 'secrets.local.lv'           # or the vault this script uses
+
+# Before: $s = Import-Clixml $file; $s['OsPassword']           (a SecureString)
+$secure = Get-VaultEntry -Path $vault -Name 'OsPassword'
+
+# Before: [Net.NetworkCredential]::new('', $s['Key']).Password
+$plain = Get-VaultEntry -Path $vault -Name 'Key' -AsPlainText  # only where a tool needs plain text
+
+# Before: environment variables filled from the hashtable
+Use-VaultEnv -Path $vault -Map @{ OS_PASSWORD = 'OsPassword'; AWS_SECRET_ACCESS_KEY = 'S3SecretKey' }
+
+# Before: $s['Key'] = Read-Host -AsSecureString; $s | Export-Clixml $file
+Set-VaultEntry -Path $vault -Name 'Key'                        # asks; never pass a value as text
+
+# Before: files embedded as base64 ('__File:clouds.yaml')
+Restore-VaultFile -Path $vault -Name 'clouds.yaml'             # writes it back to its stored path
+
+# One mailbox per entry, scoped
+foreach ($mailbox in $mailboxes) { $pw = Get-VaultEntry -Path $vault -Name "migration/$mailbox" }
+
+# Before: a user name kept beside the password; now one credential entry
+Set-VaultEntry -Path $vault -Name 'smtp' -Credential            # asks user, password, TOTP, URLs
+$credential = Get-VaultEntry -Path $vault -Name 'smtp' -AsCredential
+$code = Get-VaultEntry -Path $vault -Name 'portal#totp' -AsPlainText
+```
+
+Writes merge: several scripts can share one vault. A script never rebuilds a whole vault.
+
+## New machine
+
+1. Install (above). Clone the project.
+2. `lv start`. Only when it says the project's store isn't defined on this PC:
+   `lv store add <name> <path to .kdbx> --default` (name as `lv start` shows it). Optional, to type
+   one password: `lv store add mine <personal.kdbx>`, then `lv store add <name> <path to .kdbx>
+   --unlock-with mine`.
+3. `lv load` (every vault of the repository); the person types the KeePass password. Exit code 2:
+   entries changed on both sides; ask, then `--replace name,...`.
+4. `lv list`: entries marked `Missing` are personal values to set with `lv set <name>`.
+
+## Commands
+
+Cmdlets: `Get-VaultEntryList`, `Get-VaultEntry`, `Copy-VaultEntry`, `Set-VaultEntry`,
+`Remove-VaultEntry`, `Resolve-VaultEntry`, `Use-VaultEnv`, `Restore-VaultFile`, `Export-Vault`,
+`Import-Vault`, `Clear-Vault`, `Enable-/Disable-/Invoke-/Test-/Get-VaultBackup`,
+`Export-VaultToStore`, `Import-VaultFromStore`, `Compare-VaultWithStore`, `Get-VaultStoreStatus`,
+`Copy-VaultToStore`, `Set-VaultProjectStore`, `Register-/Set-/Unregister-/Get-VaultStore`,
+`Add-/Update-/Write-/Clear-/Remove-/Get-VaultTemplate`.
+
+`lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local]`, `require [--note]`,
+`mark <name> shared|local`, `rm`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
+`export [--overwrite]`, `import`, `backup [enable|disable|now|test]`,
+`store [list|add|set|rm|use|diff|copy]`, `template [add|update|render|clear|rm]`,
+`run [VAR=name ...] -- <command>`, `update [<tag>] [--downgrade]`, `--version`.
+`lv store set <name> --mirror` (or `--unlock-with <store>`, `--no-mirror`, `--no-unlock`, `--default`)
+changes one setting without retyping the target and key file.
+Every vault command takes `--path <vault>`; `save`, `load` and `store diff` take `--store <name>`.
+`<name>#user`, `#password`, `#totp` (current code), `#url`, `#url2` name one part of a credential in
+`get`, `clip`, `set`, `env`, `run` and templates (`{{name#user}}`); the bare name is the password.

@@ -1,0 +1,5 @@
+KeePassLib from KeePass 2.61.1, unmodified.
+Source: https://sourceforge.net/projects/keepass/files/KeePass%202.x/2.61.1/KeePass-2.61.1-Source.zip/download
+SHA-256: 711BD9EC7076661678469E51BAE876DEBAC07A08C32F1B1C6B3B8FE5E761C13A
+OpenPGP signer: D95044283EE948D911E8B606A4F762DC58C6F98E
+Update: tools/update-keepasslib.ps1 -Version <x.y> -Sha256 <hash from https://keepass.info/integrity.html>
