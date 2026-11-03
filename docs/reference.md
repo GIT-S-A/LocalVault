@@ -2,8 +2,7 @@
 
 The LocalVault module stores the secrets and files of a project in one vault file in the project
 folder. The file is sealed with Windows DPAPI for the current user on the current machine. Exports
-are sealed with a passphrase. Automatic backups are sealed with a passphrase and a keyfile kept in
-the vault. Shared entries are saved to a store, a KeePass database, defined on the PC or in the
+are sealed with a passphrase. Shared entries are saved to a store, a KeePass database, defined on the PC or in the
 project, where the team reads them and from which a new machine loads them.
 
 The module requires Windows and PowerShell 7.6 or later. For concepts, see
@@ -18,11 +17,8 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Compare-VaultWithStore](#compare-vaultwithstore): Compares the entries of a vault with its store.
 - [Copy-VaultEntry](#copy-vaultentry): Copies a secret to the clipboard for a short time.
 - [Copy-VaultToStore](#copy-vaulttostore): Copies the shared entries of a vault once to another store.
-- [Disable-VaultBackup](#disable-vaultbackup): Turns off automatic backups of a vault.
-- [Enable-VaultBackup](#enable-vaultbackup): Turns on automatic backups of a vault.
 - [Export-Vault](#export-vault): Exports every entry of a vault to a file sealed with a passphrase.
 - [Export-VaultToStore](#export-vaulttostore): Saves the shared entries of the repository's vaults to their stores.
-- [Get-VaultBackup](#get-vaultbackup): Gets the state of a vault's automatic backups.
 - [Get-VaultEntry](#get-vaultentry): Gets the value of one vault entry.
 - [Get-VaultEntryList](#get-vaultentrylist): Gets the names, kinds and ages of the entries in a vault.
 - [Get-VaultStore](#get-vaultstore): Gets the stores of the project and of this PC.
@@ -31,7 +27,6 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Import-Vault](#import-vault): Merges entries from an export, a backup or a `secrets.local.clixml` file into a vault.
 - [Import-VaultFromStore](#import-vaultfromstore): Loads the shared entries of the repository's vaults from their stores.
 - [Invoke-LocalVault](#invoke-localvault): Runs a LocalVault command from a short command line.
-- [Invoke-VaultBackup](#invoke-vaultbackup): Writes a backup of a vault now.
 - [Register-VaultStore](#register-vaultstore): Defines a store on this PC or in the project.
 - [Remove-VaultEntry](#remove-vaultentry): Deletes one entry from a vault.
 - [Remove-VaultTemplate](#remove-vaulttemplate): Stops managing a templated file.
@@ -40,7 +35,6 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Set-VaultEntry](#set-vaultentry): Adds or replaces a secret, a credential or a file in a vault.
 - [Set-VaultProjectStore](#set-vaultprojectstore): Names the project's primary store.
 - [Set-VaultStore](#set-vaultstore): Changes one setting of a store without defining it again.
-- [Test-VaultBackup](#test-vaultbackup): Verifies that the newest backup of a vault opens.
 - [Unregister-VaultStore](#unregister-vaultstore): Removes a store from this PC or from the project.
 - [Update-VaultTemplate](#update-vaulttemplate): Takes the edits of templated files back into their templates.
 - [Use-VaultEnv](#use-vaultenv): Copies vault secrets into environment variables of the current process.
@@ -153,17 +147,19 @@ missing entries, skips identical entries, and asks about entries that
 differ. It doesn't delete entries. `Import-Vault` also reads `SAAS-VAULT-1`
 exports.
 
-### Backups
+### Old backups
 
-`Enable-VaultBackup` turns on automatic backups. Each write then also writes
-a backup file to `%OneDrive%\LocalVault\<project>-<id>-<machine>`, or to the
-folder that you specify. Backup file names carry an id of the vault. The
-folder keeps the 10 newest backups of the vault and its newest backup of each
-of the last 30 days.
+LocalVault makes no automatic backups. Releases up to 1.0.0-beta14 wrote
+them, by default to `%OneDrive%\LocalVault\<project>-<id>-<machine>`, sealed
+with a key kept in the vault. Every command that opens a vault looks for
+them: the folder named by the backup settings in the vault, and the vault's
+default folder. In a console, the command asks once per session whether to
+delete them; on yes, it deletes the files, the folders left empty and the
+backup key, including the copy in the vault's previous generation
+(`<vault>.bak`). Without a console, it writes a warning. `Clear-Vault` deletes
+them with the vault.
 
-Backups are sealed with a generated passphrase and a 32-byte keyfile that
-the vault keeps. They are this machine's automatic saves. When a backup
-fails, the write succeeds and `Get-VaultEntryList` writes a warning.
+`Import-Vault` restores an old backup until it is deleted.
 
 ### Stores
 
@@ -289,7 +285,7 @@ The secrets in a vault are lost when:
 - an administrator resets the Windows password of the user, or the user
   profile is rebuilt.
 
-An export or a backup is the only other copy.
+An export is the only other copy of the entries that aren't in a store.
 
 ### Scripts
 
@@ -512,9 +508,11 @@ The `Clear-Vault` cmdlet deletes the vault file and its previous version `<vault
 named `secrets.local.lv`, it also deletes a `secrets.local.clixml` file in the same folder, and the
 confirmation message names it.
 
-The cmdlet asks for confirmation unless you use `-Confirm:$false`. When automatic backups are on,
-it also asks whether to delete the backup files of this vault. Files of other vaults in the same
-folder stay. Without a console, it keeps the backups.
+The cmdlet asks for confirmation unless you use `-Confirm:$false`. It also deletes the vault's old
+automatic backups: the files named by the backup settings kept in the vault, and every backup in
+the vault's default folder `%OneDrive%\LocalVault\<project>-<id>-<machine>`. Files of other vaults
+stay. Folders left empty are removed. When the vault file is already gone, the cmdlet still deletes
+the backups in the default folder.
 
 Files written from the repository's templates with this vault's values (see `Write-VaultTemplate`)
 hold those values in plain text. In a console, the cmdlet asks whether to delete them too; without
@@ -531,11 +529,11 @@ Clear-Vault
 ```Output
 Confirm
 Are you sure you want to perform this action?
-Performing the operation "Delete the vault and its previous generation" on target
+Performing the operation "Delete the vault, its previous generation and its 12 old automatic backup(s)" on target
 "C:\src\obs\secrets.local.lv".
 [Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"): y
 Deleted C:\src\obs\secrets.local.lv
-Backups kept in C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042
+Deleted 12 old automatic backup(s) in C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042
 ```
 
 #### Example 2 - Delete a test vault without a question
@@ -1017,262 +1015,6 @@ resolved from the current location. Use either this parameter or **Store**.
 
 `lv store copy <target | name> [--keyfile <file>]` runs this cmdlet.
 
-## Disable-VaultBackup
-
-Turns off automatic backups of a vault.
-
-### Syntax
-
-```text
-Disable-VaultBackup [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
-```
-
-### Description
-
-The `Disable-VaultBackup` cmdlet removes the backup settings from the vault. Later writes no longer
-write backups. Existing backup files are kept.
-
-### Examples
-
-#### Example 1 - Turn off backups
-
-```powershell
-Disable-VaultBackup
-```
-
-```Output
-Backups disabled. Existing backups kept in C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042
-```
-
-### Parameters
-
-#### -Confirm
-
-Prompts you for confirmation before running the cmdlet.
-
-| Property | Value |
-| --- | --- |
-| Type | System.Management.Automation.SwitchParameter |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | False |
-| Aliases | cf |
-
-#### -Path
-
-Specifies the path to the vault file. A relative path is resolved from the current location. If
-you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
-`secrets.local.lv` at the root of the git repository that contains the current location.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -WhatIf
-
-Shows what would happen if the cmdlet runs. The cmdlet isn't run.
-
-| Property | Value |
-| --- | --- |
-| Type | System.Management.Automation.SwitchParameter |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | False |
-| Aliases | wi |
-
-### Inputs
-
-**None**: You can't pipe objects to this cmdlet.
-
-### Outputs
-
-**None**: This cmdlet returns no output.
-
-### Notes
-
-`lv backup disable` runs this cmdlet.
-
-## Enable-VaultBackup
-
-Turns on automatic backups of a vault.
-
-### Syntax
-
-```text
-Enable-VaultBackup [-Destination <string>] [-Path <string>] [<CommonParameters>]
-```
-
-```text
-Enable-VaultBackup -Manual [-Destination <string>] [-KeyFile <string>] [-KeyFileOut <string>]
- [-Passphrase <securestring>] [-Path <string>] [<CommonParameters>]
-```
-
-### Description
-
-The `Enable-VaultBackup` cmdlet stores backup settings in the vault and writes a first backup.
-After that, every write to the vault also writes a backup file, `<time>-<backup id>.lvbak`, to the
-destination folder. The backup id is random and is stored in the backup settings. The folder keeps
-the 10 newest backups of the vault and its newest backup of each of the last 30 days. Files of other
-vaults, and files with other names, stay.
-
-A backup is sealed with a passphrase and a 32-byte keyfile, the key of the backups. By default, the
-cmdlet generates both and keeps them in the vault, and asks for nothing. The backups are this
-machine's automatic saves: they cover a deleted vault file or a cleaned folder. To share entries or
-recover them on another machine, use `Export-VaultToStore`.
-
-With the **Manual** parameter, you give the passphrase, and an existing keyfile or a path for a new
-one. You keep both yourself.
-
-When backups are already on, the cmdlet shows their state and changes nothing. To change the
-folder or the key, run `Disable-VaultBackup` first.
-
-A failed backup doesn't stop the write to the vault: the cmdlet that wrote writes a warning, and
-`Get-VaultEntryList` warns until a backup succeeds.
-
-### Examples
-
-#### Example 1 - Back up to OneDrive
-
-```powershell
-Enable-VaultBackup
-```
-
-```Output
-Backups on. Every change to the vault now also writes a backup to C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042.
-First backup: C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042\20261008T091240512Z-0ec6df6e042491df.lvbak
-```
-
-#### Example 2 - Back up to a network share
-
-```powershell
-Enable-VaultBackup -Destination \\nas\backup\obs
-```
-
-#### Example 3 - Back up with your own passphrase and keyfile
-
-```powershell
-Enable-VaultBackup -Manual -KeyFileOut E:\keys\obs.lvkey
-```
-
-The cmdlet writes a new keyfile to `E:\keys\obs.lvkey` and asks for a passphrase twice.
-
-### Parameters
-
-#### -Destination
-
-Specifies the folder for the backup files. If you omit this parameter, the cmdlet uses
-`%OneDrive%\LocalVault\<project>-<id>-<machine>`, and fails when OneDrive isn't set up.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -KeyFile
-
-Specifies an existing keyfile to seal the backups with.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -KeyFileOut
-
-Specifies where to write a new keyfile. The cmdlet fails when the file exists. If you omit both
-this parameter and **KeyFile**, the cmdlet asks for the path.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -Manual
-
-Indicates that you supply the passphrase and the keyfile instead of the cmdlet generating them.
-
-| Property | Value |
-| --- | --- |
-| Type | System.Management.Automation.SwitchParameter |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | Manual |
-| Pipeline input | False |
-| Default value | False |
-| Aliases | None |
-
-#### -Passphrase
-
-Specifies the backup passphrase as a **SecureString** of at least 12 characters. If you omit this
-parameter, the cmdlet asks for it twice.
-
-| Property | Value |
-| --- | --- |
-| Type | System.Security.SecureString |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -Path
-
-Specifies the path to the vault file. A relative path is resolved from the current location. If
-you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
-`secrets.local.lv` at the root of the git repository that contains the current location.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-### Inputs
-
-**None**: You can't pipe objects to this cmdlet.
-
-### Outputs
-
-**None**: This cmdlet writes messages only. To read the state of the backups, use `Get-VaultBackup`.
-
-### Notes
-
-When a backup fails, the write still succeeds. The vault records the error, and
-`Get-VaultEntryList` writes a warning.
-
-`lv backup enable [--destination <folder>]` and
-`lv backup enable --manual [--keyfile <file> | --keyfile-out <file>]` run this cmdlet.
-
 ## Export-Vault
 
 Exports every entry of a vault to a file sealed with a passphrase.
@@ -1293,8 +1035,6 @@ opens the file on any machine.
 The cmdlet asks for the passphrase twice. Without a console, it reads the **Passphrase** parameter
 or one line of redirected standard input. The cmdlet verifies the file after it writes it, and
 records the time of the export in the vault.
-
-The export doesn't include the automatic backup settings.
 
 ### Examples
 
@@ -1576,57 +1316,6 @@ changes.
 
 `lv save [--store <name>] [--replace a,b | --replace-all]` runs this cmdlet.
 
-## Get-VaultBackup
-
-Gets the state of a vault's automatic backups.
-
-### Syntax
-
-```text
-Get-VaultBackup [-Path <string>] [<CommonParameters>]
-```
-
-### Description
-
-The `Get-VaultBackup` cmdlet reads the backup settings of the vault: the backup folder, the newest
-backup and the last error. It asks for nothing. When backups are off, it returns nothing and says
-so.
-
-### Examples
-
-#### Example 1 - Find the newest backup
-
-```powershell
-(Get-VaultBackup).Newest
-```
-
-### Parameters
-
-#### -Path
-
-Specifies the path to the vault file. A relative path is resolved from the current location. If
-you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
-`secrets.local.lv` at the root of the git repository that contains the current location.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-### Inputs
-
-**None**: You can't pipe objects to this cmdlet.
-
-### Outputs
-
-**LocalVault.PowerShell.BackupStatus**: This cmdlet returns the backup **Destination**, the **Newest** backup file, the time of the
-**LastBackup**, and the **LastError** if the last backup failed.
-
 ## Get-VaultEntry
 
 Gets the value of one vault entry.
@@ -1790,9 +1479,9 @@ the store state (**Sync**), the creation time and the age of the entry. The obje
 values. **Sync** is `Local` for an entry kept on this machine, `New` for a shared entry never saved to
 the store, `Changed` when it changed since the last save or load, and `Saved` otherwise. A required personal value is `Missing` until it's set on this machine, then `Personal`; the object's **Note** says where to get it.
 
-The cmdlet writes a warning when the last automatic backup failed, and when the vault has a store and
-shared entries aren't saved to it. When some entries aren't in the store and the
-vault has no automatic backup, it also warns if the vault wasn't exported in the last 30 days.
+The cmdlet writes a warning when the vault has a store and shared entries aren't saved to it. It
+also warns about the entries that exist only on this machine when the vault wasn't exported in the
+last 30 days: local entries and personal values, or every entry when the vault has no store.
 
 When the vault file doesn't exist and the same folder contains `secrets.local.clixml`, the cmdlet
 reads that file.
@@ -2187,11 +1876,11 @@ Added Replaced Identical Skipped Refused
     3        1         2       0       0
 ```
 
-#### Example 2 - Go back to the newest automatic backup of this vault
+#### Example 2 - Go back to an old automatic backup of this vault
 
 ```powershell
-$newest = Get-VaultBackup | Select-Object -ExpandProperty Newest
-Import-Vault -Source $newest -ReplaceAll
+$backup = 'C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042\20261008T101502117Z-0ec6df6e042491df.lvbak'
+Import-Vault -Source $backup -ReplaceAll
 ```
 
 #### Example 3 - Import in a script and replace two named entries
@@ -2220,7 +1909,7 @@ After the import, the cmdlet renames the source file to `secrets.local.clixml.mi
 
 #### -KeyFile
 
-Specifies the keyfile of a backup sealed with a key that this vault doesn't hold, such as a backup made with `Enable-VaultBackup -Manual` or by another vault.
+Specifies the keyfile of a backup sealed with a key that this vault doesn't hold, such as a backup made in manual mode or by another vault.
 
 | Property | Value |
 | --- | --- |
@@ -2501,7 +2190,7 @@ The `Invoke-LocalVault` function runs a LocalVault cmdlet from a short command. 
 the function shows the installed release, lists the commands and names the vault that they would
 use, without opening it. `--version` alone prints the installed release, such as
 `LocalVault 1.0.0-beta11`.
-`backup` alone shows the state of the backups, `store` alone shows each vault's store and what
+`store` alone shows each vault's store and what
 isn't saved to it yet, followed by a `Stores:` line that lists every store with its level and
 flags, and `template` alone shows each templated file and whether it is written and up to date. `start` reads the vault, the repository and the stores, without opening a
 store, and prints the state and the commands to run next, ready to paste. When `list` finds no entry,
@@ -2526,12 +2215,6 @@ it says that the vault is missing or empty.
 | `load` | `[--store <name>] [--replace a,b] [--replace-all]` | `Import-VaultFromStore`, every vault of the repository |
 | `export` | `<file> [--overwrite]` | `Export-Vault` |
 | `import` | `<file> [--replace a,b] [--replace-all] [--keyfile <file>]` | `Import-Vault` |
-| `backup` | | `Get-VaultBackup` |
-| `backup enable` | `[--destination <folder>]` | `Enable-VaultBackup` |
-| `backup enable --manual` | `[--keyfile <file> \| --keyfile-out <file>]` | `Enable-VaultBackup -Manual` |
-| `backup disable` | | `Disable-VaultBackup` |
-| `backup now` | | `Invoke-VaultBackup` |
-| `backup test` | `[--manual --keyfile <file>]` | `Test-VaultBackup` |
 | `store` | | `Get-VaultStoreStatus` |
 | `store list` | | `Get-VaultStore` |
 | `store add` | `[<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]` | `Register-VaultStore`, a store of this PC |
@@ -2628,68 +2311,6 @@ formatted tables.
 ### Notes
 
 The function reads its words and `--` options as typed; options with one dash are PowerShell's common parameters.
-
-## Invoke-VaultBackup
-
-Writes a backup of a vault now.
-
-### Syntax
-
-```text
-Invoke-VaultBackup [-Path <string>] [<CommonParameters>]
-```
-
-### Description
-
-The `Invoke-VaultBackup` cmdlet writes a backup with the settings that `Enable-VaultBackup` stored.
-No entry changes. The cmdlet fails when backups aren't enabled.
-
-### Examples
-
-#### Example 1 - Write a backup and check the result
-
-```powershell
-Invoke-VaultBackup | Select-Object Newest, LastError
-```
-
-```Output
-Newest                                                                     LastError
-------                                                                     ---------
-C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042\20261008T101502117Z.lvbak
-```
-
-### Parameters
-
-#### -Path
-
-Specifies the path to the vault file. A relative path is resolved from the current location. If
-you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
-`secrets.local.lv` at the root of the git repository that contains the current location.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-### Inputs
-
-**None**: You can't pipe objects to this cmdlet.
-
-### Outputs
-
-**LocalVault.PowerShell.BackupStatus**: This cmdlet returns the backup **Destination**, the **Newest** backup file, the time of the
-**LastBackup**, and the **LastError** if the backup failed.
-
-### Notes
-
-When the backup fails, the cmdlet writes a warning and **LastError** holds the error.
-
-`lv backup now` runs this cmdlet.
 
 ## Register-VaultStore
 
@@ -3845,9 +3466,6 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 
 ### Notes
 
-When automatic backups are on, the cmdlet also writes a backup. If the backup fails, the cmdlet
-writes a warning and the vault keeps the new entry.
-
 `lv set <name> [--file <path> | --credential] [--local]`, `lv set <name>#<part>`,
 `lv require <name> [--note <text>]` and
 `lv mark <name> shared|local` run this cmdlet.
@@ -4154,129 +3772,6 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 
 `lv store set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default]
 [--project]` runs this cmdlet.
-
-## Test-VaultBackup
-
-Verifies that the newest backup of a vault opens.
-
-### Syntax
-
-```text
-Test-VaultBackup [-Path <string>] [<CommonParameters>]
-```
-
-```text
-Test-VaultBackup -Manual -KeyFile <string> [-Passphrase <securestring>] [-Path <string>]
- [<CommonParameters>]
-```
-
-### Description
-
-The `Test-VaultBackup` cmdlet finds the newest backup file of the vault in the backup folder and
-opens it. By default, it uses the backup key kept in the vault and asks for nothing. With the
-**Manual** parameter, you give the keyfile and the passphrase, which checks the copy that you keep
-yourself.
-
-The cmdlet doesn't change the vault and doesn't import anything. It fails when backups aren't
-enabled, when there is no backup file, or when the backup doesn't open.
-
-### Examples
-
-#### Example 1 - Test the newest backup
-
-```powershell
-Test-VaultBackup
-```
-
-```Output
-C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042\20261008T101502117Z-0ec6df6e042491df.lvbak opens with the key kept in this vault: 7 entries.
-
-Backup                                                                                        Entries Taken
-------                                                                                        ------- -----
-C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042\20261008T101502117Z-0ec6df6e042491df.lvbak       7 08/10/2026 10:15:02
-```
-
-#### Example 2 - Test with a keyfile you keep yourself
-
-```powershell
-Test-VaultBackup -Manual -KeyFile E:\keys\obs.lvkey
-```
-
-The cmdlet asks for the backup passphrase.
-
-### Parameters
-
-#### -KeyFile
-
-Specifies the keyfile of the backups.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | Manual |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -Manual
-
-Indicates that you supply the passphrase and the keyfile instead of the backup key kept in the vault.
-
-| Property | Value |
-| --- | --- |
-| Type | System.Management.Automation.SwitchParameter |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | Manual |
-| Pipeline input | False |
-| Default value | False |
-| Aliases | None |
-
-#### -Passphrase
-
-Specifies the backup passphrase as a **SecureString**. If you omit this parameter, the cmdlet asks
-for it, or reads one line from redirected standard input.
-
-| Property | Value |
-| --- | --- |
-| Type | System.Security.SecureString |
-| Parameter sets | Manual |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-#### -Path
-
-Specifies the path to the vault file. A relative path is resolved from the current location. If
-you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
-`secrets.local.lv` at the root of the git repository that contains the current location.
-
-| Property | Value |
-| --- | --- |
-| Type | System.String |
-| Parameter sets | (All) |
-| Position | Named |
-| Required | False |
-| Pipeline input | False |
-| Default value | None |
-| Aliases | None |
-
-### Inputs
-
-**None**: You can't pipe objects to this cmdlet.
-
-### Outputs
-
-**LocalVault.PowerShell.BackupTestResult**: This cmdlet returns the path of the **Backup** it opened, the number of **Entries** in it, and the
-time the backup was **Taken**.
-
-### Notes
-
-`lv backup test` and `lv backup test --manual --keyfile <file>` run this cmdlet.
 
 ## Unregister-VaultStore
 

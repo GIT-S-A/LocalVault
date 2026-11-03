@@ -9,13 +9,6 @@ public interface ILegacyVaultReader
     IReadOnlyList<KeyValuePair<string, string>> Read(string path);
 }
 
-public interface IBackupWriter
-{
-    string Write(VaultBody transferBody, BackupSettings settings, DateTimeOffset now);
-
-    void Prune(BackupSettings settings, DateTimeOffset now, string justWritten);
-}
-
 public sealed record VaultSnapshot(
     VaultBody Body,
     string Fingerprint,
@@ -31,6 +24,8 @@ public sealed record VaultUpdateOptions
     public string? ExpectedFingerprint { get; init; }
 
     public bool IgnoreLegacy { get; init; }
+
+    public bool DropPreviousGeneration { get; init; }
 }
 
 public sealed record VaultWriteResult(
@@ -38,10 +33,7 @@ public sealed record VaultWriteResult(
     IReadOnlyList<string> MigratedNames,
     IReadOnlyList<RefusedName> LegacyRefused,
     string? MigratedLegacyPath,
-    string? BackupPath,
-    string? BackupError,
     int? UpgradedFromSchema = null,
-    string? BackupCleanupError = null,
     string? Path = null);
 
 public sealed class VaultChangedException : VaultException
@@ -72,18 +64,15 @@ public sealed class VaultStore
     private const int ReplaceAttempts = 5;
 
     private readonly ILegacyVaultReader? legacyReader;
-    private readonly IBackupWriter? backupWriter;
     private readonly TimeProvider time;
 
     public VaultStore(
         VaultLocation location,
         ILegacyVaultReader? legacyReader = null,
-        IBackupWriter? backupWriter = null,
         TimeProvider? time = null)
     {
         Location = location ?? throw new ArgumentNullException(nameof(location));
         this.legacyReader = legacyReader;
-        this.backupWriter = backupWriter;
         this.time = time ?? TimeProvider.System;
     }
 
@@ -141,10 +130,11 @@ public sealed class VaultStore
 
         mutate(body);
 
-        var now = time.GetUtcNow();
-        var (backupPath, backupError) = WriteBackup(body, now);
         WriteVerified(body);
-        var cleanupError = backupPath is null ? null : PruneBackups(body.Backup!, now, backupPath);
+        if (options.DropPreviousGeneration)
+        {
+            File.Delete(Location.PreviousGenerationPath);
+        }
 
         string? migratedPath = null;
         if (snapshot.LegacyPending)
@@ -157,10 +147,7 @@ public sealed class VaultStore
             migratedNames,
             snapshot.LegacyRefused,
             migratedPath,
-            backupPath,
-            backupError,
             body.UpgradedFrom,
-            cleanupError,
             Location.Path);
     }
 
@@ -295,45 +282,6 @@ public sealed class VaultStore
 
         File.Move(legacyPath, target, overwrite: false);
         return target;
-    }
-
-    private (string? Path, string? Error) WriteBackup(VaultBody body, DateTimeOffset now)
-    {
-        var settings = body.Backup;
-        if (settings is null || backupWriter is null)
-        {
-            return (null, null);
-        }
-
-        if (settings.Id is null)
-        {
-            settings = settings.WithId(BackupSettings.NewId());
-        }
-
-        try
-        {
-            var path = backupWriter.Write(body.WithoutLocalSettings(), settings, now);
-            body.Backup = settings.WithResult(now, null);
-            return (path, null);
-        }
-        catch (Exception ex) when (ex is not OutOfMemoryException)
-        {
-            body.Backup = settings.WithResult(null, ex.Message);
-            return (null, ex.Message);
-        }
-    }
-
-    private string? PruneBackups(BackupSettings settings, DateTimeOffset now, string justWritten)
-    {
-        try
-        {
-            backupWriter!.Prune(settings, now, justWritten);
-            return null;
-        }
-        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
-        {
-            return ex.Message;
-        }
     }
 
     private void WriteVerified(VaultBody body)

@@ -77,11 +77,11 @@ Added Replaced Identical Skipped Refused
     3        1         2       0       0
 ```
 
-### Example 2 - Go back to the newest automatic backup of this vault
+### Example 2 - Go back to an old automatic backup of this vault
 
 ```powershell
-$newest = Get-VaultBackup | Select-Object -ExpandProperty Newest
-Import-Vault -Source $newest -ReplaceAll
+$backup = 'C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042\20261008T101502117Z-0ec6df6e042491df.lvbak'
+Import-Vault -Source $backup -ReplaceAll
 ```
 ### Example 3 - Import in a script and replace two named entries
 
@@ -109,7 +109,7 @@ After the import, the cmdlet renames the source file to `secrets.local.clixml.mi
 
 ### -KeyFile
 
-Specifies the keyfile of a backup sealed with a key that this vault doesn't hold, such as a backup made with `Enable-VaultBackup -Manual` or by another vault.
+Specifies the keyfile of a backup sealed with a key that this vault doesn't hold, such as a backup made in manual mode or by another vault.
 
 ```yaml
 Type: System.String
@@ -270,6 +270,5 @@ unanswered differences.
 ## RELATED LINKS
 
 - [Export-Vault](Export-Vault.md)
-- [Enable-VaultBackup](Enable-VaultBackup.md)
 - [Import-VaultFromStore](Import-VaultFromStore.md)
 - [about_LocalVault](about_LocalVault.md)

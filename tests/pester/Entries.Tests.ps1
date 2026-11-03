@@ -60,7 +60,29 @@ Describe 'Secret entries' {
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret '1')
 
         Get-VaultEntryList -Path $vault -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
-        $warnings | Should -Match 'never been exported'
+        "$warnings" | Should -Match 'Only on this PC, never exported: a\.'
+    }
+
+    It 'warns only about entries without a copy in the store' {
+        $savedLocalAppData = $env:LOCALAPPDATA
+        try {
+            $env:LOCALAPPDATA = Join-Path $folder 'appdata'
+            Set-Content -LiteralPath (Join-Path $folder 'team.kdbx') -Value 'x'
+            Register-VaultStore -Name 'team' -Target (Join-Path $folder 'team.kdbx') -Default | Out-Null
+            Set-VaultEntry -Path $vault -Name 'shared' -Value (ConvertTo-TestSecret '1')
+            Set-VaultEntry -Path $vault -Name 'mine' -Value (ConvertTo-TestSecret '2') -Local
+            Set-VaultEntry -Path $vault -Name 'personal' -Required
+
+            Get-VaultEntryList -Path $vault -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+            ($warnings | Where-Object { "$_" -like 'Only on this PC*' }) | Should -Match ': mine\.'
+
+            Set-VaultEntry -Path $vault -Name 'mine' -Sharing Shared
+            Get-VaultEntryList -Path $vault -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
+            "$warnings" | Should -Not -Match 'Only on this PC'
+        }
+        finally {
+            $env:LOCALAPPDATA = $savedLocalAppData
+        }
     }
 
     It 'rejects an invalid name and writes nothing' {

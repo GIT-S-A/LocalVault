@@ -3,149 +3,91 @@ Set-StrictMode -Version Latest
 
 BeforeAll {
     . (Join-Path $PSScriptRoot 'TestSupport.ps1')
-    $script:secret = ConvertTo-TestSecret 'backup passphrase'
 }
-Describe 'Manual backups' {
+Describe 'Leftover backups' {
     BeforeEach {
         $script:folder = Initialize-TestFolder
+        $script:savedOneDrive = $env:OneDrive
+        $env:OneDrive = Join-Path $script:folder 'OneDrive'
         $script:vault = Join-Path $script:folder 'v/secrets.local.lv'
         $script:destination = Join-Path $script:folder 'backups'
-        $script:keyFile = Join-Path $script:folder 'kp/backup.lvkey'
+        $script:fixtures = Join-Path $PSScriptRoot '../fixtures'
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret '1')
-        Enable-VaultBackup -Path $vault -Manual -Destination $destination -KeyFileOut $keyFile -Passphrase $secret -WarningAction SilentlyContinue | Out-Null
+        $script:location = [LocalVault.Core.VaultLocation]::Resolve($vault, $null, $script:folder)
+        $script:addBackupSettings = {
+            param([string]$Destination)
+            $keyFile = [IO.File]::ReadAllBytes((Join-Path $fixtures 'localvault-2-beta1.lvkey'))
+            $settings = [LocalVault.Core.BackupSettings]::Create('0123456789abcdef', $Destination, 'fixture passphrase 2', $keyFile)
+            $store = [LocalVault.Core.VaultStore]::new($location, $null)
+            $store.Update([Action[LocalVault.Core.VaultBody]] { param($body) $body.Backup = $settings }, $null) | Out-Null
+        }
+        $script:addBackup = {
+            param([string]$Folder, [string]$Name = '20261008T120000000Z-0123456789abcdef.lvbak')
+            New-Item -ItemType Directory -Path $Folder -Force | Out-Null
+            $path = Join-Path $Folder $Name
+            Copy-Item -LiteralPath (Join-Path $fixtures 'localvault-2-beta1.lvbak') -Destination $path
+            $path
+        }
     }
-    AfterEach { Clear-TestFolder $script:folder }
-
-    It 'writes a first backup and a new one on every write' {
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 1
-        Start-Sleep -Milliseconds 5
-        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2')
-
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 2
-        (Get-Item -LiteralPath $keyFile).Length | Should -Be 32
-    }
-
-    It 'opens the newest backup with the keyfile and passphrase given by a person' {
-        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2')
-
-        (Test-VaultBackup -Path $vault -Manual -KeyFile $keyFile -Passphrase $secret).Entries | Should -Be 2
-        { Test-VaultBackup -Path $vault -Manual -KeyFile $keyFile -Passphrase (ConvertTo-TestSecret 'wrong passphrase') } | Should -Throw
-    }
-
-    It 'restores a backup into another vault' {
-        $other = Join-Path $folder 'w/secrets.local.lv'
-        $newest = Get-ChildItem -LiteralPath $destination -Filter '*.lvbak' | Sort-Object Name | Select-Object -Last 1
-
-        Import-Vault -Path $other -Source $newest.FullName -KeyFile $keyFile -Passphrase $secret | Out-Null
-
-        Get-VaultEntry -Path $other -Name 'a' -AsPlainText | Should -Be '1'
-        Get-VaultEntryList -Path $other -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
-        $warnings | Should -Match 'never been exported'
+    AfterEach {
+        $env:OneDrive = $script:savedOneDrive
+        Clear-TestFolder $script:folder
     }
 
-    It 'asks for the keyfile when importing a backup without one' {
-        $newest = Get-ChildItem -LiteralPath $destination -Filter '*.lvbak' | Select-Object -First 1
+    It 'warns and keeps them when nobody can be asked' {
+        & $addBackupSettings $destination
+        $backup = & $addBackup $destination
 
-        { Import-Vault -Path (Join-Path $folder 'w/secrets.local.lv') -Source $newest.FullName -Passphrase $secret } | Should -Throw '*-KeyFile*'
+        Get-VaultEntry -Path $vault -Name 'a' -AsPlainText -WarningVariable warnings -WarningAction SilentlyContinue | Should -Be '1'
+
+        "$warnings" | Should -Match 'no longer makes automatic backups'
+        "$warnings" | Should -Match '1 old automatic backup'
+        Test-Path -LiteralPath $backup | Should -BeTrue
     }
 
-    It 'keeps saving when the backup fails, and says so' {
-        Remove-Item -LiteralPath $destination -Recurse
-        Set-Content -LiteralPath $destination -Value 'not a folder'
+    It 'finds backups in the default OneDrive folder without settings' {
+        $default = [LocalVault.Core.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
+        & $addBackup $default | Out-Null
 
-        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2') -WarningVariable warnings -WarningAction SilentlyContinue
+        Get-VaultEntryList -Path $vault -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
 
-        $warnings | Should -Match 'backup failed'
-        Get-VaultEntry -Path $vault -Name 'b' -AsPlainText | Should -Be '2'
-        Get-VaultEntryList -Path $vault -WarningVariable listWarnings -WarningAction SilentlyContinue | Out-Null
-        $listWarnings | Should -Match 'last backup failed'
+        "$warnings" | Should -Match 'no longer makes automatic backups'
     }
 
-    It 'names backups with the vault id and leaves stray and foreign files alone' {
-        $stray = Join-Path $destination '20261399T000000000Z.lvbak'
-        $foreign = Join-Path $destination '20200101T000000000Z-fedcba9876543210.lvbak'
-        Set-Content -LiteralPath $stray, $foreign -Value 'x'
-
-        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2') -WarningVariable warnings
+    It 'says nothing when there are none' {
+        Get-VaultEntry -Path $vault -Name 'a' -AsPlainText -WarningVariable warnings | Out-Null
 
         $warnings | Should -BeNullOrEmpty
-        Get-VaultEntry -Path $vault -Name 'b' -AsPlainText | Should -Be '2'
-        Test-Path -LiteralPath $stray, $foreign | Should -Be $true, $true
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak' | Where-Object Name -Match '^\d{8}T\d{9}Z-[0-9a-f]{16}\.lvbak$').Count | Should -Be 3
     }
 
-    It 'disables backups and keeps the files' {
-        Disable-VaultBackup -Path $vault
+    It 'are deleted with the vault by Clear-Vault' {
+        & $addBackupSettings $destination
+        $own = & $addBackup $destination
+        $foreign = & $addBackup $destination '20261008T120000000Z-fedcba9876543210.lvbak'
+        $default = [LocalVault.Core.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
+        & $addBackup $default | Out-Null
 
-        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2')
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 1
-        { Invoke-VaultBackup -Path $vault } | Should -Throw '*not enabled*'
-    }
-
-    It 'runs a backup on demand' {
-        Start-Sleep -Milliseconds 5
-        (Invoke-VaultBackup -Path $vault).Newest | Should -Not -BeNullOrEmpty
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 2
-    }
-
-    It 'keeps backups on Clear-Vault when nobody can be asked' {
         Clear-Vault -Path $vault -Confirm:$false
 
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 1
+        Test-Path -LiteralPath $vault, $own, $foreign | Should -Be $false, $false, $true
+        Test-Path -LiteralPath (Join-Path $env:OneDrive 'LocalVault') | Should -BeFalse
     }
 
-    It 'refuses to reuse an existing keyfile output path' {
-        Disable-VaultBackup -Path $vault -Confirm:$false
-        { Enable-VaultBackup -Path $vault -Manual -Destination $destination -KeyFileOut $keyFile -Passphrase $secret } | Should -Throw '*already exists*'
-    }
-}
+    It 'are deleted by Clear-Vault after the vault itself is gone' {
+        $default = [LocalVault.Core.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
+        $backup = & $addBackup $default
+        Remove-Item -LiteralPath $vault
 
-Describe 'Generated backups' {
-    BeforeEach {
-        $script:folder = Initialize-TestFolder
-        $script:vault = Join-Path $script:folder 'v/secrets.local.lv'
-        $script:destination = Join-Path $script:folder 'backups'
-        Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret '1')
-    }
-    AfterEach { Clear-TestFolder $script:folder }
+        Clear-Vault -Path $vault -Confirm:$false
 
-    It 'turns backups on without asking anything' {
-        Enable-VaultBackup -Path $vault -Destination $destination -InformationVariable told
-
-        "$told" | Should -Match 'Backups on'
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 1
-        (Get-VaultBackup -Path $vault).Newest | Should -Not -BeNullOrEmpty
-        Get-VaultEntryList -Path $vault -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
-        $warnings | Should -BeNullOrEmpty
+        Test-Path -LiteralPath $backup | Should -BeFalse
     }
 
-    It 'changes nothing when backups are already on' {
-        Enable-VaultBackup -Path $vault -Destination $destination
-        $before = Get-VaultBackup -Path $vault
+    It 'still restore with the key kept in the vault' {
+        & $addBackupSettings $destination
+        $backup = & $addBackup $destination
 
-        Enable-VaultBackup -Path $vault -Destination (Join-Path $folder 'elsewhere') -InformationVariable told
-
-        "$told" | Should -Match 'already on'
-        (Get-VaultBackup -Path $vault).Destination | Should -Be $before.Destination
-        Test-Path -LiteralPath (Join-Path $folder 'elsewhere') | Should -BeFalse
-        @(Get-ChildItem -LiteralPath $destination -Filter '*.lvbak').Count | Should -Be 1
-    }
-
-    It 'tests and restores the newest backup with the key kept in the vault' {
-        Enable-VaultBackup -Path $vault -Destination $destination
-        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2')
-        $newest = Get-ChildItem -LiteralPath $destination -Filter '*.lvbak' | Sort-Object Name | Select-Object -Last 1
-
-        (Test-VaultBackup -Path $vault).Entries | Should -Be 2
-        Remove-VaultEntry -Path $vault -Name 'b'
-        Import-Vault -Path $vault -Source $newest.FullName | Out-Null
-
-        Get-VaultEntry -Path $vault -Name 'b' -AsPlainText | Should -Be '2'
-    }
-
-    It 'says when backups are off' {
-        Get-VaultBackup -Path $vault -InformationVariable told | Should -BeNullOrEmpty
-        "$told" | Should -Match 'off'
+        (Import-Vault -Path $vault -Source $backup -WarningAction SilentlyContinue).Added | Should -Be 3
     }
 }
 

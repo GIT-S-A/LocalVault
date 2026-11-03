@@ -537,9 +537,6 @@ This cmdlet returns no output. It writes the entry name to the information strea
 
 ## NOTES
 
-When automatic backups are on, the cmdlet also writes a backup. If the backup fails, the cmdlet
-writes a warning and the vault keeps the new entry.
-
 `lv set <name> [--file <path> | --credential] [--local]`, `lv set <name>#<part>`,
 `lv require <name> [--note <text>]` and
 `lv mark <name> shared|local` run this cmdlet.

@@ -33,9 +33,11 @@ The `Clear-Vault` cmdlet deletes the vault file and its previous version `<vault
 named `secrets.local.lv`, it also deletes a `secrets.local.clixml` file in the same folder, and the
 confirmation message names it.
 
-The cmdlet asks for confirmation unless you use `-Confirm:$false`. When automatic backups are on,
-it also asks whether to delete the backup files of this vault. Files of other vaults in the same
-folder stay. Without a console, it keeps the backups.
+The cmdlet asks for confirmation unless you use `-Confirm:$false`. It also deletes the vault's old
+automatic backups: the files named by the backup settings kept in the vault, and every backup in
+the vault's default folder `%OneDrive%\LocalVault\<project>-<id>-<machine>`. Files of other vaults
+stay. Folders left empty are removed. When the vault file is already gone, the cmdlet still deletes
+the backups in the default folder.
 
 Files written from the repository's templates with this vault's values (see `Write-VaultTemplate`)
 hold those values in plain text. In a console, the cmdlet asks whether to delete them too; without
@@ -52,11 +54,11 @@ Clear-Vault
 ```Output
 Confirm
 Are you sure you want to perform this action?
-Performing the operation "Delete the vault and its previous generation" on target
+Performing the operation "Delete the vault, its previous generation and its 12 old automatic backup(s)" on target
 "C:\src\obs\secrets.local.lv".
 [Y] Yes  [A] Yes to All  [N] No  [L] No to All  [S] Suspend  [?] Help (default is "Y"): y
 Deleted C:\src\obs\secrets.local.lv
-Backups kept in C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042
+Deleted 12 old automatic backup(s) in C:\Users\me\OneDrive\LocalVault\obs-1a2b3c4d-PC042
 ```
 
 ### Example 2 - Delete a test vault without a question
@@ -163,4 +165,3 @@ The cmdlet doesn't delete the vault's entries in its store.
 
 - [Export-Vault](Export-Vault.md)
 - [Remove-VaultEntry](Remove-VaultEntry.md)
-- [Disable-VaultBackup](Disable-VaultBackup.md)

@@ -13,7 +13,7 @@ Describe 'tools/release.ps1' {
         $script:repository = Join-Path $script:folder 'repo'
         git init --quiet --bare $script:origin
         git init --quiet $script:repository
-        git -C $script:repository remote add origin $script:origin
+        git -C $script:repository remote add github $script:origin
         New-Item -ItemType Directory -Path (Join-Path $script:repository 'tools'), (Join-Path $script:repository 'src/LocalVault.PowerShell') | Out-Null
         Copy-Item -LiteralPath $script:releaser -Destination (Join-Path $script:repository 'tools/release.ps1')
         Set-Content -LiteralPath (Join-Path $script:repository 'src/LocalVault.PowerShell/LocalVault.psd1') -Value "@{ ModuleVersion = '9.9.9'; PrivateData = @{ PSData = @{ Prerelease = 'beta1' } } }"
@@ -28,12 +28,12 @@ Describe 'tools/release.ps1' {
     AfterEach { Clear-TestFolder $script:folder }
 
     It 'refuses a commit that is not pushed' {
-        { & $release } | Should -Throw '*not on origin yet*'
+        { & $release } | Should -Throw '*not on github yet*'
         git -C $repository tag --list | Should -BeNullOrEmpty
     }
 
     It 'tests and builds a clean checkout, packages it, then tags and pushes the manifest version' {
-        git -C $repository push --quiet origin HEAD:main 2>$null
+        git -C $repository push --quiet github HEAD:main 2>$null
 
         (& $release | Out-String) | Should -Match 'Tagged v9.9.9-beta1.*no GitHub release'
 
@@ -52,13 +52,13 @@ Describe 'tools/release.ps1' {
         Set-Content -LiteralPath (Join-Path $repository 'tools/fail.txt') -Value 'x'
         git -C $repository add -A
         git -C $repository -c user.name=t -c user.email=t@t commit --quiet -m failing
-        git -C $repository push --quiet origin HEAD:main 2>$null
+        git -C $repository push --quiet github HEAD:main 2>$null
         { & $release } | Should -Throw '*Tests failed*'
         git -C $repository tag --list | Should -BeNullOrEmpty
 
         git -C $repository rm --quiet tools/fail.txt
         git -C $repository -c user.name=t -c user.email=t@t commit --quiet -m fixed
-        git -C $repository push --quiet origin HEAD:main 2>$null
+        git -C $repository push --quiet github HEAD:main 2>$null
         Set-Content -LiteralPath (Join-Path $repository 'tools/fail.txt') -Value 'uncommitted'
         (& $release | Out-String) | Should -Match 'Tagged'
     }

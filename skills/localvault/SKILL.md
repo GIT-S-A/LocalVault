@@ -62,7 +62,7 @@ commands; `lv start` in a project prints its state and the commands to run next.
   runs. When the tool reads environment variables (`docker compose` `${VAR}`, `OS_PASSWORD`), prefer
   `Use-VaultEnv` / `lv run VAR=name` and no file at all.
 - **The local vault is a cache**, sealed to the Windows account (DPAPI). It disappears with the
-  folder; `lv load` rebuilds it. Optional automatic local backups: `lv backup enable`.
+  folder; `lv load` rebuilds it.
 - **Old files.** A `secrets.local.clixml` beside `secrets.local.lv` is read until the first write,
   which moves its entries into the vault and renames it `.migrated-<time>`. Other .clixml files are
   imported with `Import-Vault -Source <file>`; the file itself stays where it is.
@@ -150,14 +150,14 @@ Writes merge: several scripts can share one vault. A script never rebuilds a who
 
 Cmdlets: `Get-VaultEntryList`, `Get-VaultEntry`, `Copy-VaultEntry`, `Set-VaultEntry`,
 `Remove-VaultEntry`, `Resolve-VaultEntry`, `Use-VaultEnv`, `Restore-VaultFile`, `Export-Vault`,
-`Import-Vault`, `Clear-Vault`, `Enable-/Disable-/Invoke-/Test-/Get-VaultBackup`,
+`Import-Vault`, `Clear-Vault`,
 `Export-VaultToStore`, `Import-VaultFromStore`, `Compare-VaultWithStore`, `Get-VaultStoreStatus`,
 `Copy-VaultToStore`, `Set-VaultProjectStore`, `Register-/Set-/Unregister-/Get-VaultStore`,
 `Add-/Update-/Write-/Clear-/Remove-/Get-VaultTemplate`.
 
 `lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local]`, `require [--note]`,
 `mark <name> shared|local`, `rm`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
-`export [--overwrite]`, `import`, `backup [enable|disable|now|test]`,
+`export [--overwrite]`, `import`,
 `store [list|add|set|rm|use|diff|copy]`, `template [add|update|render|clear|rm]`,
 `run [VAR=name ...] -- <command>`, `update [<tag>] [--downgrade]`, `--version`.
 `lv store set <name> --mirror` (or `--unlock-with <store>`, `--no-mirror`, `--no-unlock`, `--default`)

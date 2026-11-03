@@ -188,7 +188,7 @@ internal static class RepositoryVaults
 
     public static string Label(VaultLocation location) => StoreResolver.VaultLabel(location);
 
-    public static VaultStore StoreFor(VaultLocation location) => new(location, new ClixmlLegacyReader(), new BackupFileWriter());
+    public static VaultStore StoreFor(VaultLocation location) => new(location, new ClixmlLegacyReader());
 
     private static bool Same(VaultLocation a, VaultLocation b) => string.Equals(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
 }

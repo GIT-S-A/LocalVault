@@ -116,18 +116,6 @@ Describe 'lv' {
         "$(lv @arguments 6>&1 3>$null)" | Should -Be "No entries in $vault."
     }
 
-    It 'shows the backup state' {
-        $arguments = 'backup', 'enable', '--destination', (Join-Path $folder 'b'), '--path', $vault
-        lv @arguments 6>$null
-
-        $arguments = 'backup', '--path', $vault
-        $text = lv @arguments | Out-String
-        $text | Should -Match 'Last backup: .+\.lvbak'
-
-        $arguments = 'backup', 'enable', 'extra'
-        "$(lv @arguments 2>&1)" | Should -BeLike '*Too many words*'
-    }
-
     It 'prints the usage of a command used with a wrong syntax' -ForEach @(
         @{ Line = @('store', 'add'); Usage = 'lv store \[list \| add \[<name>\] <target>' }
         @{ Line = @('set'); Usage = 'lv set <name> \[--file <path> \| --credential\] \[--local\]' }
@@ -136,7 +124,6 @@ Describe 'lv' {
         @{ Line = @('store', 'use', 'a', '--project'); Usage = 'lv store ' }
         @{ Line = @('store', 'bogus'); Usage = 'lv store ' }
         @{ Line = @('mark', 'a', 'public'); Usage = 'lv mark <name> shared\|local' }
-        @{ Line = @('backup', 'bogus'); Usage = 'lv backup \[enable' }
         @{ Line = @('export'); Usage = 'lv export <file> \[--overwrite\]' }
         @{ Line = @('restore', '--force'); Usage = 'lv restore ' }
         @{ Line = @('import', 'a', '--store'); Usage = 'lv import <file>' }

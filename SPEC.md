@@ -51,19 +51,14 @@ body  := { schema: 2, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entr
 ```
 
 - unknown body fields, entry fields, meta fields, kinds → kept verbatim on rewrite (V20).
-- local body only: `backup?: { destination, passphrase: b64, keyfile: b64, keyfileId: hex, lastBackup?, lastError? }`. ⊥ in export | backup body (V33).
+- local body only: `backup?: { id, destination, passphrase: b64, keyfile: b64, keyfileId: hex, lastBackup?, lastError? }`, left by releases ≤ beta14; read, ⊥ written. ⊥ in export (V33).
 
-### Automatic backup
+### Old backups
 
-- opt-in per vault (`Enable-VaultBackup`). ∀ successful write → full backup of new body.
-- default destination `$env:OneDrive\LocalVault\<git root leaf>-<8 hex SHA-256(lowercase full vault path)>-<COMPUTERNAME>\`; no `$env:OneDrive` → `-Destination` required.
-- file `<yyyyMMddTHHmmssfffZ>.lvbak`, envelope §I.Envelope mode `backup`.
-- key = HKDF-SHA256(ikm = PBKDF2-SHA256(passphrase, salt, 210000, 32) ‖ keyfile, salt, info `LOCALVAULT-2 backup`), 32 B.
-- keyfile = 32 random bytes, generated at enable (or reused via `-KeyFile`); keyfileId = hex SHA-256(keyfile).
-- passphrase: default → generated, 32 random chars from `[A-Za-z0-9]`; manual mode → chosen by person, ≥ 12 chars, asked twice.
-- key (pass+keyfile) ∈ backup settings in vault body (DPAPI) only: backups = this PC's auto-saves. Manual mode → person keeps own copy. beta3 fields `keySaved`, `keePass`, `keePassEntry`, `keySavedAt` ignored.
-- retention: newest 10 + newest per UTC day for 30 days; only own-pattern files in own folder deleted.
-- recovery: `Import-Vault -Source <x.lvbak>` (key from this vault) or `-KeyFile <path>` + passphrase (manual). Backup config ⊥ restored; person re-enables (`-KeyFile` to reuse). Off-machine copy of shared entries = KeePass (§I.KeePass).
+- module ⊥ writes backups (≥ beta15). Releases ≤ beta14 wrote `.lvbak` (envelope §I.Envelope mode `backup`) on every write when enabled.
+- leftovers := own files in `backup.destination` (expanded; name `<yyyyMMddTHHmmssfffZ>[-<backup.id>].lvbak`, id = settings id) ∪ every backup-named file in default folder `%OneDrive%\LocalVault\<git root leaf>-<8 hex SHA-256(lowercase full vault path)>-<COMPUTERNAME>\` ∪ `backup` settings themselves.
+- delete := files, then folders left empty (incl. `%OneDrive%\LocalVault`), then `backup` removed from body.
+- restore: `Import-Vault -Source <x.lvbak>` (key from `backup` settings while kept) or `-KeyFile <path>` + passphrase.
 
 ### Stores
 
@@ -161,15 +156,6 @@ cmd: Export-Vault -Destination f [-Passphrase <SecureString>] [-Overwrite]
                                                         → LOCALVAULT-2 export; existing f refused w/o -Overwrite
 cmd: Import-Vault -Source f [-Passphrase <SecureString>] [-KeyFile k] [-Replace a,b | -ReplaceAll]
                                                         f ∈ LOCALVAULT-2 export | .lvbak backup | SAAS-VAULT-1 export | legacy secrets.local.clixml (V24)
-cmd: Enable-VaultBackup [-Destination dir]               → generate pass+keyfile, store config, first backup; ⊥ prompt; on → status, nothing changed
-cmd: Enable-VaultBackup -Manual [-Destination dir] [-KeyFile k | -KeyFileOut f] [-Passphrase <SecureString>]
-                                                        → manual mode: store config in body; new keyfile written to f; first backup taken
-cmd: Disable-VaultBackup                                → remove config; existing backups kept
-cmd: Invoke-VaultBackup                                 → backup now (same as post-write)
-cmd: Test-VaultBackup                                   → newest backup opened w/ vault key; report entry count, ⊥ values
-cmd: Test-VaultBackup -Manual -KeyFile k [-Passphrase <SecureString>]
-                                                        → same w/ person-supplied pass+keyfile
-cmd: Get-VaultBackup                                    → BackupStatus {Destination, Newest, LastBackup, LastError}; off → nothing + info
 cmd: Set-VaultEntry -Name n -Sharing Shared|Local       → flag only, value unchanged; new value as local → -Local on -Value|-FilePath sets
 cmd: Export-VaultToStore [-Store s] [-Replace a,b | -ReplaceAll]
                                                         → shared entries → each vault's store (V66, V84); one save per DB, one write per vault
@@ -204,7 +190,6 @@ cmd: lv rm <name>
 cmd: lv env ENV=name ...
 cmd: lv restore [<name> ...] [--overwrite]
 cmd: lv export <file> [--overwrite] | lv import <file> [--replace a,b | --replace-all] [--keyfile k]
-cmd: lv backup [enable|disable|now|test]      alone → state (Get-VaultBackup)
 cmd: lv save | lv load [--store s] [--replace a,b | --replace-all]   every vault of the repository (--path: one)
 cmd: lv store                  Get-VaultStoreStatus per vault + stores; ⊥ store opened
 cmd: lv store list             Get-VaultStore
@@ -245,21 +230,21 @@ V21: missing vault created only if path from `-Path`|env, or person confirms (pr
 V22: import → conflicts computed & resolved w/o lock; then under lock re-read; vault changed since → abort, nothing written, say re-run.
 V23: export → write temp beside dest, decrypt-verify temp w/ same passphrase, then rename. Existing dest → refuse unless `-Overwrite`. Verify fail → temp deleted, error.
 V24: `Import-Vault -Source <legacy clixml>` → merge w/ V6 conflict rules; source renamed per V26 only if = own legacy sibling & ∀ entry imported|identical; else source untouched. Recovery path for V12.
-V25: ∀ vault replace → `File.Replace(tmp, vault, vault.bak)`; `.bak` = previous generation. `Clear-Vault` deletes `.lv` & `.bak`.
+V25: ∀ vault replace → `File.Replace(tmp, vault, vault.bak)`; `.bak` = previous generation. `Clear-Vault` deletes `.lv` & `.bak`. Backup key removal (V111) deletes `.bak`.
 V26: legacy rename target `secrets.local.clixml.migrated-<yyyyMMddTHHmmssZ>`; ⊥ overwrite existing file.
 V27: `.lv` & clixml both present & ∀ mapped clixml entry ∈ `.lv` w/ equal value → finish V26 rename automatically, report. Any missing|different → V12 error.
 V28: case-only name clash (migration, import, v1 body) → import: conflict per V6; migration: error, nothing written. ⊥ silent drop.
 V29: lock file ⊥ deleted.
 V30: before replace → temp read back, unsealed; plaintext bytes = intended body; fail → temp deleted, vault untouched, error. Replace fails & vault missing → `.bak` moved back, temp kept, error.
-V31: `Export-Vault` success → `lastExported` set in body (normal write). `Get-VaultEntryList` & `lv list` warn if: backup off & (`lastExported` absent | > 30 days); backup on & `lastError` set.
+V31: `Export-Vault` success → `lastExported` set in body (normal write). `Get-VaultEntryList` & `lv list` warn if (`lastExported` absent | > 30 days) & ∃ entry only on this PC: value set & (store ⊥ known | `meta.local` | required personal value); warning lists names, ⊥ values.
 V32: `Restore-VaultFile -Destination dir` → meta.path resolved under dir instead of vault dir; same V14 rules.
-V33: `backup` field (passphrase, keyfile) ⊥ in any export or backup body; ⊥ shown by any cmdlet.
-V34: write w/ backup on → order: build new body → write backup (temp + verify + rename, V23 rules) → set `lastBackup`|`lastError` in body → vault replace → retention. ∀ backup failure (any exception) ⊥ blocks vault write; warning emitted. All under vault lock.
-V35: backup content = new body minus `backup` field; restore of newest backup = vault state after that write.
-V36: backup file `<yyyyMMddTHHmmssfffZ>-<backupId>.lvbak`; `backupId` random, in backup settings. Retention, `Clear-Vault`, `Test-VaultBackup`, recovery → only own id (+ beta1 names w/o id: read, ⊥ deleted). Unparsable name → ignored. Just-written backup ⊥ deleted. Destination ! fully qualified after expansion, ⊥ leftover `%VAR%`.
-V37: `Enable-VaultBackup` new keyfile → written to `-KeyFileOut` (interactive default: prompt for path); person must confirm keyfile & passphrase stored outside this machine (KeePass) before config saved; interactive → keyfile file deleted after confirm. Non-interactive → file kept, warning.
-V38: `Test-VaultBackup` → vault body key, or person-supplied with `-Manual`.
-V39: `Clear-Vault` → asks separately whether to delete backup folder, default no.
+V33: `backup` field (passphrase, keyfile) ⊥ in any export; ⊥ shown by any cmdlet.
+V34: superseded by V111.
+V35: superseded by V111.
+V36: superseded by V111.
+V37: superseded by V111.
+V38: superseded by V111.
+V39: `Clear-Vault` → deletes vault & leftovers (§I.Old backups) after its one confirmation, ⊥ separate question; vault file absent → leftovers in default folder still deleted; vault unreadable → default folder only, warning.
 V40: superseded by V66.
 V41: superseded by V62.
 V42: KP master password → read as SecureString, converted only into KeePassLib composite key; plain copies zeroed; ⊥ argument, ⊥ env, ⊥ file.
@@ -281,11 +266,11 @@ V57: case-only clash member whose name ∃ in vault → shown as replacing exist
 V58: `keepassxc-cli` → `%ProgramFiles%\KeePassXC` first, then rooted PATH dirs only; run w/ timeout; non-zero exit on `ls` → error (⊥ empty list); KeePass changed only after vault write options resolved.
 V59: `lv` → extra words → error, nothing done.
 V60: `lv` ∀ error (option parse incl.) → `$LASTEXITCODE` 1; `lv` alone ⊥ silent.
-V61: `Enable-VaultBackup` ⊥ KeePass, ⊥ prompt; backups on → status, nothing changed.
+V61: superseded by V111.
 V62: superseded by V66.
 V63: superseded by V67.
 V64: `install.ps1` → new copy staged beside target before old moved; old ⊥ movable → staging removed, error, old untouched; old ⊥ deletable → warning, new installed, leftover deleted next run.
-V65: replacing an entry (set, import) keeps `meta.local` & `meta.kp` of the entry it replaces. Remove of shared entry w/ `meta.kp` → `kpRemoved += {name, hash}`; set of that name again → tombstone dropped, base restored. Export body ⊥ `meta.kp`, ⊥ `kpRemoved`; backup body keeps them.
+V65: replacing an entry (set, import) keeps `meta.local` & `meta.kp` of the entry it replaces. Remove of shared entry w/ `meta.kp` → `kpRemoved += {name, hash}`; set of that name again → tombstone dropped, base restored. Export body ⊥ `meta.kp`, ⊥ `kpRemoved`.
 V66: `Export-VaultToStore`, per shared entry (local = vault hash, kp = KeePass hash, base = `meta.kp.hash`): kp absent & base absent → add; kp absent & base set → skip, "removed in KeePass"; kp = local → record base; kp = base ≠ local → update KeePass; local = base ≠ kp → skip, "changed in KeePass, load first"; else conflict → ask, default skip; `-Replace`/`-ReplaceAll` → update. Tombstone: kp = tombstone hash → delete in KeePass; kp absent → drop tombstone; kp ≠ → skip, "changed in KeePass". Says DB, path & group before master prompt. Write options resolved before DB opened. KeePass saved once, then vault written once (bases, tombstones). ⊥ KeePass entry outside vault group touched.
 V67: `Import-VaultFromStore`, per entry of vault group (name invalid → skipped, warned): vault absent & tombstone hash = kp → skip; vault absent → add (shared, base = kp); vault entry local → skip, silent; local = kp → record base; local = base ≠ kp → take KeePass, ⊥ question; kp = base ≠ local → keep vault; else conflict (V44). Shared vault entry w/ base & absent in KeePass → ask remove here, default keep (kept → base dropped). One vault write.
 V68: `Get-VaultEntryList` → `Sync` column (Local|New|Changed|Saved); ≥ 1 KP DB registered & shared entries ⊥ saved | removals pending → warning naming `lv save`.
@@ -296,7 +281,7 @@ V72: `lv` tab completion: commands, subcommands, options taken by the command, v
 V73: superseded by V110 (⊥ `-Ref`, ⊥ worktree install).
 V74: `lv start` ⊥ write, ⊥ KeePass open, ⊥ value shown; suggestions: register DB if none; .gitignore if vault not ignored; subfolder vault if default absent; `kp load` (& `kp save` when pending) once DB registered.
 V75: `Copy-VaultEntry` → secret only; clipboard data marked `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0, `CanUploadToCloudClipboard`=0; cleared after -Seconds (default 20) or at process exit, only if clipboard sequence number unchanged; value ⊥ printed.
-V76: required entry (kind `required` = declared, no value; secret w/ `meta.required` = personal value set): KeePass ⊥ value, gets declaration (`LocalVault.Kind`=required, Notes = note), sync hash over declaration; load ⊥ overwrite a personal value; export drops personal value (keeps declaration); backup keeps it; read of missing value → error w/ note; `-Sharing` refused.
+V76: required entry (kind `required` = declared, no value; secret w/ `meta.required` = personal value set): KeePass ⊥ value, gets declaration (`LocalVault.Kind`=required, Notes = note), sync hash over declaration; load ⊥ overwrite a personal value; export drops personal value (keeps declaration); read of missing value → error w/ note; `-Sharing` refused.
 V77: project file names DB → ∀ save|load|list refuse another DB (id compare after open), nothing written. Project file ⊥ secret.
 V78: unlock: master of a store w/ unlocker read from unlocker's `AutoOpen` only; LocalVault writes AutoOpen only after person confirms (interactive); unlocker save = merge-on-save. ⊥ password cached in registry or vault.
 V79: sync base, removal markers per DB id; copy to / sync with DB B ⊥ changes state for DB A.
@@ -337,6 +322,7 @@ V107: KeePass credential = UserName, Password, URL (url 1), `KP2A_URL_<n>` (url 
 V109: ∀ store write (`lv save` primary & mirrors, `Copy-VaultToStore`): install entry absent (⊥ kind `install` & ⊥ title `Install instructions for localVault`, case ignored) → created; present → ⊥ touched, except Notes w/ retired ADO URL `https://dev.azure.com/<org>/<project>/_git/LocalVault` → made by module (kind `install`) → Notes := current install line; by hand → only the URL replaced by repo URL (history kept). Origin entry: git root & `origin` remote ∃ → created | updated when title, URL or Notes differ (history kept), else ⊥ change; ⊥ origin → ⊥ entry. Origin URL: http(s) → userinfo dropped; other schemes → password dropped, user kept. Guide change alone → KeePass saved.
 V110: `install.ps1` download: `<source>/latest/download/` | `<source>/download/<tag>/` (`-ReleaseSource`, default GitHub releases; local folder for tests) → `LocalVault.zip` & `.sha256`; hash ≠ → error, nothing installed; unpacked `install.ps1` signature checked before it runs. Unpacked release install: every `.dll`/`.ps1`/`.psm1`/`.psd1` ! Authenticode Valid & signer simple name `GIT Gestion Et Informatique Pour Tous S.A.`, else error listing files, nothing installed; `-AllowUnsigned` (dev/tests) skips; checkout builds ⊥ checked. Install line (README, SKILL, KeePass install entry) = one constant, fresh temp folder per run.
 V108: template placeholders take `{{name#part}}`; render computes `#totp` at write time; `template update` compares password/user/url parts, ⊥ totp; changed user/url → stored in that part.
+V111: ∀ cmdlet (`lv` included) except `Clear-Vault` → before its own work, leftovers (§I.Old backups) ∃ → interactive: one question per vault per PowerShell session; yes → delete, `backup` removed from body & `.bak` deleted (key ⊥ left in previous generation); no → kept, asked again next session. Non-interactive → warning, ⊥ change. Search failure → silent, command proceeds.
 
 ## §T Tasks
 
@@ -425,6 +411,8 @@ T80|x|credential entries (user, password, TOTP, URLs), `name#part` references, K
 T81|x|guide entries in stores: `Repository origin` per repo group, install instructions at `LocalVault/` root; shared git runner; beta13|V109,I.KeePass
 T82|x|public on GitHub (`GIT-S-A/LocalVault`), GPL-3.0-or-later; internal material kept local; install entry w/ retired ADO URL updated; beta14|V109,C9
 T83|x|signed GitHub releases made by `tools/release.ps1` (Key Vault, azuresigntool), `install.ps1` download/bundle/checkout modes, `lv update` via installed `install.ps1`; ⊥ `-Ref`, ⊥ `source.txt`; module-made install entries get the release line; beta14|C9,V83,V98,V103,V109,V110
+T84|x|automatic backups removed: ⊥ `Enable/Disable/Invoke/Test/Get-VaultBackup`, ⊥ `lv backup`; leftovers found & offered for deletion by every command, deleted by `Clear-Vault`; `.lvbak` still imported; export warning narrowed to entries only on this PC; beta15|V31,V33,V39,V111,I.Old backups
+
 ## §B Bugs
 
 id|date|cause|fix

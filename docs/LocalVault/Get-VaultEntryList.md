@@ -35,9 +35,9 @@ the store state (**Sync**), the creation time and the age of the entry. The obje
 values. **Sync** is `Local` for an entry kept on this machine, `New` for a shared entry never saved to
 the store, `Changed` when it changed since the last save or load, and `Saved` otherwise. A required personal value is `Missing` until it's set on this machine, then `Personal`; the object's **Note** says where to get it.
 
-The cmdlet writes a warning when the last automatic backup failed, and when the vault has a store and
-shared entries aren't saved to it. When some entries aren't in the store and the
-vault has no automatic backup, it also warns if the vault wasn't exported in the last 30 days.
+The cmdlet writes a warning when the vault has a store and shared entries aren't saved to it. It
+also warns about the entries that exist only on this machine when the vault wasn't exported in the
+last 30 days: local entries and personal values, or every entry when the vault has no store.
 
 When the vault file doesn't exist and the same folder contains `secrets.local.clixml`, the cmdlet
 reads that file.
@@ -165,5 +165,4 @@ name, which isn't a secret.
 
 - [Get-VaultEntry](Get-VaultEntry.md)
 - [Set-VaultEntry](Set-VaultEntry.md)
-- [Enable-VaultBackup](Enable-VaultBackup.md)
 - [about_LocalVault](about_LocalVault.md)

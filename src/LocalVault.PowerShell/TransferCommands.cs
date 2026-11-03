@@ -215,14 +215,10 @@ public sealed class ImportVaultCommand : VaultCmdletBase
 [Cmdlet(VerbsCommon.Clear, "Vault", SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.High)]
 public sealed class ClearVaultCommand : VaultCmdletBase
 {
+    protected override bool OffersBackupCleanup => false;
+
     protected override void Run()
     {
-        if (!VaultFile.Exists)
-        {
-            Say("No vault to delete.");
-            return;
-        }
-
         BackupSettings? backup = null;
         try
         {
@@ -230,11 +226,27 @@ public sealed class ClearVaultCommand : VaultCmdletBase
         }
         catch (VaultException ex)
         {
-            WriteWarning($"The vault cannot be read ({ex.Message}); its backups are left as they are.");
+            WriteWarning($"The vault cannot be read ({ex.Message}); only the backups in its default folder are found.");
         }
 
-        var legacy = Location.LegacyPath is { } legacyPath && File.Exists(legacyPath) ? $" and the unmigrated {legacyPath}" : string.Empty;
-        if (!ShouldProcess(Location.Path, $"Delete the vault, its previous generation{legacy}"))
+        var leftovers = FindLeftoverBackups(backup);
+        var backups = leftovers.Files.Count > 0 ? $" and its {leftovers.Files.Count} old automatic backup(s)" : string.Empty;
+        if (!VaultFile.Exists)
+        {
+            if (leftovers.Files.Count > 0 && ShouldProcess(Location.Path, $"Delete the {leftovers.Files.Count} old automatic backup(s) of this vault"))
+            {
+                DeleteLeftoverBackups(leftovers);
+            }
+            else
+            {
+                Say("No vault to delete.");
+            }
+
+            return;
+        }
+
+        var legacy = Location.LegacyPath is { } legacyPath && File.Exists(legacyPath) ? $", the unmigrated {legacyPath}" : string.Empty;
+        if (!ShouldProcess(Location.Path, $"Delete the vault, its previous generation{legacy}{backups}"))
         {
             return;
         }
@@ -246,6 +258,7 @@ public sealed class ClearVaultCommand : VaultCmdletBase
                 .ToList();
         VaultFile.Delete();
         Say($"Deleted {Location.Path}");
+        DeleteLeftoverBackups(leftovers);
         if (rendered.Count > 0 && (!IsInteractive || Confirm($"Also delete the files written from its templates ({string.Join(", ", rendered.Select(t => t.Display))})? They hold its values in plain text.")))
         {
             foreach (var template in rendered)
@@ -254,25 +267,6 @@ public sealed class ClearVaultCommand : VaultCmdletBase
             }
 
             Say($"Deleted {string.Join(", ", rendered.Select(t => t.Display))}");
-        }
-
-        if (backup is not null)
-        {
-            var folder = BackupFileWriter.ResolveDestination(backup.Destination);
-            var own = BackupFileWriter.FindOwn(backup.Destination, backup.Id);
-            if (IsInteractive && own.Count > 0 && Confirm($"Also delete the {own.Count} backups of this vault in '{folder}'?"))
-            {
-                foreach (var file in own)
-                {
-                    File.Delete(file);
-                }
-
-                Say($"Deleted the backups of this vault in {folder}");
-            }
-            else
-            {
-                Say($"Backups kept in {folder}");
-            }
         }
     }
 }

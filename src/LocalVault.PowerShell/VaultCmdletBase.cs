@@ -22,7 +22,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     internal VaultLocation VaultLocation => Location;
 
-    protected VaultStore VaultFile => store ??= new(Location, new ClixmlLegacyReader(), new BackupFileWriter());
+    protected VaultStore VaultFile => store ??= new(Location, new ClixmlLegacyReader());
 
     protected static bool IsInteractive =>
         Environment.UserInteractive
@@ -32,10 +32,15 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     protected static DateTimeOffset Now => DateTimeOffset.UtcNow;
 
+    private static readonly HashSet<string> SettledBackupCleanups = new(StringComparer.OrdinalIgnoreCase);
+
+    protected virtual bool OffersBackupCleanup => true;
+
     protected override void ProcessRecord()
     {
         try
         {
+            OfferBackupCleanup();
             Run();
         }
         catch (ImportConflictException ex)
@@ -163,15 +168,90 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
         }
 
         ReportRefused(result.LegacyRefused, result.MigratedLegacyPath);
+    }
 
-        if (result.BackupError is not null)
+    protected LeftoverBackups FindLeftoverBackups(BackupSettings? settings) =>
+        LeftoverBackups.Find(Location, settings, Environment.MachineName, Environment.GetEnvironmentVariable("OneDrive"));
+
+    protected void DeleteLeftoverBackups(LeftoverBackups leftovers)
+    {
+        ArgumentNullException.ThrowIfNull(leftovers);
+        leftovers.Delete();
+        if (leftovers.Files.Count > 0)
         {
-            WriteWarning($"Saved, but the backup failed: {result.BackupError}");
+            Say($"Deleted {leftovers.Files.Count} old automatic backup(s) in {string.Join(", ", leftovers.Folders)}");
         }
 
-        if (result.BackupCleanupError is not null)
+        if (leftovers.UnresolvedDestination is { } destination)
         {
-            WriteWarning($"Saved and backed up, but old backups could not be deleted: {result.BackupCleanupError}");
+            WriteWarning($"Old automatic backups may remain in '{destination}', which does not resolve on this PC. Delete them by hand.");
+        }
+    }
+
+    private void OfferBackupCleanup()
+    {
+        if (!OffersBackupCleanup)
+        {
+            return;
+        }
+
+        LeftoverBackups leftovers;
+        string vault;
+        try
+        {
+            vault = Location.Path;
+            lock (SettledBackupCleanups)
+            {
+                if (SettledBackupCleanups.Contains(vault))
+                {
+                    return;
+                }
+            }
+
+            leftovers = FindLeftoverBackups(File.Exists(vault) ? VaultFile.Read(ignoreLegacy: true).Body.Backup : null);
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            return;
+        }
+
+        if (!leftovers.Any)
+        {
+            return;
+        }
+
+        lock (SettledBackupCleanups)
+        {
+            SettledBackupCleanups.Add(vault);
+        }
+
+        var found = leftovers.Files.Count > 0
+            ? $"{leftovers.Files.Count} old automatic backup(s) of this vault in {string.Join(", ", leftovers.Folders)}"
+            : "the key of its old automatic backups";
+        if (!IsInteractive)
+        {
+            WriteWarning($"LocalVault no longer makes automatic backups, and {vault} still has {found}. Run any lv command in a console to delete them, or lv clear.");
+            return;
+        }
+
+        if (!Confirm($"LocalVault no longer makes automatic backups, and {vault} still has {found}. They are copies of its values. Delete them?"))
+        {
+            Say("Old backups kept. You will be asked again in the next session.");
+            return;
+        }
+
+        try
+        {
+            DeleteLeftoverBackups(leftovers);
+            if (leftovers.HasSettings)
+            {
+                Report(VaultFile.Update(body => body.Backup = null, new VaultUpdateOptions { DropPreviousGeneration = true }));
+                Say("Removed the backup key from the vault.");
+            }
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            WriteWarning($"Old backups not fully deleted: {ex.Message}");
         }
     }
 

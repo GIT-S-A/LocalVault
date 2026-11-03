@@ -51,10 +51,6 @@ Describe 'No secret value in any stream' {
                 Import-Vault -Path $vault -Source $export -Passphrase $pass -Verbose -Debug } }
         @{ Name = 'Import-Vault wrong passphrase'; Action = {
                 Import-Vault -Path $vault -Source $export -Passphrase (ConvertTo-TestSecret ($passCanary + 'x')) -Verbose -Debug } }
-        @{ Name = 'Enable-VaultBackup'; Action = {
-                Enable-VaultBackup -Path $vault -Manual -Destination (Join-Path $folder 'b') -KeyFileOut (Join-Path $folder 'k.lvkey') -Passphrase $pass -Verbose -Debug } }
-        @{ Name = 'Invoke-VaultBackup'; Action = { Invoke-VaultBackup -Path $vault -Verbose -Debug } }
-        @{ Name = 'Test-VaultBackup'; Action = { Test-VaultBackup -Path $vault -Manual -KeyFile (Join-Path $folder 'k.lvkey') -Passphrase $pass -Verbose -Debug } }
         @{ Name = 'Set-VaultEntry bad name'; Action = { Set-VaultEntry -Path $vault -Name 'bad name' -Value (ConvertTo-TestSecret $canary) -Verbose -Debug } }
     ) {
         $text = & $capture $Action

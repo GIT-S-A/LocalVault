@@ -18,16 +18,14 @@ $script:LvSyntax = @{
     load    = @{ Usage = 'lv load [--store <name>] [--replace a,b | --replace-all]   (every vault of the repository; --path for one)'; Min = 0; Max = 0; Options = @('store', 'replace', 'replace-all') }
     export  = @{ Usage = 'lv export <file> [--overwrite]'; Min = 1; Max = 1; Options = @('overwrite') }
     import  = @{ Usage = 'lv import <file> [--replace a,b | --replace-all] [--keyfile <file>]'; Min = 1; Max = 1; Options = @('replace', 'replace-all', 'keyfile') }
-    backup  = @{ Usage = 'lv backup [enable [--destination <folder>] [--manual [--keyfile <file> | --keyfile-out <file>]] | disable | now | test [--manual --keyfile <file>]]'; Min = 0; Max = 1; Options = @('destination', 'manual', 'keyfile', 'keyfile-out') }
     store   = @{ Usage = 'lv store [list | add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] | add <name> [<target>] --project [--default] [--mirror] | set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default] [--project] | rm <name> [--project] | use <name> | diff [--store <name>] | copy <target | name> [--keyfile <file>]]'; Min = 0; Max = 4; Options = @('project', 'default', 'unlock-with', 'mirror', 'no-mirror', 'no-unlock', 'store', 'keyfile') }
     update  = @{ Usage = 'lv update [<tag>] [--downgrade]'; Min = 0; Max = 1; Options = @('downgrade') }
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @() }
 }
-$script:LvValueOptions = @('path', 'file', 'replace', 'destination', 'store', 'unlock-with', 'keyfile', 'keyfile-out', 'note', 'capture')
-$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'manual', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'no-unlock', 'accept', 'version', 'help')
+$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture')
+$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'no-unlock', 'accept', 'version', 'help')
 $script:LvSubcommands = @{
-    backup = @('enable', 'disable', 'now', 'test')
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
 }
@@ -133,7 +131,6 @@ Moving entries
   save | load                          every vault of the repository to / from its store, one password per store
   export <file> [--overwrite]          writes a passphrase-sealed export
   import <file> [--replace a,b] [--replace-all] [--keyfile <file>]
-  backup [enable|disable|now|test]     automatic local backups; alone: their state
 
 Stores
   store                                each vault's store, and what this PC still needs
@@ -221,7 +218,7 @@ Details: Get-Help Invoke-LocalVault -Full
         }
         if ($Command -eq '-h') { $Command = 'help' }
         if (-not $syntax.ContainsKey($Command)) {
-            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import backup store template run update. Run lv alone for details."
+            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run update. Run lv alone for details."
         }
 
         $rule = $syntax[$Command]
@@ -325,8 +322,6 @@ Details: Get-Help Invoke-LocalVault -Full
                         $next.Add("lv set $($entry.Name)   required, not set on this PC$(if ($entry.Note) { ": $($entry.Note)" })")
                     }
                     $next.Add('lv list   names of the entries')
-                    $backup = Get-VaultBackup @vault 6>$null
-                    if (-not $backup) { $next.Add('lv backup enable   automatic local saves (optional)') }
                 }
                 $here = (Get-Location -PSProvider FileSystem).ProviderPath
                 $listed = @($vaults | ForEach-Object { if ($resolved.GitRoot) { [IO.Path]::GetFullPath((Join-Path $resolved.GitRoot $_.Vault)) } })
@@ -335,7 +330,7 @@ Details: Get-Help Invoke-LocalVault -Full
                 }
                 $next.Add('lv   all commands')
                 $suffix = if ($options.ContainsKey('path')) { " --path $($options.path)" } else { '' }
-                $vaultCommands = 'lv list', 'lv set <name>', 'lv backup enable'
+                $vaultCommands = 'lv list', 'lv set <name>'
                 $rows = $next | ForEach-Object {
                     $commandText, $why = $_ -split '   ', 2
                     if ($vaultCommands -contains $commandText -or $commandText -like 'lv set *') { $commandText += $suffix }
@@ -414,41 +409,6 @@ Details: Get-Help Invoke-LocalVault -Full
                 }
                 else {
                     Restore-VaultFile @vault -All -Overwrite:([bool]$options['overwrite'])
-                }
-            }
-            'backup' {
-                if ($words.Count -eq 0) {
-                    $status = Get-VaultBackup @vault
-                    if ($status) {
-                        "Folder:      $([LocalVault.Core.BackupFileWriter]::ResolveDestination($status.Destination))"
-                        "Last backup: $(if ($status.Newest) { $status.Newest } else { 'none' })"
-                        if ($status.LastError) { "Last error:  $($status.LastError)" }
-                    }
-                    break
-                }
-                switch ($words[0]) {
-                    'enable' {
-                        $extra = @{}
-                        if ($options.ContainsKey('destination')) { $extra.Destination = $options.destination }
-                        if ($options['manual']) {
-                            $extra.Manual = $true
-                            if ($options.ContainsKey('keyfile')) { $extra.KeyFile = $options.keyfile }
-                            if ($options.ContainsKey('keyfile-out')) { $extra.KeyFileOut = $options['keyfile-out'] }
-                        }
-                        Enable-VaultBackup @vault @extra
-                    }
-                    'disable' { Disable-VaultBackup @vault }
-                    'now' { Invoke-VaultBackup @vault | Out-Null }
-                    'test' {
-                        if ($options['manual']) {
-                            if (-not $options.ContainsKey('keyfile')) { & $fail 'lv backup test --manual needs --keyfile <file>.' }
-                            Test-VaultBackup @vault -Manual -KeyFile $options.keyfile | Out-Null
-                        }
-                        else {
-                            Test-VaultBackup @vault | Out-Null
-                        }
-                    }
-                    default { & $fail "Unknown backup command '$($words[0])'." }
                 }
             }
             'load' { Import-VaultFromStore @vault @store @replace -ReplaceAll:([bool]$options['replace-all']) | Out-Null }

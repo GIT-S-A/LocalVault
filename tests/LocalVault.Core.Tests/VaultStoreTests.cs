@@ -315,46 +315,6 @@ public sealed class VaultStoreTests : IDisposable
     }
 
     [Fact]
-    public void BackupWriterReceivesBodyWithoutSettingsAndResultIsRecorded()
-    {
-        var writer = new RecordingBackupWriter();
-        var store = NewStore(writer);
-        store.Update(
-            body =>
-            {
-                Put(body, "a", "1");
-                body.Backup = BackupSettings.Create("0123456789abcdef", "D:/b", "passphrase-123".AsSpan(), new byte[32]);
-            },
-            new VaultUpdateOptions { AllowCreate = true });
-
-        Assert.NotNull(writer.LastBody);
-        Assert.Null(writer.LastBody.Backup);
-        Assert.Equal("1", Value(writer.LastBody, "a"));
-        var settings = store.Read().Body.Backup!;
-        Assert.NotNull(settings.LastBackup);
-        Assert.Null(settings.LastError);
-    }
-
-    [Fact]
-    public void BackupFailureDoesNotBlockTheWrite()
-    {
-        var writer = new RecordingBackupWriter { Fail = true };
-        var store = NewStore(writer);
-
-        var result = store.Update(
-            body =>
-            {
-                Put(body, "a", "1");
-                body.Backup = BackupSettings.Create("0123456789abcdef", "D:/b", "passphrase-123".AsSpan(), new byte[32]);
-            },
-            new VaultUpdateOptions { AllowCreate = true });
-
-        Assert.Equal("destination offline", result.BackupError);
-        Assert.Equal("1", Value(store.Read().Body, "a"));
-        Assert.Equal("destination offline", store.Read().Body.Backup!.LastError);
-    }
-
-    [Fact]
     public void FailedReplaceLeavesTheVaultAndNoTemporaryFile()
     {
         var store = NewStore();
@@ -372,50 +332,30 @@ public sealed class VaultStoreTests : IDisposable
     }
 
     [Fact]
-    public void AnyBackupFailureLeavesTheWriteDone()
+    public void WritesKeepLeftoverBackupSettings()
     {
-        var writer = new RecordingBackupWriter { Failure = new FormatException("bad name") };
-        var store = NewStore(writer);
-
-        var result = store.Update(
-            body =>
-            {
-                Put(body, "a", "1");
-                body.Backup = BackupSettings.Create("0123456789abcdef", "D:/b", "passphrase-123".AsSpan(), new byte[32]);
-            },
-            new VaultUpdateOptions { AllowCreate = true });
-
-        Assert.Equal("bad name", result.BackupError);
-        Assert.Equal("1", Value(store.Read().Body, "a"));
-    }
-
-    [Fact]
-    public void OldBackupsArePrunedOnlyAfterTheVaultIsWritten()
-    {
-        var path = directory.Combine("secrets.local.lv");
-        var writer = new RecordingBackupWriter { VaultPath = path };
-        var store = NewStore(writer);
-
+        var store = NewStore();
         store.Update(
             body => body.Backup = BackupSettings.Create("0123456789abcdef", "D:/b", "passphrase-123".AsSpan(), new byte[32]),
             new VaultUpdateOptions { AllowCreate = true });
 
-        Assert.Equal("backup.lvbak", writer.Pruned);
-        Assert.True(writer.VaultExistedAtPrune);
+        store.Update(body => Put(body, "a", "1"));
+
+        Assert.Equal("D:/b", store.Read().Body.Backup!.Destination);
     }
 
     [Fact]
-    public void SettingsWithoutAnIdGetOneOnTheNextBackup()
+    public void DropPreviousGenerationDeletesTheBakFile()
     {
-        var writer = new RecordingBackupWriter();
-        var store = NewStore(writer);
-        var settings = BackupSettings.Create("0123456789abcdef", "D:/b", "passphrase-123".AsSpan(), new byte[32]);
-        settings.Node.Remove("id");
+        var store = NewStore();
+        store.Update(body => Put(body, "a", "1"), new VaultUpdateOptions { AllowCreate = true });
+        store.Update(body => Put(body, "b", "2"));
+        Assert.True(File.Exists(store.Location.PreviousGenerationPath));
 
-        store.Update(body => body.Backup = settings, new VaultUpdateOptions { AllowCreate = true });
+        store.Update(body => Put(body, "c", "3"), new VaultUpdateOptions { DropPreviousGeneration = true });
 
-        Assert.Matches("^[0-9a-f]{16}$", writer.LastId);
-        Assert.Equal(writer.LastId, store.Read().Body.Backup!.Id);
+        Assert.False(File.Exists(store.Location.PreviousGenerationPath));
+        Assert.Equal(3, store.Read().Body.Entries.Count);
     }
 
     [Fact]
@@ -434,8 +374,8 @@ public sealed class VaultStoreTests : IDisposable
         Assert.True(File.Exists(store.Location.LegacyPath!));
     }
 
-    private VaultStore NewStore(IBackupWriter? writer = null) =>
-        new(new VaultLocation(directory.Combine("secrets.local.lv"), VaultPathSource.Explicit, null), legacy, writer);
+    private VaultStore NewStore() =>
+        new(new VaultLocation(directory.Combine("secrets.local.lv"), VaultPathSource.Explicit, null), legacy);
 
     private static void Put(VaultBody body, string name, string value) =>
         body.Set(VaultEntry.NewSecret(EntryName.Parse(name), Encoding.UTF8.GetBytes(value), Created));
@@ -448,45 +388,5 @@ public sealed class VaultStoreTests : IDisposable
         public IReadOnlyList<KeyValuePair<string, string>> Values { get; set; } = [];
 
         public IReadOnlyList<KeyValuePair<string, string>> Read(string path) => Values;
-    }
-
-    private sealed class RecordingBackupWriter : IBackupWriter
-    {
-        public bool Fail { get; init; }
-
-        public Exception? Failure { get; init; }
-
-        public VaultBody? LastBody { get; private set; }
-
-        public string? LastId { get; private set; }
-
-        public string? Pruned { get; private set; }
-
-        public bool VaultExistedAtPrune { get; private set; }
-
-        public string? VaultPath { get; init; }
-
-        public string Write(VaultBody transferBody, BackupSettings settings, DateTimeOffset now)
-        {
-            if (Failure is not null)
-            {
-                throw Failure;
-            }
-
-            if (Fail)
-            {
-                throw new IOException("destination offline");
-            }
-
-            LastBody = transferBody;
-            LastId = settings.Id;
-            return "backup.lvbak";
-        }
-
-        public void Prune(BackupSettings settings, DateTimeOffset now, string justWritten)
-        {
-            Pruned = justWritten;
-            VaultExistedAtPrune = VaultPath is not null && File.Exists(VaultPath);
-        }
     }
 }

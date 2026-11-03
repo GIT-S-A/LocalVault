@@ -1,5 +1,5 @@
 ---
-description: Describes the LocalVault vault file, entry names, writes, exports, backups and use from scripts.
+description: Describes the LocalVault vault file, entry names, writes, exports, old backups and use from scripts.
 Locale: en-US
 ms.date: 10/13/2026
 title: about_LocalVault
@@ -9,8 +9,8 @@ title: about_LocalVault
 
 ## Short description
 
-Describes the LocalVault vault file, entry names, writes, exports, backups,
-and use from scripts.
+Describes the LocalVault vault file, entry names, writes, exports, old
+backups, and use from scripts.
 
 ## Long description
 
@@ -119,17 +119,19 @@ missing entries, skips identical entries, and asks about entries that
 differ. It doesn't delete entries. `Import-Vault` also reads `SAAS-VAULT-1`
 exports.
 
-### Backups
+### Old backups
 
-`Enable-VaultBackup` turns on automatic backups. Each write then also writes
-a backup file to `%OneDrive%\LocalVault\<project>-<id>-<machine>`, or to the
-folder that you specify. Backup file names carry an id of the vault. The
-folder keeps the 10 newest backups of the vault and its newest backup of each
-of the last 30 days.
+LocalVault makes no automatic backups. Releases up to 1.0.0-beta14 wrote
+them, by default to `%OneDrive%\LocalVault\<project>-<id>-<machine>`, sealed
+with a key kept in the vault. Every command that opens a vault looks for
+them: the folder named by the backup settings in the vault, and the vault's
+default folder. In a console, the command asks once per session whether to
+delete them; on yes, it deletes the files, the folders left empty and the
+backup key, including the copy in the vault's previous generation
+(`<vault>.bak`). Without a console, it writes a warning. `Clear-Vault` deletes
+them with the vault.
 
-Backups are sealed with a generated passphrase and a 32-byte keyfile that
-the vault keeps. They are this machine's automatic saves. When a backup
-fails, the write succeeds and `Get-VaultEntryList` writes a warning.
+`Import-Vault` restores an old backup until it is deleted.
 
 ### Stores
 
@@ -255,7 +257,7 @@ The secrets in a vault are lost when:
 - an administrator resets the Windows password of the user, or the user
   profile is rebuilt.
 
-An export or a backup is the only other copy.
+An export is the only other copy of the entries that aren't in a store.
 
 ### Scripts
 
@@ -330,7 +332,6 @@ one, and does nothing when it is already installed.
 - [Get-VaultEntry](Get-VaultEntry.md)
 - [Use-VaultEnv](Use-VaultEnv.md)
 - [Import-Vault](Import-Vault.md)
-- [Enable-VaultBackup](Enable-VaultBackup.md)
 - [Export-VaultToStore](Export-VaultToStore.md)
 - [Import-VaultFromStore](Import-VaultFromStore.md)
 - [Register-VaultStore](Register-VaultStore.md)

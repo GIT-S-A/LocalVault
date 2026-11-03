@@ -1,5 +1,3 @@
-using System.Globalization;
-using System.Security.Cryptography;
 using System.Text.Json.Nodes;
 
 namespace LocalVault.Core;
@@ -11,9 +9,6 @@ public sealed class BackupSettings
     private const string PassphraseField = "passphrase";
     private const string KeyFileField = "keyfile";
     private const string KeyFileIdField = "keyfileId";
-    private const string LastBackupField = "lastBackup";
-    private const string LastErrorField = "lastError";
-    private const int IdBytes = 8;
 
     internal BackupSettings(JsonObject node)
     {
@@ -25,17 +20,7 @@ public sealed class BackupSettings
     public string Destination => Node[DestinationField]?.GetValue<string>()
         ?? throw new VaultException("Backup settings have no destination.");
 
-    public string KeyFileId => Node[KeyFileIdField]?.GetValue<string>()
-        ?? throw new VaultException("Backup settings have no keyfile id.");
-
-
-    public DateTimeOffset? LastBackup => ReadTime(LastBackupField);
-
-    public string? LastError => Node[LastErrorField]?.GetValue<string>();
-
     internal JsonObject Node { get; }
-
-    public static string NewId() => Convert.ToHexStringLower(RandomNumberGenerator.GetBytes(IdBytes));
 
     public static BackupSettings Create(
         string id, string destination, ReadOnlySpan<char> passphrase, ReadOnlySpan<byte> keyFile)
@@ -83,39 +68,4 @@ public sealed class BackupSettings
 
     public byte[] GetKeyFile() => Convert.FromBase64String(Node[KeyFileField]?.GetValue<string>()
         ?? throw new VaultException("Backup settings have no keyfile."));
-
-    public BackupSettings WithId(string id)
-    {
-        var node = (JsonObject)Node.DeepClone();
-        node[IdField] = id;
-        return new BackupSettings(node);
-    }
-
-    public BackupSettings WithResult(DateTimeOffset? lastBackup, string? lastError)
-    {
-        var node = (JsonObject)Node.DeepClone();
-        if (lastBackup is not null)
-        {
-            node[LastBackupField] = lastBackup.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
-        }
-
-        if (lastError is null)
-        {
-            node.Remove(LastErrorField);
-        }
-        else
-        {
-            node[LastErrorField] = lastError;
-        }
-
-        return new BackupSettings(node);
-    }
-
-    private DateTimeOffset? ReadTime(string field)
-    {
-        var text = Node[field]?.GetValue<string>();
-        return text is null
-            ? null
-            : DateTimeOffset.Parse(text, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
-    }
 }

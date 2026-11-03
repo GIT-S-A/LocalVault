@@ -36,7 +36,7 @@ The `Invoke-LocalVault` function runs a LocalVault cmdlet from a short command. 
 the function shows the installed release, lists the commands and names the vault that they would
 use, without opening it. `--version` alone prints the installed release, such as
 `LocalVault 1.0.0-beta11`.
-`backup` alone shows the state of the backups, `store` alone shows each vault's store and what
+`store` alone shows each vault's store and what
 isn't saved to it yet, followed by a `Stores:` line that lists every store with its level and
 flags, and `template` alone shows each templated file and whether it is written and up to date. `start` reads the vault, the repository and the stores, without opening a
 store, and prints the state and the commands to run next, ready to paste. When `list` finds no entry,
@@ -61,12 +61,6 @@ it says that the vault is missing or empty.
 | `load` | `[--store <name>] [--replace a,b] [--replace-all]` | `Import-VaultFromStore`, every vault of the repository |
 | `export` | `<file> [--overwrite]` | `Export-Vault` |
 | `import` | `<file> [--replace a,b] [--replace-all] [--keyfile <file>]` | `Import-Vault` |
-| `backup` | | `Get-VaultBackup` |
-| `backup enable` | `[--destination <folder>]` | `Enable-VaultBackup` |
-| `backup enable --manual` | `[--keyfile <file> \| --keyfile-out <file>]` | `Enable-VaultBackup -Manual` |
-| `backup disable` | | `Disable-VaultBackup` |
-| `backup now` | | `Invoke-VaultBackup` |
-| `backup test` | `[--manual --keyfile <file>]` | `Test-VaultBackup` |
 | `store` | | `Get-VaultStoreStatus` |
 | `store list` | | `Get-VaultStore` |
 | `store add` | `[<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]` | `Register-VaultStore`, a store of this PC |

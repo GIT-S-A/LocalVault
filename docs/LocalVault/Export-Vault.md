@@ -38,8 +38,6 @@ The cmdlet asks for the passphrase twice. Without a console, it reads the **Pass
 or one line of redirected standard input. The cmdlet verifies the file after it writes it, and
 records the time of the export in the vault.
 
-The export doesn't include the automatic backup settings.
-
 ## EXAMPLES
 
 ### Example 1 - Export the vault to a USB drive
@@ -182,5 +180,4 @@ The cmdlet fails when the vault is empty.
 ## RELATED LINKS
 
 - [Import-Vault](Import-Vault.md)
-- [Enable-VaultBackup](Enable-VaultBackup.md)
 - [about_LocalVault](about_LocalVault.md)

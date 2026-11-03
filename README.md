@@ -3,7 +3,7 @@
 One secret store per project, on the machine where you work. Values are sealed with Windows DPAPI
 to your account on this PC; copying the file elsewhere gives nothing. Exports carry secrets between
 machines and people under a passphrase. Shared entries live in a store, a KeePass database, that
-the team reads and a new machine loads from. Optional automatic backups go to OneDrive.
+the team reads and a new machine loads from.
 
 Windows only. PowerShell 7.6 or later.
 
@@ -80,7 +80,6 @@ when there is no `prod/db`.
 | `Restore-VaultFile [-Name n \| -All] [-Destination d] [-Overwrite]` | `lv restore [n] [--overwrite]` | asks before overwriting a different file |
 | `Export-Vault -Destination f [-Overwrite]` | `lv export f [--overwrite]` | passphrase of 12+ characters, asked twice |
 | `Import-Vault -Source f [-Replace a,b \| -ReplaceAll]` | `lv import f` | export, backup, `SAAS-VAULT-1` export or old `.clixml` |
-| `Enable-VaultBackup`, `Disable-`, `Invoke-`, `Test-`, `Get-VaultBackup` | `lv backup [enable\|disable\|now\|test]` | automatic backups |
 | `Export-VaultToStore [-Store name] [-Replace a,b \| -ReplaceAll]` | `lv save` | shared entries of every vault → its store |
 | `Import-VaultFromStore [-Store name] [-Replace a,b \| -ReplaceAll]` | `lv load` | store → vaults; on a new machine too |
 | `Get-VaultStoreStatus` | `lv store` | each vault's store and what isn't saved; opens nothing |
@@ -172,19 +171,12 @@ git-ignored; `lv template render` writes it, `lv template clear` deletes it, and
 `lv run -- terraform apply` keeps it only while the command runs. Edit the real file and run
 `lv template update` to carry the change into the template.
 
-## Backups
+## Old backups
 
-```powershell
-Enable-VaultBackup                     # lv backup enable; asks nothing
-Test-VaultBackup                       # lv backup test
-```
-
-After that, every write also writes a backup to
-`%OneDrive%\LocalVault\<project>-<id>-<machine>\` (`-Destination` elsewhere). The last ten are kept,
-plus one per day for 30 days. A failed backup never blocks the write; `Get-VaultEntryList` warns.
-Backups are this machine's automatic saves: their key is kept in the vault.
-`Import-Vault -Source <file.lvbak>` restores one. With `Enable-VaultBackup -Manual -KeyFileOut <file>`
-you choose the passphrase and keep the keyfile yourself.
+LocalVault makes no automatic backups. Releases up to 1.0.0-beta14 could write them to
+`%OneDrive%\LocalVault\<project>-<id>-<machine>\`. Every command that opens a vault looks for them;
+in a console it offers to delete them, without one it warns. `lv clear` deletes them with the vault.
+`Import-Vault -Source <file.lvbak>` restores one until then.
 ## How a vault gets lost
 
 The vault is one file in the project folder, readable only by your Windows account on this PC.
@@ -196,8 +188,8 @@ It is gone, with every secret in it, when:
 - an administrator resets your Windows password (a change you make yourself is fine), or your
   profile is rebuilt: DPAPI can then no longer open it.
 
-Turn on backups, or export after every change and keep the export off this machine. Until then
-`Get-VaultEntryList` warns.
+Shared entries survive in the store. For local entries and personal values, export after every change
+and keep the export off this machine. Until then `Get-VaultEntryList` warns.
 
 ## Development
 

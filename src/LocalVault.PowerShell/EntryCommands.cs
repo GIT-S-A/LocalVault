@@ -49,7 +49,7 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         {
             WriteWarning($"Required values not set on this PC: {string.Join(", ", missing)}. Run lv set <name> for each (lv start shows where to get them).");
         }
-        WarnAboutBackup(snapshot.Body, states, now);
+        WarnAboutUnexported(snapshot.Body, now);
     }
 
     private void WarnAboutStore(IReadOnlyList<KeePassComparison> states)
@@ -88,36 +88,25 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         }
     }
 
-    private void WarnAboutBackup(VaultBody body, IReadOnlyList<KeePassComparison> states, DateTimeOffset now)
+    private void WarnAboutUnexported(VaultBody body, DateTimeOffset now)
     {
-        if (body.Entries.Count == 0)
+        if (body.LastExported is { } exported && now - exported <= TimeSpan.FromDays(ExportWarningDays))
         {
             return;
         }
 
-        if (body.Backup is { } backup)
-        {
-            if (backup.LastError is not null)
-            {
-                WriteWarning($"The last backup failed: {backup.LastError}");
-            }
-
-            return;
-        }
-
-        if (states.All(s => s.State == KeePassSyncState.Saved))
+        var storeKnown = StoreKnown();
+        var onlyHere = body.Entries
+            .Where(e => !e.IsMissing && (!storeKnown || e.IsLocal || e.IsRequired))
+            .Select(e => e.Name.FullName)
+            .ToList();
+        if (onlyHere.Count == 0)
         {
             return;
         }
 
-        if (body.LastExported is null)
-        {
-            WriteWarning("This vault has never been exported and has no automatic backup. See Enable-VaultBackup.");
-        }
-        else if (now - body.LastExported > TimeSpan.FromDays(ExportWarningDays))
-        {
-            WriteWarning($"Last export {body.LastExported:yyyy-MM-dd}, no automatic backup. See Enable-VaultBackup.");
-        }
+        var since = body.LastExported is { } last ? $"last export {last:yyyy-MM-dd}" : "never exported";
+        WriteWarning($"Only on this PC, {since}: {string.Join(", ", onlyHere)}. Keep a copy with lv export (Export-Vault).");
     }
 }
 
