@@ -33,6 +33,7 @@ Versions install side by side; scripts pin the one they were written for:
 
 ## Documentation
 
+- [Getting started](docs/getting-started.md): first vault, team store, personal values and SSH keys, new machine.
 - [LocalVault reference](docs/reference.md): concepts and every command on one page.
 - [LocalVault module](docs/LocalVault/LocalVault.md): one page per command.
 - [about_LocalVault](docs/LocalVault/about_LocalVault.md): concepts, file layout, use from scripts.
