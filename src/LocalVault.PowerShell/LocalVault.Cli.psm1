@@ -8,7 +8,7 @@ $script:LvSyntax = @{
     get     = @{ Usage = 'lv get <name>[#user|#totp|#url<n>] [--show]   (secrets without --show: into a pipe or a redirection only)'; Min = 1; Max = 1; Options = @('show') }
     clip    = @{ Usage = 'lv clip <name>[#user|#totp|#url<n>]'; Min = 1; Max = 1; Options = @() }
     set     = @{ Usage = 'lv set <name> [--file <path> | --credential] [--local]   or   lv set <name>#user|#password|#totp|#url<n>'; Min = 1; Max = 1; Options = @('file', 'local', 'credential') }
-    require = @{ Usage = 'lv require <name> [--note <where to get it>]'; Min = 1; Max = 1; Options = @('note') }
+    require = @{ Usage = 'lv require <name> [--credential | --file <restore path, e.g. ~/.ssh/id_ed25519>] [--note <where to get it>]'; Min = 1; Max = 1; Options = @('note', 'credential', 'file') }
     mark    = @{ Usage = 'lv mark <name> shared|local'; Min = 2; Max = 2; Options = @() }
     rm      = @{ Usage = 'lv rm <name>'; Min = 1; Max = 1; Options = @() }
     env     = @{ Usage = 'lv env <VARIABLE>=<name> [<VARIABLE>=<name> ...]'; Min = 1; Max = [int]::MaxValue; Options = @() }
@@ -18,13 +18,13 @@ $script:LvSyntax = @{
     load    = @{ Usage = 'lv load [--store <name>] [--replace a,b | --replace-all]   (every vault of the repository; --path for one)'; Min = 0; Max = 0; Options = @('store', 'replace', 'replace-all') }
     export  = @{ Usage = 'lv export <file> [--overwrite]'; Min = 1; Max = 1; Options = @('overwrite') }
     import  = @{ Usage = 'lv import <file> [--replace a,b | --replace-all] [--keyfile <file>]'; Min = 1; Max = 1; Options = @('replace', 'replace-all', 'keyfile') }
-    store   = @{ Usage = 'lv store [list | add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] | add <name> [<target>] --project [--default] [--mirror] | set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default] [--project] | rm <name> [--project] | use <name> | diff [--store <name>] | copy <target | name> [--keyfile <file>]]'; Min = 0; Max = 4; Options = @('project', 'default', 'unlock-with', 'mirror', 'no-mirror', 'no-unlock', 'store', 'keyfile') }
+    store   = @{ Usage = 'lv store [list | add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal] | add <name> [<target>] --project [--default] [--mirror] | set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default] [--personal | --no-personal] [--project] | rm <name> [--project] | use <name> | diff [--store <name>] | copy <target | name> [--keyfile <file>]]'; Min = 0; Max = 4; Options = @('project', 'default', 'unlock-with', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'store', 'keyfile') }
     update  = @{ Usage = 'lv update [<tag>] [--downgrade]'; Min = 0; Max = 1; Options = @('downgrade') }
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @() }
 }
 $script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture')
-$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'no-unlock', 'accept', 'version', 'help')
+$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help')
 $script:LvSubcommands = @{
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
@@ -121,6 +121,8 @@ Entries
   <name>#user #totp #url #url2 ...     one part of a credential, for get, clip, set, env, run and templates;
                                        #totp is the current code
   require <name> [--note <text>]       declares a personal value each person sets; the store gets the declaration only
+  require <name> --credential          the same, for a user name and a password
+  require <name> --file <path>         the same, for a file such as an SSH key; ~/ is your profile
   mark <name> shared|local             sends the entry to the store, or keeps it on this PC only
   rm <name>                            removes an entry
   env <VARIABLE>=<name> ...            sets environment variables in this window
@@ -135,11 +137,12 @@ Moving entries
 Stores
   store                                each vault's store, and what this PC still needs
   store list                           stores of this PC and of the project
-  store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]
-                                       a store of this PC; --mirror: every save on this PC also goes there
+  store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal]
+                                       a store of this PC; --mirror: every save on this PC also goes there;
+                                       --personal: keeps your own values of required entries
   store add <name> [<target>] --project [--default] [--mirror]
                                        a store of the project; a name alone refers to each PC's store of that name
-  store set <name> [--mirror|--no-mirror] [--unlock-with <store>|--no-unlock] [--default] [--project]
+  store set <name> [--mirror|--no-mirror] [--unlock-with <store>|--no-unlock] [--default] [--personal|--no-personal] [--project]
                                        changes one setting of a store
   store rm <name> [--project]          forgets a store
   store use <name>                     the project's primary store: lv load reads it (--path: one vault only)
@@ -294,7 +297,7 @@ Details: Get-Help Invoke-LocalVault -Full
                     $where = if ($item.Problem) { "no store: $($item.Problem)" } else { "store '$($item.Store)' ($($item.Scope)), $($item.Group)" }
                     "  $($item.Vault) -> $where"
                 }
-                "Stores:  $(if ($stores.Count -gt 0) { ($stores | ForEach-Object { "$($_.Name) ($($_.Scope)$(if ($_.Default) { ', default' })$(if ($_.UnlockWith) { ", unlocked with $($_.UnlockWith)" }))" }) -join ', ' } else { 'none' })"
+                "Stores:  $(if ($stores.Count -gt 0) { ($stores | ForEach-Object { "$($_.Name) ($($_.Scope)$(if ($_.Default) { ', default' })$(if ($_.Personal) { ', personal' })$(if ($_.UnlockWith) { ", unlocked with $($_.UnlockWith)" }))" }) -join ', ' } else { 'none' })"
 
                 $missing = @($vaults | Where-Object { $_.Problem -and $_.Store } | Select-Object -ExpandProperty Store -Unique)
                 $unassigned = @($vaults | Where-Object { $_.Problem -and -not $_.Store })
@@ -320,6 +323,9 @@ Details: Get-Help Invoke-LocalVault -Full
                     }
                     foreach ($entry in $entries | Where-Object Sync -EQ 'Missing') {
                         $next.Add("lv set $($entry.Name)   required, not set on this PC$(if ($entry.Note) { ": $($entry.Note)" })")
+                    }
+                    if (@($entries | Where-Object Sync -EQ 'Personal').Count -gt 0 -and -not @($stores | Where-Object Personal)) {
+                        $next.Add('lv store set <name> --personal   keep your own values in a store of yours; lv load then fills them in on another PC')
                     }
                     $next.Add('lv list   names of the entries')
                 }
@@ -368,7 +374,8 @@ Details: Get-Help Invoke-LocalVault -Full
             }
             'require' {
                 $note = if ($options.ContainsKey('note')) { @{ Note = $options.note } } else { @{} }
-                Set-VaultEntry @vault -Name $words[0] -Required @note
+                $file = if ($options.ContainsKey('file')) { @{ StoredPath = $options.file } } else { @{} }
+                Set-VaultEntry @vault -Name $words[0] -Required -Credential:([bool]$options['credential']) @note @file
             }
             'mark' {
                 $sharing = switch ($words[1]) {
@@ -417,8 +424,8 @@ Details: Get-Help Invoke-LocalVault -Full
                 $sub = if ($words.Count -eq 0) { 'status' } else { $words[0] }
                 $rest = @($words | Select-Object -Skip 1)
                 $allowed = @{
-                    status = @(); list = @(); add = @('project', 'default', 'unlock-with', 'mirror'); rm = @('project'); use = @()
-                    set = @('project', 'default', 'unlock-with', 'mirror', 'no-mirror', 'no-unlock')
+                    status = @(); list = @(); add = @('project', 'default', 'unlock-with', 'mirror', 'personal'); rm = @('project'); use = @()
+                    set = @('project', 'default', 'unlock-with', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock')
                     diff = @('store'); copy = @('keyfile')
                 }
                 if (-not $allowed.ContainsKey($sub)) { & $fail "Unknown store command '$sub'." }
@@ -436,11 +443,11 @@ Details: Get-Help Invoke-LocalVault -Full
                         $statuses | Format-Table Vault, Store, Mirrors, Scope, UnlockWith, Group, @{ Label = 'To save'; Expression = { $_.Pending + $_.RemovalsPending } } -AutoSize
                         foreach ($item in $statuses | Where-Object Problem) { "$($item.Problem)" }
                         $stores = @(Get-VaultStore @vault)
-                        "Stores: $(if ($stores.Count -gt 0) { ($stores | ForEach-Object { "$($_.Name) ($($_.Scope)$(if ($_.Default) { ', default' })$(if ($_.Mirror) { ', mirror' })$(if ($_.UnlockWith) { ", unlocked with $($_.UnlockWith)" }))" }) -join ', ' } else { 'none (lv store add <name> <target>)' })"
+                        "Stores: $(if ($stores.Count -gt 0) { ($stores | ForEach-Object { "$($_.Name) ($($_.Scope)$(if ($_.Default) { ', default' })$(if ($_.Mirror) { ', mirror' })$(if ($_.Personal) { ', personal' })$(if ($_.UnlockWith) { ", unlocked with $($_.UnlockWith)" }))" }) -join ', ' } else { 'none (lv store add <name> <target>)' })"
                     }
-                    'list' { Get-VaultStore @vault | Format-Table Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Mirror, Exists -AutoSize }
+                    'list' { Get-VaultStore @vault | Format-Table Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Mirror, Personal, Exists -AutoSize }
                     'add' {
-                        $register = @{ Default = [bool]$options['default']; Project = [bool]$options['project']; Mirror = [bool]$options['mirror'] }
+                        $register = @{ Default = [bool]$options['default']; Project = [bool]$options['project']; Mirror = [bool]$options['mirror']; Personal = [bool]$options['personal'] }
                         if ($options.ContainsKey('unlock-with')) { $register.UnlockWith = $options['unlock-with'] }
                         switch ($rest.Count) {
                             1 {
@@ -454,16 +461,19 @@ Details: Get-Help Invoke-LocalVault -Full
                             3 { $register.Name = $rest[0]; $register.Target = $rest[1]; $register.KeyFile = $rest[2] }
                             default { & $fail 'lv store add needs a target, e.g. a .kdbx file.' }
                         }
-                        Register-VaultStore @vault @register | Format-Table Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Mirror, Exists -AutoSize
+                        Register-VaultStore @vault @register | Format-Table Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Mirror, Personal, Exists -AutoSize
                     }
                     'rm' { Unregister-VaultStore @vault -Name $rest[0] -Project:([bool]$options['project']) }
                     'set' {
                         if ($options['mirror'] -and $options['no-mirror']) { & $fail 'Give --mirror or --no-mirror, not both.' }
+                        if ($options['personal'] -and $options['no-personal']) { & $fail 'Give --personal or --no-personal, not both.' }
                         $change = @{ Name = $rest[0]; Default = [bool]$options['default']; Project = [bool]$options['project']; NoUnlock = [bool]$options['no-unlock'] }
                         if ($options['mirror']) { $change.Mirror = $true }
                         if ($options['no-mirror']) { $change.Mirror = $false }
+                        if ($options['personal']) { $change.Personal = $true }
+                        if ($options['no-personal']) { $change.Personal = $false }
                         if ($options.ContainsKey('unlock-with')) { $change.UnlockWith = $options['unlock-with'] }
-                        Set-VaultStore @vault @change | Format-Table Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Mirror, Exists -AutoSize
+                        Set-VaultStore @vault @change | Format-Table Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Mirror, Personal, Exists -AutoSize
                     }
                     'use' { Set-VaultProjectStore @vault -Name $rest[0] }
                     'diff' { Compare-VaultWithStore @vault @store | Format-Table Name, Kind, State -AutoSize }

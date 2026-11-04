@@ -20,8 +20,8 @@ Changes one setting of a store without defining it again.
 ### __AllParameterSets
 
 ```
-Set-VaultStore [-Name] <string> [-Mirror] [-UnlockWith <string>] [-NoUnlock] [-Default] [-Project]
- [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+Set-VaultStore [-Name] <string> [-Mirror] [-UnlockWith <string>] [-NoUnlock] [-Default] [-Personal]
+ [-Project] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -37,7 +37,9 @@ repeat.
 **Mirror** makes the store a mirror: every `Export-VaultToStore` also writes it. `-Mirror:$false`
 makes it an ordinary store again. **UnlockWith** names the store that keeps its password;
 **NoUnlock** removes it. **Default** makes it the default store of this PC, or, with **Project**,
-the project's primary store.
+the project's primary store. **Personal** makes it this PC's personal store, which keeps your own
+values of required entries, in place of any other; `-Personal:$false` leaves this PC without one.
+**Personal** isn't accepted with **Project**.
 
 Without **Project**, the cmdlet changes a store of this PC in `stores.json`. With **Project**, it
 changes an entry of the project's `localvault.json`; an unlocking store is personal and isn't
@@ -51,7 +53,13 @@ accepted there.
 Set-VaultStore mine -Mirror
 ```
 
-### Example 2 - Open the team store with the password kept in your personal store
+### Example 2 - Keep your own values of required entries in your personal store
+
+```powershell
+Set-VaultStore mine -Personal
+```
+
+### Example 3 - Open the team store with the password kept in your personal store
 
 ```powershell
 Set-VaultStore team -UnlockWith mine
@@ -148,6 +156,28 @@ HelpMessage: ''
 ### -Default
 
 Makes the store this PC's default store, or with **Project**, the project's primary store.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
+### -Personal
+
+Makes the store this PC's personal store. `-Personal:$false` leaves this PC without one. Without this
+parameter, the setting stays.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter
@@ -272,12 +302,12 @@ You can't pipe objects to this cmdlet.
 ### LocalVault.PowerShell.VaultStoreInfo
 
 This cmdlet returns the store after the change: **Name**, **Scope**, **Type**, **Target**,
-**KeyFile**, **Default**, **UnlockWith**, **Mirror** and **Exists**.
+**KeyFile**, **Default**, **UnlockWith**, **Mirror**, **Exists** and **Personal**.
 
 ## NOTES
 
 `lv store set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default]
-[--project]` runs this cmdlet.
+[--personal | --no-personal] [--project]` runs this cmdlet.
 
 ## RELATED LINKS
 

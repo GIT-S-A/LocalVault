@@ -63,6 +63,17 @@ public sealed class KeePassItem : IDisposable
         Hash = VaultEntry.ComputeContentHash(kind, storedPath, value);
     }
 
+    internal KeePassItem(EntryName name, string note, string? shape, string? requiredPath, KeePassItem? personalValue)
+    {
+        Name = name;
+        Kind = VaultEntry.RequiredKind;
+        Value = System.Text.Encoding.UTF8.GetBytes(note);
+        Shape = shape;
+        RequiredPath = requiredPath;
+        PersonalValue = personalValue;
+        Hash = VaultEntry.ComputeDeclarationHash(note, shape, requiredPath);
+    }
+
     internal KeePassItem(EntryName name, string? userName, byte[] password, TotpSecret? totp, IReadOnlyList<string> urls)
     {
         Name = name;
@@ -82,6 +93,14 @@ public sealed class KeePassItem : IDisposable
 
     public string Hash { get; }
 
+    public string? Shape { get; }
+
+    public string? RequiredPath { get; }
+
+    public bool IsUnderHome => StoredPath is { } path && StoredPathRules.IsUnderHome(path);
+
+    public KeePassItem? PersonalValue { get; }
+
     internal byte[] Value { get; }
 
     internal string? UserName { get; }
@@ -93,12 +112,16 @@ public sealed class KeePassItem : IDisposable
     public VaultEntry ToVaultEntry(DateTimeOffset created) => Kind switch
     {
         VaultEntry.FileKind => VaultEntry.NewFile(Name, Value, StoredPath!, created),
-        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created),
+        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath),
         VaultEntry.CredentialKind => VaultEntry.NewCredential(Name, UserName, Value, Totp, Urls, created),
         _ => VaultEntry.NewSecret(Name, Value, created),
     };
 
-    public void Dispose() => CryptographicOperations.ZeroMemory(Value);
+    public void Dispose()
+    {
+        CryptographicOperations.ZeroMemory(Value);
+        PersonalValue?.Dispose();
+    }
 }
 
 public sealed class AutoOpenTarget(string title, string path, string? keyFile, char[] password) : IDisposable
@@ -144,6 +167,8 @@ public sealed partial class KeePassVault : IDisposable
 {
     public const string KindField = "LocalVault.Kind";
     public const string PathField = "LocalVault.Path";
+    public const string ShapeField = "LocalVault.Shape";
+    public const string RequiredPathField = "LocalVault.RequiredPath";
     public const string DatabaseIdField = "LocalVault.DatabaseId";
     public const string AutoOpenGroup = "AutoOpen";
     public const string OriginKind = "origin";
@@ -306,13 +331,20 @@ public sealed partial class KeePassVault : IDisposable
         var value = entry.GetValue();
         try
         {
-            if (target.Strings.ReadSafe(KindField) == VaultEntry.CredentialKind)
+            var previousKind = target.Strings.ReadSafe(KindField);
+            if (previousKind == VaultEntry.CredentialKind)
             {
                 RemoveCredentialStrings(target);
             }
 
             target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
             target.Strings.Set(KindField, new ProtectedString(false, entry.IsRequired ? VaultEntry.RequiredKind : entry.Kind));
+            if (!entry.IsRequired)
+            {
+                target.Strings.Remove(ShapeField);
+                target.Strings.Remove(RequiredPathField);
+            }
+
             if (entry.IsCredential && !entry.IsRequired)
             {
                 target.Strings.Remove(PathField);
@@ -320,9 +352,14 @@ public sealed partial class KeePassVault : IDisposable
             }
             else if (entry.IsRequired)
             {
-                target.Strings.Remove(PwDefs.PasswordField);
-                target.Strings.Remove(PathField);
-                target.Strings.Set(PwDefs.NotesField, new ProtectedString(false, entry.RequiredNote ?? string.Empty));
+                if (previousKind != VaultEntry.RequiredKind)
+                {
+                    target.Strings.Remove(PwDefs.PasswordField);
+                    target.Strings.Remove(PathField);
+                    target.Binaries.Clear();
+                }
+
+                WriteDeclaration(target, entry);
             }
             else if (entry.IsFile)
             {
@@ -334,6 +371,60 @@ public sealed partial class KeePassVault : IDisposable
             else
             {
                 target.Strings.Remove(PathField);
+                target.Strings.Set(PwDefs.PasswordField, new ProtectedString(true, value));
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(value);
+        }
+
+        target.Touch(true, false);
+        target.MaintainBackups(database);
+    }
+
+    public void PutPersonalValue(IReadOnlyList<string> groupPath, VaultEntry entry, bool withDeclaration)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        if (!withDeclaration)
+        {
+            Put(groupPath, entry.AsPersonalValue());
+            return;
+        }
+
+        var group = FindGroup(groupPath, create: true)!;
+        var target = FindEntry(group, entry.Name);
+        if (target is null)
+        {
+            target = new PwEntry(true, true);
+            group.AddEntry(target, true);
+        }
+        else
+        {
+            target.CreateBackup(database);
+        }
+
+        var value = entry.GetValue();
+        try
+        {
+            RemoveCredentialStrings(target);
+            target.Strings.Remove(PathField);
+            target.Strings.Remove(PwDefs.PasswordField);
+            target.Binaries.Clear();
+            target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
+            target.Strings.Set(KindField, new ProtectedString(false, VaultEntry.RequiredKind));
+            WriteDeclaration(target, entry);
+            if (entry.IsCredential)
+            {
+                WriteCredential(target, entry, value);
+            }
+            else if (entry.IsFile)
+            {
+                target.Strings.Set(PathField, new ProtectedString(false, entry.StoredPath!));
+                target.Binaries.Set(AttachmentName(entry.StoredPath!), new ProtectedBinary(true, value));
+            }
+            else
+            {
                 target.Strings.Set(PwDefs.PasswordField, new ProtectedString(true, value));
             }
         }
@@ -566,6 +657,25 @@ public sealed partial class KeePassVault : IDisposable
     private static PwEntry? FindEntry(PwGroup group, EntryName name) =>
         group.Entries.FirstOrDefault(entry => EntryName.Comparer.Equals(entry.Strings.ReadSafe(PwDefs.TitleField), name.FullName));
 
+    private static void WriteDeclaration(PwEntry target, VaultEntry entry)
+    {
+        target.Strings.Set(PwDefs.NotesField, new ProtectedString(false, entry.RequiredNote ?? string.Empty));
+        SetOrRemove(target, ShapeField, entry.RequiredShape);
+        SetOrRemove(target, RequiredPathField, entry.RequiredPath);
+    }
+
+    private static void SetOrRemove(PwEntry target, string field, string? value)
+    {
+        if (value is null)
+        {
+            target.Strings.Remove(field);
+        }
+        else
+        {
+            target.Strings.Set(field, new ProtectedString(false, value));
+        }
+    }
+
     private void WriteCredential(PwEntry target, VaultEntry entry, byte[] password)
     {
         target.Strings.Set(PwDefs.UserNameField, new ProtectedString(database.MemoryProtection.ProtectUserName, entry.UserName ?? string.Empty));
@@ -690,7 +800,14 @@ public sealed partial class KeePassVault : IDisposable
 
         if (kind == VaultEntry.RequiredKind)
         {
-            return new KeePassItem(name, VaultEntry.RequiredKind, null, System.Text.Encoding.UTF8.GetBytes(entry.Strings.ReadSafe(PwDefs.NotesField)));
+            var shape = entry.Strings.ReadSafe(ShapeField);
+            var requiredPath = entry.Strings.ReadSafe(RequiredPathField);
+            return new KeePassItem(
+                name,
+                entry.Strings.ReadSafe(PwDefs.NotesField),
+                shape.Length == 0 ? null : shape,
+                requiredPath.Length == 0 ? null : StoredPathRules.Normalize(requiredPath),
+                ReadPersonalValue(entry, name));
         }
 
         if (kind == VaultEntry.FileKind)
@@ -706,6 +823,24 @@ public sealed partial class KeePassVault : IDisposable
         }
 
         return new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
+    }
+
+    private static KeePassItem? ReadPersonalValue(PwEntry entry, EntryName name)
+    {
+        var storedPath = entry.Strings.ReadSafe(PathField);
+        if (storedPath.Length > 0 && entry.Binaries.Get(AttachmentName(storedPath)) is { } attachment)
+        {
+            return new KeePassItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), attachment.ReadData());
+        }
+
+        if (LooksLikeCredential(entry))
+        {
+            return ReadCredential(entry, name);
+        }
+
+        return entry.Strings.ReadSafe(PwDefs.PasswordField).Length > 0
+            ? new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8())
+            : null;
     }
 
     private PwGroup? FindGroup(IReadOnlyList<string> groupPath, bool create)

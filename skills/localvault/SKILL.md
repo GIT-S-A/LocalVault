@@ -36,8 +36,13 @@ commands; `lv start` in a project prints its state and the commands to run next.
   project, value set by each person, see below).
 - **Who sees what.** Every entry is *shared* by default: `lv save` copies it to the vault's store (a
   KeePass database). `--local` / `-Local` keeps an entry on this PC; `lv mark <name> local|shared`
-  changes it later. `lv require <name> --note "..."` declares a personal value: the store gets the
-  declaration, never the value; until set, the entry is `Missing` and reading it fails with the note.
+  changes it later. `lv require <name> [--credential | --file <path>] --note "..."` declares a personal
+  value (a user name and a password with `--credential`; a file such as an SSH private key with
+  `--file ~/.ssh/<key>`, written there by `lv load` with an owner-only ACL): the store gets the
+  declaration, never the value; until
+  set, the entry is `Missing`. A PC's personal store (`lv store set <name> --personal`) keeps each
+  person's values: `lv save` writes them there, `lv load` fills them in, then asks in a console for
+  those still missing.
 - **Stores.** A store is a KeePass `.kdbx` file. *Common* stores belong to the PC (`lv store add <name>
   <kdbx> [--default] [--unlock-with <store>] [--mirror]`, in `%LOCALAPPDATA%\LocalVault\stores.json`), read
   first; *project* stores belong to the repository (`lv store add <name> [<kdbx>] --project [--mirror]`,
@@ -141,10 +146,11 @@ Writes merge: several scripts can share one vault. A script never rebuilds a who
 2. `lv start`. Only when it says the project's store isn't defined on this PC:
    `lv store add <name> <path to .kdbx> --default` (name as `lv start` shows it). Optional, to type
    one password: `lv store add mine <personal.kdbx>`, then `lv store add <name> <path to .kdbx>
-   --unlock-with mine`.
-3. `lv load` (every vault of the repository); the person types the KeePass password. Exit code 2:
-   entries changed on both sides; ask, then `--replace name,...`.
-4. `lv list`: entries marked `Missing` are personal values to set with `lv set <name>`.
+   --unlock-with mine`. If the person keeps their own values in it: `lv store set mine --personal`.
+3. `lv load` (every vault of the repository); the person types the KeePass password, then, in their
+   console, each required value still missing. Exit code 2: entries changed on both sides; ask, then
+   `--replace name,...`.
+4. `lv list`: entries still marked `Missing` are personal values to set with `lv set <name>`.
 
 ## Commands
 
@@ -155,12 +161,12 @@ Cmdlets: `Get-VaultEntryList`, `Get-VaultEntry`, `Copy-VaultEntry`, `Set-VaultEn
 `Copy-VaultToStore`, `Set-VaultProjectStore`, `Register-/Set-/Unregister-/Get-VaultStore`,
 `Add-/Update-/Write-/Clear-/Remove-/Get-VaultTemplate`.
 
-`lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local]`, `require [--note]`,
+`lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local]`, `require [--credential | --file <path>] [--note]`,
 `mark <name> shared|local`, `rm`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
 `export [--overwrite]`, `import`,
 `store [list|add|set|rm|use|diff|copy]`, `template [add|update|render|clear|rm]`,
 `run [VAR=name ...] -- <command>`, `update [<tag>] [--downgrade]`, `--version`.
-`lv store set <name> --mirror` (or `--unlock-with <store>`, `--no-mirror`, `--no-unlock`, `--default`)
+`lv store set <name> --mirror` (or `--unlock-with <store>`, `--no-mirror`, `--no-unlock`, `--default`, `--personal`, `--no-personal`)
 changes one setting without retyping the target and key file.
 Every vault command takes `--path <vault>`; `save`, `load` and `store diff` take `--store <name>`.
 `<name>#user`, `#password`, `#totp` (current code), `#url`, `#url2` name one part of a credential in

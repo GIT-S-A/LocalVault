@@ -248,7 +248,9 @@ public sealed class WriteVaultTemplateCommand : TemplateCmdletBase
         foreach (var group in Selected(File).GroupBy(t => t.Vault, StringComparer.OrdinalIgnoreCase))
         {
             var body = string.Equals(group.Key, Location.Path, StringComparison.OrdinalIgnoreCase)
-                ? ReadForUse(current => group.All(t => TemplateText.Placeholders(System.IO.File.ReadAllText(t.Template)).All(n => current.Find(n.Name) is not null)))
+                ? ReadForUse(
+                    current => group.All(t => TemplateText.Placeholders(System.IO.File.ReadAllText(t.Template)).All(n => current.Find(n.Name) is not null)),
+                    _ => group.SelectMany(t => TemplateText.Placeholders(System.IO.File.ReadAllText(t.Template)).Select(n => n.Name)))
                 : VaultAt(group.Key).Read().Body;
             var rendered = group.Select(t => (Template: t, Text: Render(t, body))).ToList();
             foreach (var (template, text) in rendered)

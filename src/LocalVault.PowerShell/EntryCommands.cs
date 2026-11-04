@@ -75,6 +75,18 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         }
     }
 
+    private static string? PersonalStoreId()
+    {
+        try
+        {
+            return new StoreRegistry(StoreRegistry.DefaultPath).Personal?.Id;
+        }
+        catch (VaultException)
+        {
+            return null;
+        }
+    }
+
     private bool StoreKnown()
     {
         try
@@ -96,8 +108,9 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         }
 
         var storeKnown = StoreKnown();
+        var personalKey = PersonalStoreId() is { } id ? KeePassSync.PersonalKey(id) : null;
         var onlyHere = body.Entries
-            .Where(e => !e.IsMissing && (!storeKnown || e.IsLocal || e.IsRequired))
+            .Where(e => !e.IsMissing && (!storeKnown || e.IsLocal || (e.IsRequired && (personalKey is null || e.KeePassBaseFor(personalKey) is null))))
             .Select(e => e.Name.FullName)
             .ToList();
         if (onlyHere.Count == 0)
@@ -129,7 +142,7 @@ public sealed class GetVaultEntryCommand : VaultCmdletBase
     protected override void Run()
     {
         var reference = EntryReference.Parse(Name);
-        var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null), reference.Name);
+        var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null, _ => [reference.Name]), reference.Name);
         RequireValue(entry);
         if (AsCredential)
         {
@@ -185,7 +198,7 @@ public sealed class CopyVaultEntryCommand : VaultCmdletBase
     protected override void Run()
     {
         var reference = EntryReference.Parse(Name);
-        var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null), reference.Name);
+        var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null, _ => [reference.Name]), reference.Name);
         RequireValue(entry);
         if (!entry.IsSecret && !entry.IsCredential)
         {
@@ -220,6 +233,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     public string Name { get; set; } = string.Empty;
 
     [Parameter(Mandatory = true, ParameterSetName = CredentialSet)]
+    [Parameter(ParameterSetName = RequiredSet)]
     public SwitchParameter Credential { get; set; }
 
     [Parameter(ParameterSetName = CredentialSet)]
@@ -258,6 +272,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     public string FilePath { get; set; } = string.Empty;
 
     [Parameter(ParameterSetName = FileSet)]
+    [Parameter(ParameterSetName = RequiredSet)]
     [ValidateNotNullOrEmpty]
     public string? StoredPath { get; set; }
 
@@ -274,8 +289,16 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         {
             if (ShouldProcess($"{name} in {Location.Path}", "Declare required"))
             {
-                Report(VaultFile.Update(body => body.Set(VaultEntry.NewRequired(name, Note, Now)), WriteOptions()));
-                Say($"{name} is required and personal: each person sets their own value with lv set {name}; lv save shares the declaration, never the value.");
+                if (Credential && StoredPath is not null)
+                {
+                    throw new VaultException("A required entry is a credential or a file, not both: give -Credential or -StoredPath.");
+                }
+
+                var shape = Credential ? VaultEntry.CredentialShape : StoredPath is not null ? VaultEntry.FileShape : null;
+                Report(VaultFile.Update(body => body.Set(VaultEntry.NewRequired(name, Note, Now, shape, StoredPath)), WriteOptions()));
+                var what = Credential ? ", a user name and a password" : StoredPath is not null ? $", a file restored to {StoredPathRules.Normalize(StoredPath)}" : string.Empty;
+                var how = StoredPath is not null ? $"lv set {name} --file <path>" : $"lv set {name}";
+                Say($"{name} is required and personal{what}: each person sets their own value with {how}; lv save shares the declaration, never the value.");
             }
 
             return;
@@ -293,10 +316,18 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
             return;
         }
 
+        if (ParameterSetName == SecretSet && Value is null && ReadVault().Body.Find(name) is { IsFileShape: true } fileShaped)
+        {
+            throw new VaultException(
+                $"'{name}' is declared as a file{(fileShaped.RequiredPath is { } path ? $", restored to {path}" : string.Empty)}. Give it with lv set {name} --file <path> (Set-VaultEntry -FilePath).");
+        }
+
+        var credentialShaped = ParameterSetName == SecretSet && Value is null && ReadVault().Body.Find(name) is { IsCredentialShape: true };
         var entry = ParameterSetName switch
         {
             FileSet => ReadFile(name),
             CredentialSet => ReadCredential(name),
+            _ when credentialShaped => ReadCredential(name),
             _ => ReadSecretEntry(name),
         };
         if (!ShouldProcess($"{name} in {Location.Path}", "Set"))
@@ -469,7 +500,11 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     private VaultEntry ReadFile(EntryName name)
     {
         var full = GetUnresolvedProviderPathFromPSPath(FilePath);
-        var stored = StoredPath ?? StoredPathFor(full);
+        var declared = ReadVault().Body.Find(name) is { IsRequired: true } required ? required : null;
+        var stored = StoredPath
+            ?? declared?.RequiredPath
+            ?? (declared is not null ? StoredPathRules.HomeFormOf(full) : null)
+            ?? StoredPathFor(full);
         var content = File.ReadAllBytes(full);
         try
         {

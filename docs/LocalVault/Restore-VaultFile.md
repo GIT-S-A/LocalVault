@@ -41,6 +41,11 @@ This cmdlet has no aliases.
 The `Restore-VaultFile` cmdlet writes the content of file entries to their stored paths, relative
 to the folder of the vault, or relative to the **Destination** folder. It creates missing folders.
 
+A stored path that starts with `~/`, which only a required entry's own value can have, is under the
+user's profile, such as `~/.ssh/id_ed25519`, whatever the **Destination**. The cmdlet writes such a
+file readable by the current user, SYSTEM and Administrators only, without inherited permissions, as
+OpenSSH requires for a private key, and creates missing folders the same way.
+
 A stored path can't contain a `.git` folder or end with a file named `secrets.local.*`. Inside a git
 repository, git must ignore every target file. Otherwise the cmdlet fails and writes nothing. The
 **SkipGitIgnoreCheck** parameter skips the git check.

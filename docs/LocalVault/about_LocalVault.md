@@ -215,6 +215,39 @@ unlocking store of every other store of this PC.
 KeePass access uses KeePassLib, the library of KeePass 2, built into the
 module. No other KeePass program is needed.
 
+### Personal values
+
+`Set-VaultEntry -Required` (`lv require <name>`) declares an entry whose
+value each person sets: the store gets the declaration and its note, never a
+value. With `-Credential` (`--credential`), the value is a user name and a
+password. With `-StoredPath <path>` (`--file <path>`), the value is a file,
+such as an SSH private key, and the path says where it goes; `~/` is the
+user's profile, as in `~/.ssh/id_ed25519`. Only these personal values can be
+written under the profile. `lv load` writes them there when the file is
+missing, readable by the user, SYSTEM and Administrators only, and never
+replaces an existing file.
+
+A PC can name one personal store (`Register-VaultStore -Personal`,
+`lv store set <name> --personal`), usually the person's own KeePass
+database. `lv save` then writes each value of a required entry set on this
+PC to that store, in the same group as in the project store, with the same
+rules as shared entries. `lv load` reads them back. A personal store that is
+also a mirror holds a copy of the shared entries as well.
+
+After it loads, `lv load` asks in a console for each required value still
+missing on this PC, showing its note; an empty answer skips it. It then
+offers to save the values typed to the personal store, or warns that they
+stay on this PC when there is none. A command that reads a missing required
+value asks for it the same way. Without a console, the missing names are
+listed and nothing is asked.
+
+When the personal store is also a vault's primary store, everyone who opens
+that database can read the values. `lv save` warns and asks first; the
+declaration and the value then share one KeePass entry. Without a console,
+the values are left out of it.
+
+A vault with a credential declaration needs 1.0.0-beta16 or later.
+
 ### Files that need secrets
 
 Some tools read their secrets from a file: a `.env` file, `clouds.yaml`,
@@ -257,7 +290,8 @@ The secrets in a vault are lost when:
 - an administrator resets the Windows password of the user, or the user
   profile is rebuilt.
 
-An export is the only other copy of the entries that aren't in a store.
+An export is the only other copy of the entries that aren't in a store, and of
+the required values that aren't in a personal store.
 
 ### Scripts
 
@@ -294,6 +328,8 @@ input, the cmdlets don't ask questions:
   redirected input, the cmdlet fails.
 - `Import-Vault` fails and writes nothing when an entry differs and neither
   **Replace** nor **ReplaceAll** names it.
+- `Import-VaultFromStore` lists the required values still missing and asks
+  for none.
 - `Restore-VaultFile` keeps files that differ, unless you use **Overwrite**.
 
 ### Errors

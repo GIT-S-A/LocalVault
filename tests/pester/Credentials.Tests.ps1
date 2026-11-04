@@ -102,12 +102,12 @@ Describe 'Credential entries' {
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret '1')
         $sealed = Get-Content -LiteralPath $vault -Raw
         $body = [LocalVault.Core.Envelope]::OpenLocal($sealed)
-        $old = [Text.Encoding]::UTF8.GetString($body).Replace('"schema":3', '"schema":2')
+        $old = [Text.Encoding]::UTF8.GetString($body).Replace('"schema":4', '"schema":2')
         [IO.File]::WriteAllText($vault, [LocalVault.Core.Envelope]::SealLocal([Text.Encoding]::UTF8.GetBytes($old)))
 
         $said = Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2') 6>&1 | Out-String
 
-        $said | Should -Match 'from schema 2 to schema 3'
+        $said | Should -Match 'from schema 2 to schema 4'
     }
 }
 

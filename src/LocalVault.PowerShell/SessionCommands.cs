@@ -19,7 +19,9 @@ public sealed class UseVaultEnvCommand : VaultCmdletBase
 
     protected override void Run()
     {
-        var body = ReadForUse(current => Map.Values.Cast<object?>().All(source => Find(current, source?.ToString() ?? string.Empty) is not null));
+        var body = ReadForUse(
+            current => Map.Values.Cast<object?>().All(source => Find(current, source?.ToString() ?? string.Empty) is not null),
+            current => Map.Values.Cast<object?>().Select(source => Find(current, source?.ToString() ?? string.Empty)?.Name).OfType<EntryName>());
         var missing = 0;
         foreach (DictionaryEntry pair in Map)
         {
@@ -148,7 +150,15 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
                 }
             }
 
-            SealedFile.WriteBytes(target, content, overwrite: true);
+            if (entry.IsUnderHome)
+            {
+                PrivateFile.Write(target, content);
+            }
+            else
+            {
+                SealedFile.WriteBytes(target, content, overwrite: true);
+            }
+
             return "Written";
         }
         finally

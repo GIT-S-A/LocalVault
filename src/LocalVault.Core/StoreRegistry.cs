@@ -19,7 +19,8 @@ public sealed record StoreDefinition(
     string? Id = null,
     bool IsDefault = false,
     string? UnlockWith = null,
-    bool IsMirror = false)
+    bool IsMirror = false,
+    bool IsPersonal = false)
 {
     public string ExpandedTarget => Environment.ExpandEnvironmentVariables(Target);
 
@@ -77,6 +78,7 @@ public sealed class StoreRegistry
     public const string LegacyFileName = "keepass.json";
     private const string SchemaField = "schema";
     private const string DefaultField = "default";
+    private const string PersonalField = "personal";
     private const string LegacyKeyringField = "keyring";
     private const string UnlockWithField = "unlockWith";
     private const string MirrorField = "mirror";
@@ -107,6 +109,7 @@ public sealed class StoreRegistry
     {
         var root = ReadRoot();
         var defaultName = root[DefaultField]?.GetValue<string>();
+        var personalName = root[PersonalField]?.GetValue<string>();
         return Stores(root)
             .Select(node =>
             {
@@ -120,10 +123,13 @@ public sealed class StoreRegistry
                     node[IdField]?.GetValue<string>(),
                     string.Equals(name, defaultName, StringComparison.OrdinalIgnoreCase),
                     node[UnlockWithField]?.GetValue<string>(),
-                    node[MirrorField]?.GetValue<bool>() == true);
+                    node[MirrorField]?.GetValue<bool>() == true,
+                    string.Equals(name, personalName, StringComparison.OrdinalIgnoreCase));
             })
             .ToList();
     }
+
+    public StoreDefinition? Personal => Load().FirstOrDefault(store => store.IsPersonal);
 
     public StoreDefinition? FindById(string id) =>
         Load().FirstOrDefault(store => string.Equals(store.Id, id, StringComparison.OrdinalIgnoreCase));
@@ -164,7 +170,8 @@ public sealed class StoreRegistry
         Save(root);
     }
 
-    public StoreDefinition Register(string name, string target, string? keyFile, bool makeDefault, string? unlockWith = null, bool mirror = false)
+    public StoreDefinition Register(
+        string name, string target, string? keyFile, bool makeDefault, string? unlockWith = null, bool mirror = false, bool personal = false)
     {
         StoreTypes.RequireValidName(name);
         if (unlockWith is not null)
@@ -208,6 +215,11 @@ public sealed class StoreRegistry
             root[DefaultField] = node[NameField]!.GetValue<string>();
         }
 
+        if (personal)
+        {
+            root[PersonalField] = node[NameField]!.GetValue<string>();
+        }
+
         if (mirror)
         {
             node[MirrorField] = true;
@@ -230,7 +242,7 @@ public sealed class StoreRegistry
         return FindByName(name)!;
     }
 
-    public StoreDefinition Change(string name, bool? mirror, string? unlockWith, bool clearUnlock, bool makeDefault)
+    public StoreDefinition Change(string name, bool? mirror, string? unlockWith, bool clearUnlock, bool makeDefault, bool? personal = null)
     {
         var root = ReadRoot();
         var node = FindNode(root, name) ?? throw new VaultException($"No store named '{name}' on this PC.");
@@ -259,6 +271,15 @@ public sealed class StoreRegistry
             root[DefaultField] = storeName;
         }
 
+        if (personal == true)
+        {
+            root[PersonalField] = storeName;
+        }
+        else if (personal == false && string.Equals(root[PersonalField]?.GetValue<string>(), storeName, StringComparison.OrdinalIgnoreCase))
+        {
+            root.Remove(PersonalField);
+        }
+
         Save(root);
         return FindByName(storeName)!;
     }
@@ -283,9 +304,12 @@ public sealed class StoreRegistry
         }
 
         ((JsonArray)root[StoresField]!).Remove(node);
-        if (string.Equals(root[DefaultField]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase))
+        foreach (var field in new[] { DefaultField, PersonalField })
         {
-            root.Remove(DefaultField);
+            if (string.Equals(root[field]?.GetValue<string>(), name, StringComparison.OrdinalIgnoreCase))
+            {
+                root.Remove(field);
+            }
         }
 
         Save(root);

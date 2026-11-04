@@ -51,7 +51,7 @@ it says that the vault is missing or empty.
 | `clip` | `<name>[#<part>]` | `Copy-VaultEntry` |
 | `set` | `<name> [--file <path> \| --credential] [--local]` | `Set-VaultEntry` (`-FilePath` with `--file`, `-Credential` with `--credential`) |
 | `set` | `<name>#<part>` | `Set-VaultEntry`: one part of a credential |
-| `require` | `<name> [--note <text>]` | `Set-VaultEntry -Required` |
+| `require` | `<name> [--credential \| --file <path>] [--note <text>]` | `Set-VaultEntry -Required [-Credential \| -StoredPath <path>]` |
 | `mark` | `<name> shared\|local` | `Set-VaultEntry -Sharing` |
 | `rm` | `<name>` | `Remove-VaultEntry` |
 | `env` | `<variable>=<name> ...` | `Use-VaultEnv` |
@@ -63,9 +63,9 @@ it says that the vault is missing or empty.
 | `import` | `<file> [--replace a,b] [--replace-all] [--keyfile <file>]` | `Import-Vault` |
 | `store` | | `Get-VaultStoreStatus` |
 | `store list` | | `Get-VaultStore` |
-| `store add` | `[<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]` | `Register-VaultStore`, a store of this PC |
+| `store add` | `[<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal]` | `Register-VaultStore`, a store of this PC |
 | `store add` | `<name> [<target>] --project [--default] [--mirror]` | `Register-VaultStore -Project`; a name alone refers to each PC's store of that name |
-| `store set` | `<name> [--mirror \| --no-mirror] [--unlock-with <store> \| --no-unlock] [--default] [--project]` | `Set-VaultStore`: changes those settings only |
+| `store set` | `<name> [--mirror \| --no-mirror] [--unlock-with <store> \| --no-unlock] [--default] [--personal \| --no-personal] [--project]` | `Set-VaultStore`: changes those settings only |
 | `store rm` | `<name> [--project]` | `Unregister-VaultStore` |
 | `store use` | `<name>` | `Set-VaultProjectStore`: the project's primary store (one vault only with `--path`) |
 | `store diff` | `[--store <name>]` | `Compare-VaultWithStore` |

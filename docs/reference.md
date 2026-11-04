@@ -243,6 +243,39 @@ unlocking store of every other store of this PC.
 KeePass access uses KeePassLib, the library of KeePass 2, built into the
 module. No other KeePass program is needed.
 
+### Personal values
+
+`Set-VaultEntry -Required` (`lv require <name>`) declares an entry whose
+value each person sets: the store gets the declaration and its note, never a
+value. With `-Credential` (`--credential`), the value is a user name and a
+password. With `-StoredPath <path>` (`--file <path>`), the value is a file,
+such as an SSH private key, and the path says where it goes; `~/` is the
+user's profile, as in `~/.ssh/id_ed25519`. Only these personal values can be
+written under the profile. `lv load` writes them there when the file is
+missing, readable by the user, SYSTEM and Administrators only, and never
+replaces an existing file.
+
+A PC can name one personal store (`Register-VaultStore -Personal`,
+`lv store set <name> --personal`), usually the person's own KeePass
+database. `lv save` then writes each value of a required entry set on this
+PC to that store, in the same group as in the project store, with the same
+rules as shared entries. `lv load` reads them back. A personal store that is
+also a mirror holds a copy of the shared entries as well.
+
+After it loads, `lv load` asks in a console for each required value still
+missing on this PC, showing its note; an empty answer skips it. It then
+offers to save the values typed to the personal store, or warns that they
+stay on this PC when there is none. A command that reads a missing required
+value asks for it the same way. Without a console, the missing names are
+listed and nothing is asked.
+
+When the personal store is also a vault's primary store, everyone who opens
+that database can read the values. `lv save` warns and asks first; the
+declaration and the value then share one KeePass entry. Without a console,
+the values are left out of it.
+
+A vault with a credential declaration needs 1.0.0-beta16 or later.
+
 ### Files that need secrets
 
 Some tools read their secrets from a file: a `.env` file, `clouds.yaml`,
@@ -285,7 +318,8 @@ The secrets in a vault are lost when:
 - an administrator resets the Windows password of the user, or the user
   profile is rebuilt.
 
-An export is the only other copy of the entries that aren't in a store.
+An export is the only other copy of the entries that aren't in a store, and of
+the required values that aren't in a personal store.
 
 ### Scripts
 
@@ -322,6 +356,8 @@ input, the cmdlets don't ask questions:
   redirected input, the cmdlet fails.
 - `Import-Vault` fails and writes nothing when an entry differs and neither
   **Replace** nor **ReplaceAll** names it.
+- `Import-VaultFromStore` lists the required values still missing and asks
+  for none.
 - `Restore-VaultFile` keeps files that differ, unless you use **Overwrite**.
 
 ### Errors
@@ -1193,9 +1229,18 @@ as it is and reported. A mirror that can't be opened or saved gives a warning an
 mirror that this PC doesn't define is skipped with a message. With **Store**, the cmdlet writes that
 store only, without mirrors.
 
+When this PC has a personal store (`Register-VaultStore -Personal`), the cmdlet also writes there
+each value of a required entry set on this PC, in the vault's group, with the same rules as shared
+entries; the project store and the mirrors get the declaration only. A personal store that is also a
+mirror gets the shared entries too. When the personal store is also the vault's primary store, the
+cmdlet warns that everyone who opens it can read the values and asks first; the declaration and the
+value then share one entry. Without a console, it leaves the values out. A personal store that can't
+be opened or saved gives a warning and the save goes on. With **Store**, the cmdlet doesn't write the
+personal store.
+
 Each store is opened and saved at most once per run, whether it is the primary store of one vault, a
-mirror of another, or both; then each vault is written once, recording what was saved to all its
-stores.
+mirror of another, the personal store, or all of these; then each vault is written once, recording
+what was saved to all its stores.
 
 Without **Path**, and without the `LOCALVAULT_PATH` environment variable, the cmdlet handles every
 vault of the repository: the vaults listed in `localvault.json`, which LocalVault fills each time it
@@ -1663,8 +1708,8 @@ The vault's repository gives the project's stores.
 **LocalVault.PowerShell.VaultStoreInfo**: This cmdlet returns one object for each store, with its **Name**, **Scope** (`Project` or
 `Computer`), **Type** (`reference` for a project entry that names a store of each PC), **Target**,
 **KeyFile**, whether it's the **Default** of its scope (for the project, its primary store), the store
-that holds its password (**UnlockWith**), whether it's a **Mirror**, and whether the target
-**Exists**.
+that holds its password (**UnlockWith**), whether it's a **Mirror**, whether the target
+**Exists**, and whether it's this PC's **Personal** store.
 
 ### Notes
 
@@ -2074,6 +2119,23 @@ database's password, then offers to keep it there.
 The cmdlet reads the primary store only, never the mirrors that `Export-VaultToStore` also writes. To
 read a mirror, for example when the primary store can't be reached, name it with **Store**.
 
+When this PC has a personal store (`Register-VaultStore -Personal`), the cmdlet then reads each
+vault's group there and fills in the values of the vault's required entries, with the same rules as
+shared entries. It takes nothing else from that group. A personal store that can't be opened gives a
+warning and the load goes on.
+
+Last, in a console, the cmdlet asks for each required value still missing, showing its note: a user
+name and a password for a credential declaration, a hidden value otherwise. An empty answer skips it.
+It then offers to save the values typed to the personal store, or warns that they stay on this PC
+when there is none. Without a console, it lists the missing names and asks nothing. For a file
+declaration, it asks for the path of the file; an empty answer takes the declared path when that
+file exists.
+
+Then the cmdlet writes each required file whose path is under the user's profile (`~/`), such as an
+SSH private key, when the file doesn't exist yet, readable by the current user, SYSTEM and
+Administrators only. It never replaces an existing file; a different one gives a warning, and
+`Restore-VaultFile -Overwrite` replaces it.
+
 ### Examples
 
 #### Example 1 - Get the shared entries of a project on a new machine
@@ -2171,7 +2233,8 @@ were, and **Removed**.
 when entries changed in both places weren't resolved.
 
 In a console, a command that reads an entry or a vault this PC doesn't have yet runs this cmdlet
-first, keeping the local value of every entry changed in both places.
+first, keeping the local value of every entry changed in both places. A command that reads a
+required value still missing asks for it, as this cmdlet does.
 
 ## Invoke-LocalVault
 
@@ -2205,7 +2268,7 @@ it says that the vault is missing or empty.
 | `clip` | `<name>[#<part>]` | `Copy-VaultEntry` |
 | `set` | `<name> [--file <path> \| --credential] [--local]` | `Set-VaultEntry` (`-FilePath` with `--file`, `-Credential` with `--credential`) |
 | `set` | `<name>#<part>` | `Set-VaultEntry`: one part of a credential |
-| `require` | `<name> [--note <text>]` | `Set-VaultEntry -Required` |
+| `require` | `<name> [--credential \| --file <path>] [--note <text>]` | `Set-VaultEntry -Required [-Credential \| -StoredPath <path>]` |
 | `mark` | `<name> shared\|local` | `Set-VaultEntry -Sharing` |
 | `rm` | `<name>` | `Remove-VaultEntry` |
 | `env` | `<variable>=<name> ...` | `Use-VaultEnv` |
@@ -2217,9 +2280,9 @@ it says that the vault is missing or empty.
 | `import` | `<file> [--replace a,b] [--replace-all] [--keyfile <file>]` | `Import-Vault` |
 | `store` | | `Get-VaultStoreStatus` |
 | `store list` | | `Get-VaultStore` |
-| `store add` | `[<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]` | `Register-VaultStore`, a store of this PC |
+| `store add` | `[<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal]` | `Register-VaultStore`, a store of this PC |
 | `store add` | `<name> [<target>] --project [--default] [--mirror]` | `Register-VaultStore -Project`; a name alone refers to each PC's store of that name |
-| `store set` | `<name> [--mirror \| --no-mirror] [--unlock-with <store> \| --no-unlock] [--default] [--project]` | `Set-VaultStore`: changes those settings only |
+| `store set` | `<name> [--mirror \| --no-mirror] [--unlock-with <store> \| --no-unlock] [--default] [--personal \| --no-personal] [--project]` | `Set-VaultStore`: changes those settings only |
 | `store rm` | `<name> [--project]` | `Unregister-VaultStore` |
 | `store use` | `<name>` | `Set-VaultProjectStore`: the project's primary store (one vault only with `--path`) |
 | `store diff` | `[--store <name>]` | `Compare-VaultWithStore` |
@@ -2320,7 +2383,7 @@ Defines a store on this PC or in the project.
 
 ```text
 Register-VaultStore [[-Target] <string>] [-Name <string>] [-KeyFile <string>] [-Default]
- [-UnlockWith <string>] [-Mirror] [-Project] [-Path <string>] [-WhatIf] [-Confirm]
+ [-UnlockWith <string>] [-Mirror] [-Personal] [-Project] [-Path <string>] [-WhatIf] [-Confirm]
  [<CommonParameters>]
 ```
 
@@ -2357,6 +2420,12 @@ this PC, whatever the project, such as a private copy of all your projects; a mi
 receives the project's vaults, on every PC that can reach it. A mirror that can't be opened gives a
 warning and the save continues. `Import-VaultFromStore` doesn't read mirrors unless you name one with
 its **Store** parameter.
+
+With **Personal**, the store becomes this PC's personal store: `Export-VaultToStore` writes each
+value of a required entry set on this PC there, in the same group as the vault's group in the project
+store, and `Import-VaultFromStore` fills in the required values from it. A PC has at most one
+personal store; naming another one replaces it. A personal store that is also a mirror holds a copy
+of the shared entries as well. **Personal** isn't accepted with **Project**.
 
 With **UnlockWith**, the store is opened with a password kept in another store of this PC, usually
 your personal KeePass database: LocalVault opens that other store first, asking for its password,
@@ -2411,7 +2480,13 @@ Each PC defines its own `team` store, with its own path and key file. Every save
 Register-VaultStore -Name mine -Target '%OneDrive%\KeePass\mine.kdbx' -KeyFile E:\mine.keyx -Mirror
 ```
 
-#### Example 5 - Open the team database with the password kept in your personal one
+#### Example 5 - Keep your own values and a copy of every project in your personal database
+
+```powershell
+Register-VaultStore -Name mine -Target '%OneDrive%\KeePass\mine.kdbx' -Mirror -Personal
+```
+
+#### Example 6 - Open the team database with the password kept in your personal one
 
 ```powershell
 Register-VaultStore -Name mine -Target '%OneDrive%\KeePass\mine.kdbx' -KeyFile E:\mine.keyx
@@ -2514,6 +2589,20 @@ With **Project**, the vault's repository is the project.
 | Default value | None |
 | Aliases | None |
 
+#### -Personal
+
+Indicates that the store is this PC's personal store: it keeps your own values of required entries.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
 #### -Project
 
 Indicates that the store is defined in the project's `localvault.json` instead of on this PC.
@@ -2584,7 +2673,7 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 
 ### Notes
 
-`lv store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]` and
+`lv store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal]` and
 `lv store add <name> [<target>] --project [--default] [--mirror]` run this cmdlet.
 
 ## Remove-VaultEntry
@@ -2947,6 +3036,11 @@ Restore-VaultFile -All [-Destination <string>] [-Overwrite] [-SkipGitIgnoreCheck
 The `Restore-VaultFile` cmdlet writes the content of file entries to their stored paths, relative
 to the folder of the vault, or relative to the **Destination** folder. It creates missing folders.
 
+A stored path that starts with `~/`, which only a required entry's own value can have, is under the
+user's profile, such as `~/.ssh/id_ed25519`, whatever the **Destination**. The cmdlet writes such a
+file readable by the current user, SYSTEM and Administrators only, without inherited permissions, as
+OpenSSH requires for a private key, and creates missing folders the same way.
+
 A stored path can't contain a `.git` folder or end with a file named `secrets.local.*`. Inside a git
 repository, git must ignore every target file. Otherwise the cmdlet fails and writes nothing. The
 **SkipGitIgnoreCheck** parameter skips the git check.
@@ -3117,8 +3211,8 @@ Set-VaultEntry [-Name] <string> -Sharing <VaultEntrySharing> [-Path <string>] [-
 ```
 
 ```text
-Set-VaultEntry [-Name] <string> -Required [-Note <string>] [-Path <string>] [-WhatIf] [-Confirm]
- [<CommonParameters>]
+Set-VaultEntry [-Name] <string> -Required [-Credential] [-StoredPath <string>] [-Note <string>]
+ [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### Description
@@ -3157,6 +3251,16 @@ and the **Note** says where to get it. `Export-VaultToStore` shares the declarat
 never the value, and `Export-Vault` leaves the value out. Until a value is set on this machine, the
 entry is `Missing` in `Get-VaultEntryList`, and reading it fails with the note. Setting a value with
 this cmdlet then keeps it on this machine. Declaring an entry that has a value keeps the value.
+With **Required** and **Credential**, the declaration asks for a user name and a password: setting
+the value with the name alone asks for the parts of a credential. With **Required** and
+**StoredPath**, the declaration asks for a file, such as an SSH private key, and **StoredPath** is
+where it goes on each machine. A path that starts with `~/` is under the user's profile, such as
+`~/.ssh/id_ed25519`. Each person then sets the value with **FilePath**; the entry keeps the declared
+path unless **StoredPath** gives another one, or takes the `~/` form of **FilePath** when it is under
+the profile. Only a required entry's own value can have a `~/` path.
+
+`Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
+defined, and `Import-VaultFromStore` fills it in on another machine.
 
 When the vault doesn't exist, the cmdlet creates it. It fails when git doesn't ignore the vault
 file. At the default path, it also fails when the repository has a vault file in another folder,
@@ -3212,7 +3316,17 @@ URL (empty removes it) for github: https://github.example.com
 Stored github#url
 ```
 
-#### Example 5 - Copy a secret from another store
+#### Example 5 - Declare a personal SSH key and store yours
+
+```powershell
+Set-VaultEntry -Name ssh/deploy -Required -StoredPath '~/.ssh/id_deploy' -Note 'your deploy key'
+Set-VaultEntry -Name ssh/deploy -FilePath $HOME\.ssh\id_deploy
+```
+
+The key stays out of the project store. `Export-VaultToStore` writes it to the personal store, and
+`Import-VaultFromStore` writes it to `~/.ssh/id_deploy` on another machine.
+
+#### Example 6 - Copy a secret from another store
 
 ```powershell
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
@@ -3239,12 +3353,13 @@ Prompts you for confirmation before running the cmdlet.
 
 #### -Credential
 
-Indicates that the entry is a credential: a user name, a password, an optional TOTP and URLs.
+Indicates that the entry is a credential: a user name, a password, an optional TOTP and URLs. With
+**Required**, it declares that each person's value is a user name and a password.
 
 | Property | Value |
 | --- | --- |
 | Type | System.Management.Automation.SwitchParameter |
-| Parameter sets | Credential |
+| Parameter sets | Credential, Required |
 | Position | Named |
 | Required | Credential |
 | Pipeline input | False |
@@ -3371,14 +3486,16 @@ Specifies whether the existing entry is `Shared` (sent to the store by `Export-V
 #### -StoredPath
 
 Specifies the path that `Restore-VaultFile` writes the file to, relative to the folder of the
-vault. Use forward or back slashes; a rooted path or `..` is refused. If you omit this parameter,
-the cmdlet uses the path of **FilePath** relative to the folder of the vault, and fails when the
-file is outside that folder.
+vault, or under the user's profile when it starts with `~/` (required entries only). Use forward or
+back slashes; a rooted path or `..` is refused. If you omit this parameter, the cmdlet uses the
+declared path of a required entry, then the `~/` form of **FilePath** for a required entry, then the
+path of **FilePath** relative to the folder of the vault, and fails when the file is outside that
+folder. With **Required**, it declares the entry as a file restored to this path.
 
 | Property | Value |
 | --- | --- |
 | Type | System.String |
-| Parameter sets | File |
+| Parameter sets | File, Required |
 | Position | Named |
 | Required | False |
 | Pipeline input | False |
@@ -3467,7 +3584,7 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 ### Notes
 
 `lv set <name> [--file <path> | --credential] [--local]`, `lv set <name>#<part>`,
-`lv require <name> [--note <text>]` and
+`lv require <name> [--credential | --file <path>] [--note <text>]` and
 `lv mark <name> shared|local` run this cmdlet.
 
 ## Set-VaultProjectStore
@@ -3594,8 +3711,8 @@ Changes one setting of a store without defining it again.
 ### Syntax
 
 ```text
-Set-VaultStore [-Name] <string> [-Mirror] [-UnlockWith <string>] [-NoUnlock] [-Default] [-Project]
- [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+Set-VaultStore [-Name] <string> [-Mirror] [-UnlockWith <string>] [-NoUnlock] [-Default] [-Personal]
+ [-Project] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### Description
@@ -3607,7 +3724,9 @@ repeat.
 **Mirror** makes the store a mirror: every `Export-VaultToStore` also writes it. `-Mirror:$false`
 makes it an ordinary store again. **UnlockWith** names the store that keeps its password;
 **NoUnlock** removes it. **Default** makes it the default store of this PC, or, with **Project**,
-the project's primary store.
+the project's primary store. **Personal** makes it this PC's personal store, which keeps your own
+values of required entries, in place of any other; `-Personal:$false` leaves this PC without one.
+**Personal** isn't accepted with **Project**.
 
 Without **Project**, the cmdlet changes a store of this PC in `stores.json`. With **Project**, it
 changes an entry of the project's `localvault.json`; an unlocking store is personal and isn't
@@ -3621,7 +3740,13 @@ accepted there.
 Set-VaultStore mine -Mirror
 ```
 
-#### Example 2 - Open the team store with the password kept in your personal store
+#### Example 2 - Keep your own values of required entries in your personal store
+
+```powershell
+Set-VaultStore mine -Personal
+```
+
+#### Example 3 - Open the team store with the password kept in your personal store
 
 ```powershell
 Set-VaultStore team -UnlockWith mine
@@ -3716,6 +3841,21 @@ you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment varia
 | Default value | None |
 | Aliases | None |
 
+#### -Personal
+
+Makes the store this PC's personal store. `-Personal:$false` leaves this PC without one. Without this
+parameter, the setting stays.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
 #### -Project
 
 Indicates that the store is an entry of the project's `localvault.json`.
@@ -3766,12 +3906,12 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 ### Outputs
 
 **LocalVault.PowerShell.VaultStoreInfo**: This cmdlet returns the store after the change: **Name**, **Scope**, **Type**, **Target**,
-**KeyFile**, **Default**, **UnlockWith**, **Mirror** and **Exists**.
+**KeyFile**, **Default**, **UnlockWith**, **Mirror**, **Exists** and **Personal**.
 
 ### Notes
 
 `lv store set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default]
-[--project]` runs this cmdlet.
+[--personal | --no-personal] [--project]` runs this cmdlet.
 
 ## Unregister-VaultStore
 

@@ -125,8 +125,8 @@ You can't pipe objects to this cmdlet.
 This cmdlet returns one object for each store, with its **Name**, **Scope** (`Project` or
 `Computer`), **Type** (`reference` for a project entry that names a store of each PC), **Target**,
 **KeyFile**, whether it's the **Default** of its scope (for the project, its primary store), the store
-that holds its password (**UnlockWith**), whether it's a **Mirror**, and whether the target
-**Exists**.
+that holds its password (**UnlockWith**), whether it's a **Mirror**, whether the target
+**Exists**, and whether it's this PC's **Personal** store.
 
 ## NOTES
 

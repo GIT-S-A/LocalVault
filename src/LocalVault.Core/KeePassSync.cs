@@ -25,20 +25,24 @@ public sealed record KeePassSaveResult(
     IReadOnlyList<EntryName> DroppedRemovals)
 {
     public IReadOnlyList<EntryName> Overwritten { get; init; } = [];
+
+    public bool Personal { get; init; }
 }
 
 public sealed record KeePassLoadResult(int Added, int Taken, int Kept, int Removed);
 
 public static class KeePassSync
 {
-    public static IReadOnlyList<KeePassComparison> Compare(VaultBody body, KeePassGroupContent keePass)
+    public static string PersonalKey(string databaseId) => VaultEntry.PersonalBasePrefix + databaseId;
+
+    public static IReadOnlyList<KeePassComparison> Compare(VaultBody body, KeePassGroupContent keePass, bool excludeRequired = false)
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(keePass);
         var result = new List<KeePassComparison>();
-        foreach (var entry in body.Entries.Where(entry => entry.IsKnownKind))
+        foreach (var entry in body.Entries.Where(entry => entry.IsKnownKind && !(excludeRequired && entry.IsRequired)))
         {
-            var item = keePass.Find(entry.Name);
+            var item = Shared(keePass.Find(entry.Name));
             if (entry.IsLocal && !entry.IsRequired)
             {
                 result.Add(new KeePassComparison(entry.Name, entry.Kind, KeePassSyncState.Local, null, item?.Hash));
@@ -51,7 +55,7 @@ public static class KeePassSync
         }
 
         var removals = body.KeePassRemovalsFor(keePass.DatabaseId);
-        foreach (var item in keePass.Items.Where(item => body.Find(item.Name) is null))
+        foreach (var item in keePass.Items.Where(item => body.Find(item.Name) is null && Shared(item) is not null))
         {
             var removal = removals.FirstOrDefault(r => r.Name.Equals(item.Name));
             var state = removal is null
@@ -62,6 +66,53 @@ public static class KeePassSync
 
         return result.OrderBy(c => c.Name.FullName, EntryName.Comparer).ToList();
     }
+
+    public static IReadOnlyList<KeePassComparison> ComparePersonal(VaultBody body, KeePassGroupContent keePass)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(keePass);
+        var key = PersonalKey(keePass.DatabaseId);
+        var result = new List<KeePassComparison>();
+        foreach (var entry in body.Entries.Where(entry => entry.IsRequired))
+        {
+            var stored = PersonalValueOf(keePass.Find(entry.Name));
+            if (entry.IsMissing)
+            {
+                if (stored is not null)
+                {
+                    result.Add(new KeePassComparison(entry.Name, stored.Kind, KeePassSyncState.OnlyInKeePass, null, stored.Hash));
+                }
+
+                continue;
+            }
+
+            var local = entry.ContentHash();
+            result.Add(new KeePassComparison(entry.Name, entry.Kind, Classify(local, entry.KeePassBaseFor(key), stored?.Hash), local, stored?.Hash));
+        }
+
+        foreach (var removal in PersonalRemovals(body, key).Where(r => body.Find(r.Name) is null))
+        {
+            if (PersonalValueOf(keePass.Find(removal.Name)) is { } stored)
+            {
+                var state = removal.Hash == stored.Hash ? KeePassSyncState.RemovalPending : KeePassSyncState.ChangedInKeePass;
+                result.Add(new KeePassComparison(removal.Name, stored.Kind, state, null, stored.Hash));
+            }
+        }
+
+        return result.OrderBy(c => c.Name.FullName, EntryName.Comparer).ToList();
+    }
+
+    public static KeePassItem? PersonalValueOf(KeePassItem? item) => item?.Kind switch
+    {
+        VaultEntry.RequiredKind => item.PersonalValue,
+        VaultEntry.SecretKind or VaultEntry.CredentialKind or VaultEntry.FileKind => item,
+        _ => null,
+    };
+
+    private static KeePassItem? Shared(KeePassItem? item) => item is { IsUnderHome: true } ? null : item;
+
+    private static IEnumerable<KeePassRemoval> PersonalRemovals(VaultBody body, string key) =>
+        body.KeePassRemovals.Where(r => string.Equals(r.Database, key, StringComparison.OrdinalIgnoreCase));
 
     public static IReadOnlyList<KeePassComparison> ComparePending(VaultBody body, string? databaseId = null)
     {
@@ -94,7 +145,8 @@ public static class KeePassSync
         KeePassVault target,
         IReadOnlyList<string> groupPath,
         Func<EntryName, bool> replaceConflict,
-        bool mirror = false)
+        bool mirror = false,
+        bool excludeRequired = false)
     {
         ArgumentNullException.ThrowIfNull(target);
         ArgumentNullException.ThrowIfNull(replaceConflict);
@@ -103,7 +155,7 @@ public static class KeePassSync
         var bases = new List<(EntryName, string)>();
         var dropped = new List<EntryName>();
         var overwritten = new List<EntryName>();
-        foreach (var comparison in Compare(body, keePass))
+        foreach (var comparison in Compare(body, keePass, excludeRequired))
         {
             if (mirror && comparison.State is KeePassSyncState.Conflict or KeePassSyncState.ChangedInKeePass or KeePassSyncState.RemovedInKeePass)
             {
@@ -165,6 +217,64 @@ public static class KeePassSync
         return new KeePassSaveResult(keePass.DatabaseId, added, updated, deleted, skipped, bases, dropped) { Overwritten = overwritten };
     }
 
+    public static KeePassSaveResult SavePersonal(
+        VaultBody body,
+        KeePassGroupContent keePass,
+        KeePassVault target,
+        IReadOnlyList<string> groupPath,
+        bool withDeclaration,
+        Func<EntryName, bool> replaceConflict)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(keePass);
+        ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(replaceConflict);
+        var key = PersonalKey(keePass.DatabaseId);
+        int added = 0, updated = 0, deleted = 0;
+        var skipped = new List<KeePassComparison>();
+        var bases = new List<(EntryName, string)>();
+        var dropped = new List<EntryName>();
+        foreach (var comparison in ComparePersonal(body, keePass))
+        {
+            switch (comparison.State)
+            {
+                case KeePassSyncState.New:
+                    target.PutPersonalValue(groupPath, body.Find(comparison.Name)!, withDeclaration);
+                    bases.Add((comparison.Name, comparison.VaultHash!));
+                    added++;
+                    break;
+                case KeePassSyncState.Changed:
+                case KeePassSyncState.Conflict when replaceConflict(comparison.Name):
+                    target.PutPersonalValue(groupPath, body.Find(comparison.Name)!, withDeclaration);
+                    bases.Add((comparison.Name, comparison.VaultHash!));
+                    updated++;
+                    break;
+                case KeePassSyncState.Saved:
+                    bases.Add((comparison.Name, comparison.VaultHash!));
+                    break;
+                case KeePassSyncState.RemovalPending:
+                    if (!withDeclaration)
+                    {
+                        target.Delete(groupPath, comparison.Name);
+                        deleted++;
+                    }
+
+                    dropped.Add(comparison.Name);
+                    break;
+                case KeePassSyncState.Conflict:
+                case KeePassSyncState.ChangedInKeePass:
+                case KeePassSyncState.RemovedInKeePass:
+                    skipped.Add(comparison);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        dropped.AddRange(PersonalRemovals(body, key).Where(r => PersonalValueOf(keePass.Find(r.Name)) is null).Select(r => r.Name));
+        return new KeePassSaveResult(key, added, updated, deleted, skipped, bases, dropped) { Personal = true };
+    }
+
     public static bool MaintainGuides(KeePassVault target, VaultLocation location, RepositoryOrigin? origin)
     {
         ArgumentNullException.ThrowIfNull(target);
@@ -197,7 +307,7 @@ public static class KeePassSync
         ArgumentNullException.ThrowIfNull(result);
         foreach (var (name, hash) in result.Bases)
         {
-            if (body.Find(name) is { } entry && entry.SyncHash() == hash)
+            if (body.Find(name) is { } entry && (result.Personal ? !entry.IsMissing && entry.ContentHash() == hash : entry.SyncHash() == hash))
             {
                 body.RecordKeePassBase(name, result.DatabaseId, hash, now);
             }
@@ -273,6 +383,71 @@ public static class KeePassSync
         }
 
         return new KeePassLoadResult(added, taken, kept, removed);
+    }
+
+    public static KeePassLoadResult LoadPersonal(
+        VaultBody body,
+        KeePassGroupContent keePass,
+        Func<EntryName, bool> takeConflict,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(keePass);
+        ArgumentNullException.ThrowIfNull(takeConflict);
+        var key = PersonalKey(keePass.DatabaseId);
+        int added = 0, taken = 0, kept = 0;
+        foreach (var comparison in ComparePersonal(body, keePass))
+        {
+            var stored = PersonalValueOf(keePass.Find(comparison.Name));
+            switch (comparison.State)
+            {
+                case KeePassSyncState.OnlyInKeePass:
+                    TakePersonal(body, stored!, key, now);
+                    added++;
+                    break;
+                case KeePassSyncState.ChangedInKeePass when body.Find(comparison.Name) is not null:
+                case KeePassSyncState.Conflict when takeConflict(comparison.Name):
+                    TakePersonal(body, stored!, key, now);
+                    taken++;
+                    break;
+                case KeePassSyncState.Conflict:
+                    kept++;
+                    break;
+                case KeePassSyncState.Saved:
+                    body.RecordKeePassBase(comparison.Name, key, comparison.VaultHash, now);
+                    break;
+                case KeePassSyncState.RemovedInKeePass:
+                    body.RecordKeePassBase(comparison.Name, key, null, now);
+                    kept++;
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        foreach (var removal in PersonalRemovals(body, key).Where(r => PersonalValueOf(keePass.Find(r.Name)) is null).ToList())
+        {
+            body.TakeRemovals(removal.Name, key);
+        }
+
+        return new KeePassLoadResult(added, taken, kept, 0);
+    }
+
+    public static bool PersonalLoadChanges(VaultBody body, KeePassGroupContent keePass)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(keePass);
+        var key = PersonalKey(keePass.DatabaseId);
+        return ComparePersonal(body, keePass).Any(c =>
+                c.State is KeePassSyncState.OnlyInKeePass or KeePassSyncState.ChangedInKeePass or KeePassSyncState.Conflict or KeePassSyncState.RemovedInKeePass
+                || (c.State == KeePassSyncState.Saved && body.Find(c.Name)?.KeePassBaseFor(key) != c.VaultHash))
+            || PersonalRemovals(body, key).Any(r => PersonalValueOf(keePass.Find(r.Name)) is null);
+    }
+
+    private static void TakePersonal(VaultBody body, KeePassItem stored, string key, DateTimeOffset now)
+    {
+        body.SetPersonalValue(stored.Name, stored.ToVaultEntry(now));
+        body.RecordKeePassBase(stored.Name, key, stored.Hash, now);
     }
 
     private static void Take(VaultBody body, KeePassItem item, string databaseId, DateTimeOffset now)

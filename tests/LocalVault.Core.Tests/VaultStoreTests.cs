@@ -132,9 +132,9 @@ public sealed class VaultStoreTests : IDisposable
     public void NewerSchemaIsReadButNotWritten()
     {
         var store = NewStore();
-        File.WriteAllText(store.Location.Path, Envelope.SealLocal("""{"schema":4,"entries":[]}"""u8));
+        File.WriteAllText(store.Location.Path, Envelope.SealLocal("""{"schema":5,"entries":[]}"""u8));
 
-        Assert.Equal(4, store.Read().Body.Schema);
+        Assert.Equal(5, store.Read().Body.Schema);
         var error = Assert.Throws<VaultException>(() => store.Update(body => Put(body, "a", "1")));
         Assert.Contains("newer", error.Message, StringComparison.Ordinal);
     }

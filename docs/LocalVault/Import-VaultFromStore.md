@@ -77,6 +77,23 @@ database's password, then offers to keep it there.
 The cmdlet reads the primary store only, never the mirrors that `Export-VaultToStore` also writes. To
 read a mirror, for example when the primary store can't be reached, name it with **Store**.
 
+When this PC has a personal store (`Register-VaultStore -Personal`), the cmdlet then reads each
+vault's group there and fills in the values of the vault's required entries, with the same rules as
+shared entries. It takes nothing else from that group. A personal store that can't be opened gives a
+warning and the load goes on.
+
+Last, in a console, the cmdlet asks for each required value still missing, showing its note: a user
+name and a password for a credential declaration, a hidden value otherwise. An empty answer skips it.
+It then offers to save the values typed to the personal store, or warns that they stay on this PC
+when there is none. Without a console, it lists the missing names and asks nothing. For a file
+declaration, it asks for the path of the file; an empty answer takes the declared path when that
+file exists.
+
+Then the cmdlet writes each required file whose path is under the user's profile (`~/`), such as an
+SSH private key, when the file doesn't exist yet, readable by the current user, SYSTEM and
+Administrators only. It never replaces an existing file; a different one gives a warning, and
+`Restore-VaultFile -Overwrite` replaces it.
+
 ## EXAMPLES
 
 ### Example 1 - Get the shared entries of a project on a new machine
@@ -213,7 +230,8 @@ were, and **Removed**.
 when entries changed in both places weren't resolved.
 
 In a console, a command that reads an entry or a vault this PC doesn't have yet runs this cmdlet
-first, keeping the local value of every entry changed in both places.
+first, keeping the local value of every entry changed in both places. A command that reads a
+required value still missing asks for it, as this cmdlet does.
 
 ## RELATED LINKS
 

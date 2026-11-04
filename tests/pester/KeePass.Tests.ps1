@@ -371,6 +371,115 @@ Describe 'Stores of the PC and of the project' {
         finally { Pop-Location }
     }
 
+    It 'keeps personal values in the personal store and fills them in on another PC' {
+        Push-Location $repository
+        try {
+            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            lv @arguments 6>$null | Out-Null
+            $arguments = 'store', 'add', 'mine', $personalDb, '--personal'
+            (lv @arguments 6>&1 | Out-String) | Should -Match "'mine' is this PC's personal store"
+            $arguments = 'require', 'os', '--credential', '--note', 'domain account', '--path', $infra
+            lv @arguments 6>$null
+        }
+        finally { Pop-Location }
+        (Get-VaultStore -Name 'mine').Personal | Should -BeTrue
+        Set-VaultEntry -Path $infra -Name 'os' -Credential -UserName 'jdoe' -Password (ConvertTo-TestSecret 'os-pass') 6>$null
+
+        $saved = & $runInChild "Set-Location '$repository'; lv save" "$master`n$master"
+        $saved.ExitCode | Should -Be 0 -Because $saved.Output
+        $saved.Output | Should -Match "infra/secrets.local.lv -> personal store 'mine'.*1 of your values added"
+        $saved.Output | Should -Not -Match 'os-pass'
+
+        Remove-Item -LiteralPath $infra
+        $loaded = & $runInChild "Set-Location '$repository'; lv load" "$master`n$master"
+        $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
+        $loaded.Output | Should -Match "infra/secrets.local.lv <- personal store 'mine': 1 of your values filled in"
+        Get-VaultEntry -Path $infra -Name 'os#user' -AsPlainText | Should -Be 'jdoe'
+        Get-VaultEntry -Path $infra -Name 'os' -AsPlainText | Should -Be 'os-pass'
+        (Get-VaultEntryList -Path $infra 3>$null | Where-Object Name -EQ 'os').Sync | Should -Be 'Personal'
+
+        Set-VaultStore -Name 'mine' -Personal:$false | Out-Null
+        Remove-Item -LiteralPath $infra
+        $missing = & $runInChild "Set-Location '$repository'; lv load"
+        $missing.ExitCode | Should -Be 0 -Because $missing.Output
+        $missing.Output | Should -Match 'infra/secrets.local.lv: required values not set on this PC: os'
+    }
+
+    It 'carries a personal SSH key to another PC and writes it readable by its owner only' {
+        $home1 = Join-Path $folder 'home1'
+        $home2 = Join-Path $folder 'home2'
+        New-Item -ItemType Directory -Path (Join-Path $home1 '.ssh') -Force | Out-Null
+        [IO.File]::WriteAllText((Join-Path $home1 '.ssh/id_test'), "-----BEGIN OPENSSH PRIVATE KEY-----`nfake`n")
+        Push-Location $repository
+        try {
+            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            lv @arguments 6>$null | Out-Null
+            $arguments = 'store', 'add', 'mine', $personalDb, '--personal'
+            lv @arguments 6>$null | Out-Null
+        }
+        finally { Pop-Location }
+
+        $declared = & $runInChild "`$env:USERPROFILE = '$home1'; lv require ssh/id --file '~/.ssh/id_test' --note 'your key' --path '$infra'; lv set ssh/id --file '$home1\.ssh\id_test' --path '$infra'; Set-Location '$repository'; lv save" "$master`n$master"
+        $declared.ExitCode | Should -Be 0 -Because $declared.Output
+        $declared.Output | Should -Match "infra/secrets.local.lv -> personal store 'mine'.*1 of your values added"
+        $declared.Output | Should -Not -Match 'fake'
+        { Set-VaultEntry -Path $infra -Name 'shared-key' -FilePath (Join-Path $home1 '.ssh/id_test') -StoredPath '~/.ssh/other' } | Should -Throw '*only a required entry*'
+
+        Remove-Item -LiteralPath $infra
+        $loaded = & $runInChild "`$env:USERPROFILE = '$home2'; Set-Location '$repository'; lv load" "$master`n$master"
+        $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
+        $key = Join-Path $home2 '.ssh/id_test'
+        $loaded.Output | Should -Match ([regex]::Escape("Wrote your ssh/id to $key"))
+        [IO.File]::ReadAllText($key) | Should -Be "-----BEGIN OPENSSH PRIVATE KEY-----`nfake`n"
+
+        $acl = Get-Acl -LiteralPath $key
+        $acl.AreAccessRulesProtected | Should -BeTrue
+        $allowed = @(
+            [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+            'S-1-5-18'
+            'S-1-5-32-544'
+        )
+        $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object {
+            $_.IdentityReference.Value | Should -BeIn $allowed
+        }
+
+        [IO.File]::WriteAllText($key, 'changed')
+        $again = & $runInChild "`$env:USERPROFILE = '$home2'; Set-Location '$repository'; lv load" "$master`n$master"
+        $again.Output | Should -Match 'lv restore ssh/id --overwrite'
+        [IO.File]::ReadAllText($key) | Should -Be 'changed'
+    }
+
+    It 'leaves personal values out of a personal store that is also the project store, without a console' {
+        Push-Location $repository
+        try {
+            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            lv @arguments 6>$null | Out-Null
+            $arguments = 'store', 'add', 'proj', $projectDb
+            lv @arguments 6>$null | Out-Null
+            $arguments = 'store', 'set', 'proj', '--personal'
+            lv @arguments 6>$null | Out-Null
+            { Set-VaultStore -Name 'proj' -Personal -Project } | Should -Throw '*personal store belongs to this PC*'
+        }
+        finally { Pop-Location }
+        Set-VaultEntry -Path $infra -Name 'os' -Required 6>$null
+        Set-VaultEntry -Path $infra -Name 'os' -Value (ConvertTo-TestSecret 'os-pass') 6>$null
+
+        $saved = & $runInChild "Set-Location '$repository'; lv save"
+        $saved.ExitCode | Should -Be 0 -Because $saved.Output
+        $saved.Output | Should -Match "Personal store 'proj' is also the project's store"
+
+        $raw = [KeePassLib.PwDatabase]::new()
+        $key = [KeePassLib.Keys.CompositeKey]::new(); $key.AddUserKey([KeePassLib.Keys.KcpPassword]::new($master))
+        $raw.Open([KeePassLib.Serialization.IOConnectionInfo]::FromPath($projectDb), $key, $null)
+        try {
+            $entry = @($raw.RootGroup.GetEntries($true) | Where-Object { $_.Strings.ReadSafe('Title') -eq 'os' })
+            $entry.Count | Should -Be 1
+            $entry[0].Strings.ReadSafe('LocalVault.Kind') | Should -Be 'required'
+            $entry[0].Strings.ReadSafe('Password') | Should -BeNullOrEmpty
+        }
+        finally { $raw.Close() }
+    }
+
     It 'carries the registrations of keepass.json over to stores.json' {
         $appFolder = Join-Path $env:LOCALAPPDATA 'LocalVault'
         New-Item -ItemType Directory -Path $appFolder -Force | Out-Null

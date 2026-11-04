@@ -3,7 +3,7 @@ using LocalVault.Core;
 
 namespace LocalVault.PowerShell;
 
-public sealed record VaultStoreInfo(string Name, StoreScope Scope, string Type, string Target, string? KeyFile, bool Default, string? UnlockWith, bool Mirror, bool Exists);
+public sealed record VaultStoreInfo(string Name, StoreScope Scope, string Type, string Target, string? KeyFile, bool Default, string? UnlockWith, bool Mirror, bool Exists, bool Personal = false);
 
 public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
 {
@@ -13,7 +13,7 @@ public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
     {
         ArgumentNullException.ThrowIfNull(store);
         return new VaultStoreInfo(
-            store.Name, store.Scope, store.Type, store.Target, store.KeyFile, isDefault, store.UnlockWith, store.IsMirror, File.Exists(store.ExpandedTarget));
+            store.Name, store.Scope, store.Type, store.Target, store.KeyFile, isDefault, store.UnlockWith, store.IsMirror, File.Exists(store.ExpandedTarget), store.IsPersonal);
     }
 
     internal VaultLocation? ProjectLocation()
@@ -53,6 +53,18 @@ public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
         }
     }
 
+    internal const string PersonalOnPcOnly =
+        "The personal store belongs to this PC: give -Personal without -Project (lv store add|set <name> --personal).";
+
+    internal void SayPersonal(StoreDefinition store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        if (store.IsPersonal)
+        {
+            Say($"'{store.Name}' is this PC's personal store: lv save keeps your own values of required entries there, lv load reads them back.");
+        }
+    }
+
     internal string Rooted(string path) =>
         path.Contains('%', StringComparison.Ordinal) ? path : GetUnresolvedProviderPathFromPSPath(path);
 }
@@ -84,6 +96,9 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
     public SwitchParameter Mirror { get; set; }
 
     [Parameter]
+    public SwitchParameter Personal { get; set; }
+
+    [Parameter]
     public SwitchParameter Project { get; set; }
 
     protected override void Run()
@@ -102,9 +117,15 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         var target = Target is null ? null : Rooted(Target);
         if (!Project)
         {
-            var store = Registry.Register(name, target!, KeyFile is null ? null : Rooted(KeyFile), Default, UnlockWith, Mirror);
+            var store = Registry.Register(name, target!, KeyFile is null ? null : Rooted(KeyFile), Default, UnlockWith, Mirror, Personal);
+            SayPersonal(store);
             WriteObject(Describe(store, store.IsDefault));
             return;
+        }
+
+        if (Personal)
+        {
+            throw new VaultException(PersonalOnPcOnly);
         }
 
         if (KeyFile is not null || UnlockWith is not null)
@@ -154,11 +175,15 @@ public sealed class SetVaultStoreCommand : StoreDefinitionCmdletBase
     public SwitchParameter Default { get; set; }
 
     [Parameter]
+    public SwitchParameter Personal { get; set; }
+
+    [Parameter]
     public SwitchParameter Project { get; set; }
 
     protected override void Run()
     {
         bool? mirror = MyInvocation.BoundParameters.ContainsKey(nameof(Mirror)) ? Mirror.IsPresent : null;
+        bool? personal = MyInvocation.BoundParameters.ContainsKey(nameof(Personal)) ? Personal.IsPresent : null;
         if (UnlockWith is not null && NoUnlock)
         {
             throw new VaultException("Give -UnlockWith or -NoUnlock, not both.");
@@ -166,7 +191,12 @@ public sealed class SetVaultStoreCommand : StoreDefinitionCmdletBase
 
         if (!Project)
         {
-            var store = Registry.Change(Name, mirror, UnlockWith, NoUnlock, Default);
+            var store = Registry.Change(Name, mirror, UnlockWith, NoUnlock, Default, personal);
+            if (personal == true)
+            {
+                SayPersonal(store);
+            }
+
             WriteObject(Describe(store, store.IsDefault));
             return;
         }
@@ -174,6 +204,11 @@ public sealed class SetVaultStoreCommand : StoreDefinitionCmdletBase
         if (UnlockWith is not null || NoUnlock)
         {
             throw new VaultException("A project store can't name an unlocking store: that is personal. Change the store of the same name on this PC.");
+        }
+
+        if (personal is not null)
+        {
+            throw new VaultException(PersonalOnPcOnly);
         }
 
         var project = RequireProject();
@@ -314,10 +349,11 @@ public sealed class ImportVaultFromStoreCommand : StoreSyncCmdletBase
     protected override void Run()
     {
         using var access = NewAccess();
+        var vaults = RepositoryVaults.Of(Location, ExplicitVault);
         var (totals, unresolved) = VaultSync.Load(
             this,
             access,
-            RepositoryVaults.Of(Location, ExplicitVault),
+            vaults,
             (location, name) => ReplaceAll || Replace.Contains(name.FullName, EntryName.Comparer)
                 ? true
                 : IsInteractive ? Confirm($"{RepositoryVaults.Label(location)}: '{name}' changed here and in the store. Replace yours with the store's value?") : null,
@@ -329,6 +365,9 @@ public sealed class ImportVaultFromStoreCommand : StoreSyncCmdletBase
                 ". Their vaults were left as they were. Use -Replace name,... or -ReplaceAll to take the store's values.");
         }
 
+        var present = vaults.Where(location => File.Exists(location.Path)).ToList();
+        FillMissingValues(access, present);
+        WritePersonalFiles(present);
         WriteObject(new StoreLoadSummary(totals.Added, totals.Updated, totals.Kept, totals.Removed));
     }
 }

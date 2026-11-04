@@ -74,9 +74,18 @@ as it is and reported. A mirror that can't be opened or saved gives a warning an
 mirror that this PC doesn't define is skipped with a message. With **Store**, the cmdlet writes that
 store only, without mirrors.
 
+When this PC has a personal store (`Register-VaultStore -Personal`), the cmdlet also writes there
+each value of a required entry set on this PC, in the vault's group, with the same rules as shared
+entries; the project store and the mirrors get the declaration only. A personal store that is also a
+mirror gets the shared entries too. When the personal store is also the vault's primary store, the
+cmdlet warns that everyone who opens it can read the values and asks first; the declaration and the
+value then share one entry. Without a console, it leaves the values out. A personal store that can't
+be opened or saved gives a warning and the save goes on. With **Store**, the cmdlet doesn't write the
+personal store.
+
 Each store is opened and saved at most once per run, whether it is the primary store of one vault, a
-mirror of another, or both; then each vault is written once, recording what was saved to all its
-stores.
+mirror of another, the personal store, or all of these; then each vault is written once, recording
+what was saved to all its stores.
 
 Without **Path**, and without the `LOCALVAULT_PATH` environment variable, the cmdlet handles every
 vault of the repository: the vaults listed in `localvault.json`, which LocalVault fills each time it

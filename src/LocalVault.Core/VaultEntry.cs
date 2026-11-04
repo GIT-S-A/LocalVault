@@ -12,6 +12,9 @@ public sealed class VaultEntry
     public const string FileKind = "file";
     public const string RequiredKind = "required";
     public const string CredentialKind = "credential";
+    public const string CredentialShape = "credential";
+    public const string FileShape = "file";
+    public const string PersonalBasePrefix = "personal:";
 
     private const string NameField = "name";
     private const string UserField = "user";
@@ -28,6 +31,7 @@ public sealed class VaultEntry
     private const string SyncedAtField = "at";
     private const string RequiredField = "required";
     private const string NoteField = "note";
+    private const string ShapeField = "shape";
 
     internal VaultEntry(JsonObject node)
     {
@@ -68,6 +72,18 @@ public sealed class VaultEntry
 
     public string? RequiredNote =>
         (Meta?[RequiredField] as JsonObject)?[NoteField] is JsonValue value && value.TryGetValue<string>(out var note) ? note : null;
+
+    public string? RequiredShape =>
+        (Meta?[RequiredField] as JsonObject)?[ShapeField] is JsonValue value && value.TryGetValue<string>(out var shape) ? shape : null;
+
+    public bool IsCredentialShape => RequiredShape == CredentialShape;
+
+    public bool IsFileShape => RequiredShape == FileShape;
+
+    public string? RequiredPath =>
+        (Meta?[RequiredField] as JsonObject)?[PathField] is JsonValue value && value.TryGetValue<string>(out var path) ? path : null;
+
+    public bool IsUnderHome => StoredPath is { } path && StoredPathRules.IsUnderHome(path);
 
     public DateTimeOffset? Created
     {
@@ -119,7 +135,8 @@ public sealed class VaultEntry
         }
 
         return databaseId is null
-            ? sync.Select(pair => ReadHash(pair.Value as JsonObject)).FirstOrDefault(hash => hash is not null)
+            ? sync.Where(pair => !pair.Key.StartsWith(PersonalBasePrefix, StringComparison.Ordinal))
+                .Select(pair => ReadHash(pair.Value as JsonObject)).FirstOrDefault(hash => hash is not null)
             : ReadHash(sync[databaseId] as JsonObject);
     }
 
@@ -133,10 +150,10 @@ public sealed class VaultEntry
     public static VaultEntry NewFile(EntryName name, ReadOnlySpan<byte> content, string storedPath, DateTimeOffset created) =>
         new(BuildNode(name, FileKind, content, created, StoredPathRules.Normalize(storedPath)));
 
-    public static VaultEntry NewRequired(EntryName name, string? note, DateTimeOffset created)
+    public static VaultEntry NewRequired(EntryName name, string? note, DateTimeOffset created, string? shape = null, string? path = null)
     {
         var entry = new VaultEntry(BuildNode(name, RequiredKind, [], created, null));
-        entry.SetRequired(note);
+        entry.SetRequired(note, shape, path);
         return entry;
     }
 
@@ -265,16 +282,41 @@ public sealed class VaultEntry
     }
 
     public string SyncHash() =>
-        IsRequired
-            ? ComputeContentHash(RequiredKind, null, Encoding.UTF8.GetBytes(RequiredNote ?? string.Empty))
-            : ContentHash();
+        IsRequired ? ComputeDeclarationHash(RequiredNote, RequiredShape, RequiredPath) : ContentHash();
 
-    internal void SetRequired(string? note)
+    public static string ComputeDeclarationHash(string? note, string? shape, string? path = null) =>
+        ComputeContentHash(RequiredKind, path is null ? shape : $"{shape}|{path}", Encoding.UTF8.GetBytes(note ?? string.Empty));
+
+    public VaultEntry AsPersonalValue()
+    {
+        if (!IsRequired || IsMissing)
+        {
+            throw new VaultException($"'{Name}' holds no personal value.");
+        }
+
+        var copy = Clone();
+        copy.Meta?.Remove(RequiredField);
+        copy.Meta?.Remove(KeePassField);
+        copy.Meta?.Remove(LocalField);
+        return copy;
+    }
+
+    internal void SetRequired(string? note, string? shape, string? path)
     {
         var required = new JsonObject();
         if (!string.IsNullOrEmpty(note))
         {
             required[NoteField] = note;
+        }
+
+        if (!string.IsNullOrEmpty(shape))
+        {
+            required[ShapeField] = shape;
+        }
+
+        if (!string.IsNullOrEmpty(path))
+        {
+            required[PathField] = StoredPathRules.Normalize(path);
         }
 
         EnsureMeta()[RequiredField] = required;
@@ -474,7 +516,9 @@ public sealed class VaultEntry
 
         if (fields[RequiredField] is { } required
             && !(required is JsonObject requiredFields
-                && (requiredFields[NoteField] is null || (requiredFields[NoteField] is JsonValue note && note.TryGetValue<string>(out _)))))
+                && IsOptionalString(requiredFields[NoteField])
+                && IsOptionalString(requiredFields[ShapeField])
+                && IsOptionalString(requiredFields[PathField])))
         {
             throw new VaultException($"Vault entry '{Name}' has a 'required' field that is damaged.");
         }
@@ -491,6 +535,8 @@ public sealed class VaultEntry
             throw new VaultException($"Vault entry '{Name}' has KeePass sync data without a hash.");
         }
     }
+
+    private static bool IsOptionalString(JsonNode? node) => node is null || (node is JsonValue value && value.TryGetValue<string>(out _));
 
     private static readonly string[] CredentialFields = [UserField, UrlsField, TotpField];
 

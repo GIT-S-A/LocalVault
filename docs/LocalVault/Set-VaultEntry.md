@@ -49,8 +49,8 @@ Set-VaultEntry [-Name] <string> -Sharing <VaultEntrySharing> [-Path <string>] [-
 ### Required
 
 ```
-Set-VaultEntry [-Name] <string> -Required [-Note <string>] [-Path <string>] [-WhatIf] [-Confirm]
- [<CommonParameters>]
+Set-VaultEntry [-Name] <string> -Required [-Credential] [-StoredPath <string>] [-Note <string>]
+ [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -93,6 +93,16 @@ and the **Note** says where to get it. `Export-VaultToStore` shares the declarat
 never the value, and `Export-Vault` leaves the value out. Until a value is set on this machine, the
 entry is `Missing` in `Get-VaultEntryList`, and reading it fails with the note. Setting a value with
 this cmdlet then keeps it on this machine. Declaring an entry that has a value keeps the value.
+With **Required** and **Credential**, the declaration asks for a user name and a password: setting
+the value with the name alone asks for the parts of a credential. With **Required** and
+**StoredPath**, the declaration asks for a file, such as an SSH private key, and **StoredPath** is
+where it goes on each machine. A path that starts with `~/` is under the user's profile, such as
+`~/.ssh/id_ed25519`. Each person then sets the value with **FilePath**; the entry keeps the declared
+path unless **StoredPath** gives another one, or takes the `~/` form of **FilePath** when it is under
+the profile. Only a required entry's own value can have a `~/` path.
+
+`Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
+defined, and `Import-VaultFromStore` fills it in on another machine.
 
 When the vault doesn't exist, the cmdlet creates it. It fails when git doesn't ignore the vault
 file. At the default path, it also fails when the repository has a vault file in another folder,
@@ -148,7 +158,17 @@ URL (empty removes it) for github: https://github.example.com
 Stored github#url
 ```
 
-### Example 5 - Copy a secret from another store
+### Example 5 - Declare a personal SSH key and store yours
+
+```powershell
+Set-VaultEntry -Name ssh/deploy -Required -StoredPath '~/.ssh/id_deploy' -Note 'your deploy key'
+Set-VaultEntry -Name ssh/deploy -FilePath $HOME\.ssh\id_deploy
+```
+
+The key stays out of the project store. `Export-VaultToStore` writes it to the personal store, and
+`Import-VaultFromStore` writes it to `~/.ssh/id_deploy` on another machine.
+
+### Example 6 - Copy a secret from another store
 
 ```powershell
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
@@ -183,7 +203,8 @@ HelpMessage: ''
 
 ### -Credential
 
-Indicates that the entry is a credential: a user name, a password, an optional TOTP and URLs.
+Indicates that the entry is a credential: a user name, a password, an optional TOTP and URLs. With
+**Required**, it declares that each person's value is a user name and a password.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter
@@ -194,6 +215,12 @@ ParameterSets:
 - Name: Credential
   Position: Named
   IsRequired: true
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+- Name: Required
+  Position: Named
+  IsRequired: false
   ValueFromPipeline: false
   ValueFromPipelineByPropertyName: false
   ValueFromRemainingArguments: false
@@ -388,9 +415,11 @@ HelpMessage: ''
 ### -StoredPath
 
 Specifies the path that `Restore-VaultFile` writes the file to, relative to the folder of the
-vault. Use forward or back slashes; a rooted path or `..` is refused. If you omit this parameter,
-the cmdlet uses the path of **FilePath** relative to the folder of the vault, and fails when the
-file is outside that folder.
+vault, or under the user's profile when it starts with `~/` (required entries only). Use forward or
+back slashes; a rooted path or `..` is refused. If you omit this parameter, the cmdlet uses the
+declared path of a required entry, then the `~/` form of **FilePath** for a required entry, then the
+path of **FilePath** relative to the folder of the vault, and fails when the file is outside that
+folder. With **Required**, it declares the entry as a file restored to this path.
 
 ```yaml
 Type: System.String
@@ -399,6 +428,12 @@ SupportsWildcards: false
 Aliases: []
 ParameterSets:
 - Name: File
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+- Name: Required
   Position: Named
   IsRequired: false
   ValueFromPipeline: false
@@ -538,7 +573,7 @@ This cmdlet returns no output. It writes the entry name to the information strea
 ## NOTES
 
 `lv set <name> [--file <path> | --credential] [--local]`, `lv set <name>#<part>`,
-`lv require <name> [--note <text>]` and
+`lv require <name> [--credential | --file <path>] [--note <text>]` and
 `lv mark <name> shared|local` run this cmdlet.
 
 ## RELATED LINKS

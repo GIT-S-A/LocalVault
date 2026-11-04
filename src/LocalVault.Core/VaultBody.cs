@@ -6,7 +6,7 @@ namespace LocalVault.Core;
 
 public sealed class VaultBody
 {
-    public const int CurrentSchema = 3;
+    public const int CurrentSchema = 4;
 
     private const string SchemaField = "schema";
     private const string ExportedField = "exported";
@@ -175,8 +175,14 @@ public sealed class VaultBody
         var existing = Find(entry.Name);
         if (existing is not null && entry.IsMissing && !existing.IsMissing)
         {
-            existing.SetRequired(entry.RequiredNote);
+            existing.SetRequired(entry.RequiredNote, entry.RequiredShape, entry.RequiredPath);
             return;
+        }
+
+        if (entry.IsUnderHome && !entry.IsRequired && existing is not { IsRequired: true })
+        {
+            throw new VaultException(
+                $"'{entry.Name}' would be restored under your profile ({entry.StoredPath}); only a required entry's personal value can. Declare it with lv require {entry.Name} --file <path> first.");
         }
 
         if (existing is not null)
@@ -193,6 +199,18 @@ public sealed class VaultBody
 
         EntriesArray.Add(added.Node);
         entries.Add(added);
+    }
+
+    public void SetPersonalValue(EntryName name, VaultEntry value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var existing = Find(name);
+        if (existing is not { IsRequired: true } || value.IsRequired || !(value.IsSecret || value.IsCredential || value.IsFile))
+        {
+            throw new VaultException($"'{name}' is not a required entry; it takes no personal value.");
+        }
+
+        existing.CopyContentFrom(value);
     }
 
     public bool Remove(EntryName name) => Remove(name, recordForKeePass: true);

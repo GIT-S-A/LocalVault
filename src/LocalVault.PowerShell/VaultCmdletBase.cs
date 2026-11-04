@@ -106,24 +106,191 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
     void IVaultHost.ReportWrite(VaultWriteResult result) => Report(result);
 
     private bool autoLoaded;
+    private bool askedMissing;
 
-    protected VaultBody ReadForUse(Func<VaultBody, bool> satisfied)
+    protected VaultBody ReadForUse(Func<VaultBody, bool> satisfied, Func<VaultBody, IEnumerable<EntryName>>? wanted = null)
     {
         ArgumentNullException.ThrowIfNull(satisfied);
         var body = ReadVault().Body;
-        if (satisfied(body) || autoLoaded || !IsInteractive || !HasStore())
+        if (!satisfied(body) && !autoLoaded && IsInteractive && HasStore())
+        {
+            autoLoaded = true;
+            Say("Not on this PC yet: loading this repository's vaults from their stores.");
+            using var access = new StoreAccess(this, null);
+            VaultSync.Load(this, access, RepositoryVaults.Of(Location, ExplicitVault), (_, _) => false, (_, _) => false);
+            body = ReadVault().Body;
+        }
+
+        if (wanted is null || askedMissing || !IsInteractive)
         {
             return body;
         }
 
-        autoLoaded = true;
-        Say("Not on this PC yet: loading this repository's vaults from their stores.");
+        var missing = wanted(body).Where(name => body.Find(name) is { IsMissing: true }).ToHashSet();
+        if (missing.Count == 0)
+        {
+            return body;
+        }
+
+        askedMissing = true;
         using (var access = new StoreAccess(this, null))
         {
-            VaultSync.Load(this, access, RepositoryVaults.Of(Location, ExplicitVault), (_, _) => false, (_, _) => false);
+            FillMissingValues(access, [Location], missing);
         }
 
         return ReadVault().Body;
+    }
+
+    internal void WritePersonalFiles(IReadOnlyList<VaultLocation> vaults)
+    {
+        ArgumentNullException.ThrowIfNull(vaults);
+        foreach (var location in vaults)
+        {
+            foreach (var entry in RepositoryVaults.StoreFor(location).Read().Body.Entries.Where(e => e.IsRequired && e.IsFile && e.IsUnderHome))
+            {
+                var target = StoredPathRules.Resolve(location.Directory, entry.StoredPath!);
+                var content = entry.GetValue();
+                try
+                {
+                    if (!File.Exists(target))
+                    {
+                        PrivateFile.Write(target, content);
+                        Say($"Wrote your {entry.Name} to {target}, readable by your account only.");
+                    }
+                    else if (!File.ReadAllBytes(target).AsSpan().SequenceEqual(content))
+                    {
+                        WriteWarning($"Kept the existing '{target}'; it differs from your {entry.Name}. Run lv restore {entry.Name} --overwrite to replace it.");
+                    }
+                }
+                finally
+                {
+                    Array.Clear(content);
+                }
+            }
+        }
+    }
+
+    internal void FillMissingValues(StoreAccess access, IReadOnlyList<VaultLocation> vaults, IReadOnlySet<EntryName>? only = null)
+    {
+        ArgumentNullException.ThrowIfNull(access);
+        ArgumentNullException.ThrowIfNull(vaults);
+        var missing = vaults
+            .Select(location => (Location: location, Entries: RepositoryVaults.StoreFor(location).Read().Body.Entries
+                .Where(entry => entry.IsMissing && (only is null || only.Contains(entry.Name)))
+                .ToList()))
+            .Where(item => item.Entries.Count > 0)
+            .ToList();
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        if (!IsInteractive)
+        {
+            foreach (var (location, entries) in missing)
+            {
+                WriteWarning($"{RepositoryVaults.Label(location)}: required values not set on this PC: {string.Join(", ", entries.Select(e => e.Name))}. Run lv load or lv set <name> in a console.");
+            }
+
+            return;
+        }
+
+        var typed = new List<(VaultLocation Location, VaultEntry Value)>();
+        foreach (var (location, entries) in missing)
+        {
+            foreach (var entry in entries)
+            {
+                Say($"{RepositoryVaults.Label(location)}: {entry.Name} is required{(entry.RequiredNote is { } note ? $" ({note})" : string.Empty)}. Empty skips it.");
+                if (AskRequiredValue(location, entry) is { } value)
+                {
+                    typed.Add((location, value));
+                }
+            }
+        }
+
+        if (typed.Count == 0)
+        {
+            return;
+        }
+
+        var written = new List<VaultLocation>();
+        foreach (var group in typed.GroupBy(item => item.Location))
+        {
+            Report(RepositoryVaults.StoreFor(group.Key).Update(body =>
+            {
+                foreach (var (_, value) in group)
+                {
+                    body.SetPersonalValue(value.Name, value);
+                }
+            }));
+            written.Add(group.Key);
+        }
+
+        Say($"Stored {typed.Count} value(s) in the vault.");
+        if (access.Registry.Personal is not { } personal)
+        {
+            WriteWarning("These values are only on this PC: no personal store is defined. Name one with lv store set <name> --personal, then run lv save.");
+            return;
+        }
+
+        if (Confirm($"Save the {typed.Count} value(s) to your personal store '{personal.Name}' too?", defaultYes: true))
+        {
+            VaultSync.Save(this, access, written, (_, _) => false, personalOnly: true);
+        }
+    }
+
+    private VaultEntry? AskRequiredValue(VaultLocation location, VaultEntry entry)
+    {
+        if (entry.IsFileShape)
+        {
+            var declared = entry.RequiredPath is { } path ? StoredPathRules.Resolve(location.Directory, path) : null;
+            var typed = ReadText($"File for {entry.Name} (empty: {(declared is null ? "skip" : $"{declared} if it exists, else skip")})");
+            var source = typed.Length > 0 ? GetUnresolvedProviderPathFromPSPath(typed) : declared;
+            if (source is null || !File.Exists(source))
+            {
+                if (typed.Length > 0)
+                {
+                    WriteWarning($"'{source}' doesn't exist; {entry.Name} skipped.");
+                }
+
+                return null;
+            }
+
+            var stored = entry.RequiredPath ?? StoredPathRules.HomeFormOf(source) ?? StoredPathRules.FromFullPath(location.Directory, source);
+            var content = File.ReadAllBytes(source);
+            try
+            {
+                return VaultEntry.NewFile(entry.Name, content, stored, Now);
+            }
+            finally
+            {
+                Array.Clear(content);
+            }
+        }
+
+        if (entry.IsCredentialShape)
+        {
+            var user = ReadText($"User name for {entry.Name}");
+            var password = SecretText.ToUtf8(ReadSecret($"Password for {entry.Name}"));
+            try
+            {
+                return password.Length == 0 ? null : VaultEntry.NewCredential(entry.Name, user, password, null, [], Now);
+            }
+            finally
+            {
+                Array.Clear(password);
+            }
+        }
+
+        var value = SecretText.ToUtf8(ReadSecret($"Value for {entry.Name}"));
+        try
+        {
+            return value.Length == 0 ? null : VaultEntry.NewSecret(entry.Name, value, Now);
+        }
+        finally
+        {
+            Array.Clear(value);
+        }
     }
 
     private bool HasStore()
@@ -269,10 +436,10 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
     protected void Say(string message) =>
         WriteInformation(new InformationRecord(message, MyInvocation.MyCommand.Name), ["PSHOST"]);
 
-    protected bool Confirm(string question)
+    protected bool Confirm(string question, bool defaultYes = false)
     {
         Collection<ChoiceDescription> choices = [new("&Yes"), new("&No")];
-        return Host.UI.PromptForChoice("LocalVault", question, choices, 1) == 0;
+        return Host.UI.PromptForChoice("LocalVault", question, choices, defaultYes ? 0 : 1) == 0;
     }
 
     protected string ReadText(string prompt)

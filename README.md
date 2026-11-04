@@ -70,7 +70,7 @@ when there is no `prod/db`.
 | `Set-VaultEntry -Name n -FilePath p [-StoredPath r]` | `lv set n --file p` | carries a file; restored to `r` beside the vault |
 | `Set-VaultEntry -Name n -Credential [-UserName u] [-Password s] [-Totp s] [-Url a,b]` | `lv set n --credential` | user name, password, TOTP and URLs as one entry; asks for each part |
 | `Set-VaultEntry -Name n#part [-Value s]` | `lv set n#user` | one part: `#user`, `#password`, `#totp`, `#url`, `#url2`...; empty removes it |
-| `Set-VaultEntry -Name n -Required [-Note text]` | `lv require n [--note text]` | personal value each person sets; the store gets the declaration only |
+| `Set-VaultEntry -Name n -Required [-Credential \| -StoredPath p] [-Note text]` | `lv require n [--credential \| --file p] [--note text]` | personal value each person sets (a user name and a password with `--credential`, a file such as an SSH key with `--file ~/.ssh/<key>`); the store gets the declaration only |
 | `Set-VaultEntry -Name n -Sharing Shared\|Local` | `lv mark n shared\|local` | send to the store or keep on this PC |
 | `Get-VaultEntry -Name n[#part] [-AsPlainText] \| -AsCredential` | `lv get n[#part] [--show]` | SecureString by default; `lv get` into a pipe, or on screen with `--show`; `#totp` is the current code, `#user` and `#url` print anywhere |
 | `Copy-VaultEntry -Name n [-Seconds 20]` | `lv clip n` | clipboard for 20 s, out of the clipboard history |
@@ -84,11 +84,11 @@ when there is no `prod/db`.
 | `Import-VaultFromStore [-Store name] [-Replace a,b \| -ReplaceAll]` | `lv load` | store → vaults; on a new machine too |
 | `Get-VaultStoreStatus` | `lv store` | each vault's store and what isn't saved; opens nothing |
 | `Get-VaultStore` | `lv store list` | stores of the project and of this PC |
-| `Register-VaultStore [-Name n] [[-Target] kdbx] [-KeyFile k] [-Default] [-UnlockWith s] [-Mirror] [-Project]`, `Unregister-VaultStore` | `lv store add [n] kdbx [k]`, `lv store add n --project`, `lv store rm n` | defines a store on this PC, or with `--project` in localvault.json (a name alone refers to each PC's store); `--mirror`: every save also writes it; name defaults to the file name |
+| `Register-VaultStore [-Name n] [[-Target] kdbx] [-KeyFile k] [-Default] [-UnlockWith s] [-Mirror] [-Personal] [-Project]`, `Unregister-VaultStore` | `lv store add [n] kdbx [k]`, `lv store add n --project`, `lv store rm n` | defines a store on this PC, or with `--project` in localvault.json (a name alone refers to each PC's store); `--mirror`: every save also writes it; `--personal`: keeps your own values of required entries; name defaults to the file name |
 | `Set-VaultProjectStore [-Name] n` | `lv store use n` | the project's primary store, read by `lv load` (`--path`: one vault, rarely); written to localvault.json |
 | `Compare-VaultWithStore` | `lv store diff` | state of each entry against the store |
 | `Copy-VaultToStore [-Target] kdbx \| -Store n` | `lv store copy kdbx` | one-off copy to another store; records nothing |
-| `Set-VaultStore [-Name] n [-Mirror] [-UnlockWith s \| -NoUnlock] [-Default] [-Project]` | `lv store set n [--mirror\|--no-mirror] [--unlock-with s\|--no-unlock] [--default]` | changes those settings only; target and key file stay |
+| `Set-VaultStore [-Name] n [-Mirror] [-UnlockWith s \| -NoUnlock] [-Default] [-Personal] [-Project]` | `lv store set n [--mirror\|--no-mirror] [--unlock-with s\|--no-unlock] [--default] [--personal\|--no-personal]` | changes those settings only; target and key file stay |
 | `Add-VaultTemplate [-File] f [-Capture KEY,...]` | `lv template add f [--capture KEY,...]` | `f.template` beside `f`, secrets as `{{name}}`; from `f.example` when `f` doesn't exist |
 | `Update-VaultTemplate [[-File] f] [-AcceptChanges]` | `lv template update [f] [--accept]` | your edits of `f` go into its template; a changed secret is stored only when accepted |
 | `Write-VaultTemplate [[-File] f]`, `Clear-VaultTemplate [[-File] f]` | `lv template render [f]`, `lv template clear [f]` | writes or deletes the real files (git must ignore them) |
@@ -152,6 +152,14 @@ opens with the password kept in that other store's `AutoOpen` group, the same co
 uses, so that only your own password is asked; LocalVault offers to add it there the first time.
 Chains work: `proj` unlocked by `team`, `team` by `mine`.
 
+Required entries (`lv require <name> [--credential]`) share their declaration only. Each person's
+value goes to their personal store, when the PC names one (`lv store set mine --personal`, usually
+together with `--mirror`): `lv save` writes it there, `lv load` reads it back. After loading, `lv load`
+asks in a console for each required value still missing and offers to save what was typed to the
+personal store. A required file under your profile (`lv require ssh/id --file ~/.ssh/id_ed25519`,
+then `lv set ssh/id --file ~/.ssh/id_ed25519`) is written there by `lv load` when missing, readable
+by your account only. A new machine then needs `lv load` and one password.
+
 Entries become ordinary KeePass entries in `LocalVault/<repository>[/<folder of the vault>]`, titled
 with their full name (`common/db.password`), readable without LocalVault. A change made on one side
 only goes across without a question; a change made on both sides is asked about (`-Replace`,
@@ -188,7 +196,7 @@ It is gone, with every secret in it, when:
 - an administrator resets your Windows password (a change you make yourself is fine), or your
   profile is rebuilt: DPAPI can then no longer open it.
 
-Shared entries survive in the store. For local entries and personal values, export after every change
+Shared entries survive in the store, personal values in a personal store. For the rest, export after every change
 and keep the export off this machine. Until then `Get-VaultEntryList` warns.
 
 ## Development

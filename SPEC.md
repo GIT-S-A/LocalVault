@@ -46,8 +46,8 @@ skills/localvault/SKILL.md                   Claude skill: install line, usage
 ### Entry & body
 
 ```
-entry := { name, kind: "secret"|"file"|"required", value: base64 ("" for required), meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string }, kp?: { hash: hex, at: ISO-8601 UTC } } }
-body  := { schema: 2, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }] }   UTF-8 JSON
+entry := { name, kind: "secret"|"file"|"credential"|"required", value: base64 ("" for required), meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file", path?: string }, kp?: { hash: hex, at: ISO-8601 UTC } } }
+body  := { schema: 4, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }] }   UTF-8 JSON
 ```
 
 - unknown body fields, entry fields, meta fields, kinds → kept verbatim on rewrite (V20).
@@ -63,9 +63,19 @@ body  := { schema: 2, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entr
 ### Stores
 
 - store = place shared entries live beyond this PC. Types: `keepass` (target = `.kdbx` path). Target type from target: `.kdbx` → keepass; `<word>:` prefix (≥ 2 letters) → that type (`azkv:`, `keeper:`, `vault:` reserved) → error "not supported yet".
-- common stores = this PC: `%LOCALAPPDATA%\LocalVault\stores.json` `{ schema: 1, default?: name, stores: [{ name, type, target, keyFile?, id?, unlockWith?, mirror? }] }`, per Windows account & machine, ⊥ secrets. Absent & `keepass.json` ∃ → converted once (`databases[].path` → `target`, type keepass); `keepass.json` left untouched.
+- common stores = this PC: `%LOCALAPPDATA%\LocalVault\stores.json` `{ schema: 1, default?: name, personal?: name, stores: [{ name, type, target, keyFile?, id?, unlockWith?, mirror? }] }`, per Windows account & machine, ⊥ secrets. Absent & `keepass.json` ∃ → converted once (`databases[].path` → `target`, type keepass); `keepass.json` left untouched.
 - project stores = `localvault.json` `stores: [{ name, type?, target?, id?, mirror? }]`; item w/o target = reference to the PC store of that name (⊥ keyFile: personal → common store w/ same target or id supplies it).
 - name ∈ `[A-Za-z0-9._-]+`, case-insensitive unique per level. `%VAR%` in target & keyFile kept literal, expanded at use.
+
+### Personal store
+
+- personal value := entry w/ `meta.required` & value set (each person's own value of a declared entry).
+- personal store := common store named by `stores.json` `personal` (≤ 1, PC only, ⊥ project level, ⊥ default). Absent → personal values stay on this PC.
+- holds personal values, same group layout as §I.KeePass (per project & vault); entry = value as kind secret|credential|file, ⊥ declaration. Personal values ⊥ sent to any other store.
+- personal file value (e.g. SSH private key): file entry w/ `meta.required`; stored path may be `~/<rel>` = under `%USERPROFILE%` (V118); `~/` paths ⊥ for other entries. Declaration shape `file` (`lv require <name> --file <path>`) carries a default path (`meta.required.path`, KeePass `LocalVault.RequiredPath`).
+- personal store may also be a mirror (`--mirror`, V95) → copy of shared entries + personal values in the same groups.
+- personal store id = id of the vault's primary (same DB) → console: warning (personal values readable by everyone w/ access to that DB) + one question per run, default no; yes → declaration & value in one entry (`LocalVault.Kind` = required, Notes = note, value fields set); no | non-interactive → personal values ⊥ written there, warning.
+- sync state per DB id (V79): personal value's base in `meta.kp."personal:<db id>"` (content hash of the value), removal markers `db: "personal:<db id>"`; ⊥ mixed w/ the declaration's base, even in the same DB.
 
 ### KeePass
 
@@ -140,6 +150,7 @@ cmd: Get-VaultEntryList [-Scope s]                      → {Name, Kind, Created
 cmd: Get-VaultEntry -Name n [-AsPlainText]              → secret: SecureString | string; file: byte[]
 cmd: Set-VaultEntry -Name n -Value <SecureString>       → secret; pipeline SecureString ok
 cmd: Set-VaultEntry -Name n -FilePath p [-StoredPath r] → file entry; meta.path = r ?? p rel. to vault dir
+cmd: Set-VaultEntry -Name n -Required [-Credential] [-Note t]  → declaration; -Credential → shape credential (V114)
 cmd: Set-VaultEntry -Name n -Credential [-UserName u] [-Password <SecureString>] [-Totp <SecureString>] [-Url a,b]
                                                         → credential entry; missing parts asked (V104)
 cmd: Set-VaultEntry -Name n#part [-Value <SecureString>] → one part of a credential (V105)
@@ -166,10 +177,12 @@ cmd: Copy-VaultToStore [-Target] kdbx [-KeyFile k] | -Store s
                                                         → one-off: ∀ shared entry Put into same group; ⊥ removal, ⊥ vault write (V70)
 cmd: Compare-VaultWithStore [-Store s]                  → {Name, Kind, State}[]; State ∈ Saved|New|Changed|ChangedInKeePass|Conflict|OnlyInKeePass|RemovedInKeePass|RemovalPending|Local
 cmd: Get-VaultStoreStatus [-Store s]                    → {Vault, Group, Store, Scope, Target, Problem, UnlockWith, Shared, Saved, Pending, Local, RemovalsPending}; ⊥ store opened
-cmd: Register-VaultStore [-Name n] [-Target] t [-KeyFile k] [-Default] [-UnlockWith s] [-Project]
+cmd: Register-VaultStore [-Name n] [-Target] t [-KeyFile k] [-Default] [-UnlockWith s] [-Personal] [-Project]
                                                         n ?? target file name w/o extension, invalid chars → `-`; common: files must exist; -Project: localvault.json, ⊥ -KeyFile, ⊥ -UnlockWith, -Default → project default
 cmd: Unregister-VaultStore [-Name] n [-Project]         → remove; project store used by a vault → error naming vaults
-cmd: Get-VaultStore [[-Name] n]                         → {Name, Scope, Type, Target, KeyFile, Default, UnlockWith, Exists}[]; project stores first
+cmd: Set-VaultStore [-Name] n [-Mirror[:$false]] [-UnlockWith s | -NoUnlock] [-Default] [-Personal[:$false]] [-Project]
+                                                        → named settings only (V102); -Personal: ⊥ with -Project, clears it on any other store
+cmd: Get-VaultStore [[-Name] n]                         → {Name, Scope, Type, Target, KeyFile, Default, Personal, UnlockWith, Exists}[]; project stores first
 cmd: Clear-Vault                                        → delete vault, ConfirmImpact High
 ```
 
@@ -182,7 +195,7 @@ cmd: lv | lv help | lv --help | lv -h   commands + resolved vault path & state; 
 cmd: lv start [--path v]     project, vaults, stores → "Next:" commands ready to paste (carry --path); ⊥ store opened
 cmd: lv list [scope]       no entry → info line: vault missing | empty
 cmd: lv set <name> [--file <path>] [--local]   secret: stdin if redirected, else hidden prompt; --file → file entry
-cmd: lv require <name> [--note <text>]   Set-VaultEntry -Required
+cmd: lv require <name> [--credential] [--note <text>]   Set-VaultEntry -Required [-Credential]
 cmd: lv mark <name> shared|local         Set-VaultEntry -Sharing
 cmd: lv get <name> [--show]   plaintext to pipeline if output redirected|captured; on screen only w/ --show, else refuse w/ usage
 cmd: lv clip <name>            Copy-VaultEntry: clipboard, cleared after 20 s
@@ -193,7 +206,8 @@ cmd: lv export <file> [--overwrite] | lv import <file> [--replace a,b | --replac
 cmd: lv save | lv load [--store s] [--replace a,b | --replace-all]   every vault of the repository (--path: one)
 cmd: lv store                  Get-VaultStoreStatus per vault + stores; ⊥ store opened
 cmd: lv store list             Get-VaultStore
-cmd: lv store add [<name>] <target> [<keyfile>] [--project] [--default] [--unlock-with <store>]
+cmd: lv store add [<name>] <target> [<keyfile>] [--project] [--default] [--personal] [--unlock-with <store>]
+cmd: lv store set <name> [--mirror|--no-mirror] [--unlock-with <store>|--no-unlock] [--default] [--personal|--no-personal] [--project]
 cmd: lv store rm <name> [--project]
 cmd: lv store use <name>       Set-VaultProjectStore (--path: that vault only)
 cmd: lv store diff [--store s] Compare-VaultWithStore
@@ -225,7 +239,7 @@ V16: plaintext buffers (BSTR, byte[]) zeroed after use where API allows (`ZeroFr
 V17: ∀ write creating vault file (new or migration) in git repo → `git check-ignore` ! ignored; not ignored | git fails | git missing → error, nothing written (fail closed). git run from nearest existing dir, timeout.
 V18: `Use-VaultEnv` → current process env only; ⊥ user/machine env, ⊥ profile.
 V19: `Resolve-VaultEntry` → `-Name` must be unscoped key; scoped value wins over fallback; neither → error naming both tried names.
-V20: ∀ rewrite → unknown body/entry/meta fields & unknown kinds kept verbatim. body `schema` > 2 → read allowed, write refused (newer module wrote it).
+V20: ∀ rewrite → unknown body/entry/meta fields & unknown kinds kept verbatim. body `schema` > current (4) → read allowed, write refused (newer module wrote it).
 V21: missing vault created only if path from `-Path`|env, or person confirms (prompt names path). Non-interactive default path → error. ∃ other `secrets.local.*` under git root → error naming it, nothing created.
 V22: import → conflicts computed & resolved w/o lock; then under lock re-read; vault changed since → abort, nothing written, say re-run.
 V23: export → write temp beside dest, decrypt-verify temp w/ same passphrase, then rename. Existing dest → refuse unless `-Overwrite`. Verify fail → temp deleted, error.
@@ -236,7 +250,7 @@ V27: `.lv` & clixml both present & ∀ mapped clixml entry ∈ `.lv` w/ equal va
 V28: case-only name clash (migration, import, v1 body) → import: conflict per V6; migration: error, nothing written. ⊥ silent drop.
 V29: lock file ⊥ deleted.
 V30: before replace → temp read back, unsealed; plaintext bytes = intended body; fail → temp deleted, vault untouched, error. Replace fails & vault missing → `.bak` moved back, temp kept, error.
-V31: `Export-Vault` success → `lastExported` set in body (normal write). `Get-VaultEntryList` & `lv list` warn if (`lastExported` absent | > 30 days) & ∃ entry only on this PC: value set & (store ⊥ known | `meta.local` | required personal value); warning lists names, ⊥ values.
+V31: `Export-Vault` success → `lastExported` set in body (normal write). `Get-VaultEntryList` & `lv list` warn if (`lastExported` absent | > 30 days) & ∃ entry only on this PC: value set & (store ⊥ known | `meta.local` | personal value ⊥ saved in personal store (⊥ base for its DB id)); warning lists names, ⊥ values.
 V32: `Restore-VaultFile -Destination dir` → meta.path resolved under dir instead of vault dir; same V14 rules.
 V33: `backup` field (passphrase, keyfile) ⊥ in any export; ⊥ shown by any cmdlet.
 V34: superseded by V111.
@@ -281,7 +295,7 @@ V72: `lv` tab completion: commands, subcommands, options taken by the command, v
 V73: superseded by V110 (⊥ `-Ref`, ⊥ worktree install).
 V74: `lv start` ⊥ write, ⊥ KeePass open, ⊥ value shown; suggestions: register DB if none; .gitignore if vault not ignored; subfolder vault if default absent; `kp load` (& `kp save` when pending) once DB registered.
 V75: `Copy-VaultEntry` → secret only; clipboard data marked `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0, `CanUploadToCloudClipboard`=0; cleared after -Seconds (default 20) or at process exit, only if clipboard sequence number unchanged; value ⊥ printed.
-V76: required entry (kind `required` = declared, no value; secret w/ `meta.required` = personal value set): KeePass ⊥ value, gets declaration (`LocalVault.Kind`=required, Notes = note), sync hash over declaration; load ⊥ overwrite a personal value; export drops personal value (keeps declaration); read of missing value → error w/ note; `-Sharing` refused.
+V76: required entry (kind `required` = declared, no value; secret w/ `meta.required` = personal value set): KeePass ⊥ value, gets declaration (`LocalVault.Kind`=required, Notes = note), sync hash over declaration; KeePass entry kind ≠ required → value fields removed; already required → value fields kept (personal store = primary, §I.Personal store); load ⊥ overwrite a personal value; export drops personal value (keeps declaration); read of missing value → error w/ note; `-Sharing` refused.
 V77: project file names DB → ∀ save|load|list refuse another DB (id compare after open), nothing written. Project file ⊥ secret.
 V78: unlock: master of a store w/ unlocker read from unlocker's `AutoOpen` only; LocalVault writes AutoOpen only after person confirms (interactive); unlocker save = merge-on-save. ⊥ password cached in registry or vault.
 V79: sync base, removal markers per DB id; copy to / sync with DB B ⊥ changes state for DB A.
@@ -311,7 +325,7 @@ V98: `lv --version` → `LocalVault <ver>[-<pre>]` from manifest; `lv` / `lv --h
 V99: template = `<file>.template` (committed) beside real file (! git-ignored, ! under repo root); `localvault.json` `templates: [{ path, template, vault }]`. Placeholder `{{name}}` (⊥ spaces in braces). Template ⊥ contains any vault secret value ≥ 6 chars (checked before every template write). Render: real file ⊥ git-ignored | missing value → error, nothing written; required missing → note named.
 V100: `template add`: from real file (vault values ≥ 6 chars → placeholders; `--capture KEY` → KEY line value into new entry) else from `<file>.example` (known names & captured keys → placeholders; captured → required declarations). `template update`: real-file edits → template; changed secret → vault only w/ `-AcceptChanges` | console yes; non-interactive w/o → error, nothing written; placeholder line shape changed → error.
 V101: `lv run [VAR=name ...] [--] <cmd>`: vars set for the command only, restored after; all repo templates written before, deleted after in all cases; exit code passed through. `Clear-Vault` deletes files written from that vault's templates (console: asked).
-V102: `Set-VaultStore` / `lv store set` changes only named settings (mirror, unlock-with, default); target & keyFile kept. `lv store` lists every store after the vault table.
+V102: `Set-VaultStore` / `lv store set` changes only named settings (mirror, unlock-with, default, personal); target & keyFile kept. `lv store` lists every store after the vault table.
 
 V103: release = `tools/release.ps1` on a maintainer PC: `azuresigntool`, `az` logged in & `gh` logged in checked first; commit ! on remote; tag := `v<ModuleVersion>[-<Prerelease>]` from that commit's manifest, ⊥ existing; full test suite & build in a temp `git worktree` of the commit (⊥ uncommitted file counts); every `.dll`/`.ps1`/`.psm1`/`.psd1` of the package signed via Azure Key Vault (`-kvm` = own `az login`, cert `-CertificateName`, RFC 3161 timestamp) and then checked Valid + timestamped + signer GIT; any failure → ⊥ tag. Then annotated tag + push, zip + SHA256, `gh release create` (`LocalVault.zip`, `.sha256`, `install.ps1`); failed upload → error w/ the command to rerun, assets kept in `out/release/<tag>`. `-Unsigned` (tests) → tag only, ⊥ GitHub release. Worktree removed in all cases.
 
@@ -323,6 +337,16 @@ V109: ∀ store write (`lv save` primary & mirrors, `Copy-VaultToStore`): instal
 V110: `install.ps1` download: `<source>/latest/download/` | `<source>/download/<tag>/` (`-ReleaseSource`, default GitHub releases; local folder for tests) → `LocalVault.zip` & `.sha256`; hash ≠ → error, nothing installed; unpacked `install.ps1` signature checked before it runs. Unpacked release install: every `.dll`/`.ps1`/`.psm1`/`.psd1` ! Authenticode Valid & signer simple name `GIT Gestion Et Informatique Pour Tous S.A.`, else error listing files, nothing installed; `-AllowUnsigned` (dev/tests) skips; checkout builds ⊥ checked. Install line (README, SKILL, KeePass install entry) = one constant, fresh temp folder per run.
 V108: template placeholders take `{{name#part}}`; render computes `#totp` at write time; `template update` compares password/user/url parts, ⊥ totp; changed user/url → stored in that part.
 V111: ∀ cmdlet (`lv` included) except `Clear-Vault` → before its own work, leftovers (§I.Old backups) ∃ → interactive: one question per vault per PowerShell session; yes → delete, `backup` removed from body & `.bak` deleted (key ⊥ left in previous generation); no → kept, asked again next session. Non-interactive → warning, ⊥ change. Search failure → silent, command proceeds.
+V112: `Export-VaultToStore` w/o `-Store` & personal store defined & reachable → ∀ vault: personal values → personal store by V66 rules (personal values instead of shared entries; content hash over value only; declaration ⊥ sent there). Personal store also mirror → shared entries per V95 in the same run; its personal-value entries ⊥ reported as only-in-mirror. Same run, same open (V96): personal store = unlocker of project store → opened once. Unreachable → warning, rest of save proceeds. Mirrors ⊥ get personal values. Guide entries (V109) as any store.
+V113: `Import-VaultFromStore` & personal store defined & reachable → after project stores: ∀ vault: personal store entries in vault group → V67 rules restricted to entries the vault declares required (other names → ignored, silent: mirror copies); personal value only filled|updated, declaration ⊥ changed. Unreachable → warning, load proceeds.
+V114: declaration shape credential (`-Required -Credential`) → `meta.required.shape = "credential"`; KeePass declaration gets `LocalVault.Shape = credential`; sync hash over note & shape. `lv set <name>` on a credential declaration → credential prompts (V106). Shape ⊥ credential → secret prompt. Body schema 4; schema 3 → 4 no-op upgrade.
+V115: after `Import-VaultFromStore` (`lv load`), ∀ vault, ∀ required entry still missing: interactive → asked one by one (vault & name & note shown; shape credential → user then password; secret → hidden value; empty → skipped, stays missing). Typed values → one vault write per vault; then personal store defined → "Save N value(s) to personal store <name>?" default yes → yes: written per V112 (personal pass only) in this run; no → stay on this PC. Personal store ⊥ defined → warning: values only on this PC, `lv store set <name> --personal`. Non-interactive → missing names listed, ⊥ prompt.
+V116: read (`Get-VaultEntry`, `Copy-VaultEntry`, `Use-VaultEnv`, template render) → after V85 load when it applies, requested entry required & still missing & interactive (V85 conditions: console, input ⊥ redirected, ⊥ `-NonInteractive`) → that entry asked on the host UI (⊥ pipeline output; V115 prompt & save offer), then read retried. Else plain error, as today.
+V117: `lv start` → personal values ∃ & personal store ⊥ defined → suggests `lv store set <name> --personal`.
+V118: stored path `~/<rel>` → `<USERPROFILE env | profile folder>/<rel>`, same segment rules as V-rel paths (⊥ `..`, ⊥ `.git`, ⊥ vault file), stays under the profile; only on required entries (else error, nothing written). Value path: `-StoredPath` > declaration path > `~/` form of `-FilePath` when under the profile > vault-relative. Declaration hash covers note, shape & path.
+V119: file written to a `~/` path (`Restore-VaultFile`, `lv load`) → created w/ protected ACL: current user, SYSTEM, Administrators full control, ⊥ inherited; missing folders created the same way. Existing file differing → kept unless `-Overwrite` | console yes.
+V120: after `Import-VaultFromStore` (& its prompts) → ∀ personal file value w/ `~/` path & target absent → written (V119), reported by path; target ∃ & differs → warning naming `lv restore <name> --overwrite`; ⊥ overwrite. Prompt for a missing file-shaped value (V115) asks a file path (empty → declaration path if it exists, else skipped).
+V121: SSH private keys allowed as personal values (supersedes "no SSH key in the vault" for personal values only); `SAAS-VAULT-1` `__SshPrivateKey` import refusal unchanged.
 
 ## §T Tasks
 
@@ -412,6 +436,8 @@ T81|x|guide entries in stores: `Repository origin` per repo group, install instr
 T82|x|public on GitHub (`GIT-S-A/LocalVault`), GPL-3.0-or-later; internal material kept local; install entry w/ retired ADO URL updated; beta14|V109,C9
 T83|x|signed GitHub releases made by `tools/release.ps1` (Key Vault, azuresigntool), `install.ps1` download/bundle/checkout modes, `lv update` via installed `install.ps1`; ⊥ `-Ref`, ⊥ `source.txt`; module-made install entries get the release line; beta14|C9,V83,V98,V103,V109,V110
 T84|x|automatic backups removed: ⊥ `Enable/Disable/Invoke/Test/Get-VaultBackup`, ⊥ `lv backup`; leftovers found & offered for deletion by every command, deleted by `Clear-Vault`; `.lvbak` still imported; export warning narrowed to entries only on this PC; beta15|V31,V33,V39,V111,I.Old backups
+T86|x|personal file values (SSH keys): `lv require --file <path>`, `~/` stored paths, owner-only ACL, `lv load` writes missing ones; beta16|I.Personal store,V118-V121
+T85|x|personal store (`stores.json` `personal`, `-Personal`/`--personal`), personal values saved to & loaded from it, missing required values asked by `lv load` w/ save offer, credential declarations (`lv require --credential`), body schema 4; beta16|I.Personal store,V31,V102,V112-V117
 
 ## §B Bugs
 

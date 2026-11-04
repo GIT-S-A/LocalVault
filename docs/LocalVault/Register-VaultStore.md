@@ -21,7 +21,7 @@ Defines a store on this PC or in the project.
 
 ```
 Register-VaultStore [[-Target] <string>] [-Name <string>] [-KeyFile <string>] [-Default]
- [-UnlockWith <string>] [-Mirror] [-Project] [-Path <string>] [-WhatIf] [-Confirm]
+ [-UnlockWith <string>] [-Mirror] [-Personal] [-Project] [-Path <string>] [-WhatIf] [-Confirm]
  [<CommonParameters>]
 ```
 
@@ -62,6 +62,12 @@ this PC, whatever the project, such as a private copy of all your projects; a mi
 receives the project's vaults, on every PC that can reach it. A mirror that can't be opened gives a
 warning and the save continues. `Import-VaultFromStore` doesn't read mirrors unless you name one with
 its **Store** parameter.
+
+With **Personal**, the store becomes this PC's personal store: `Export-VaultToStore` writes each
+value of a required entry set on this PC there, in the same group as the vault's group in the project
+store, and `Import-VaultFromStore` fills in the required values from it. A PC has at most one
+personal store; naming another one replaces it. A personal store that is also a mirror holds a copy
+of the shared entries as well. **Personal** isn't accepted with **Project**.
 
 With **UnlockWith**, the store is opened with a password kept in another store of this PC, usually
 your personal KeePass database: LocalVault opens that other store first, asking for its password,
@@ -116,7 +122,13 @@ Each PC defines its own `team` store, with its own path and key file. Every save
 Register-VaultStore -Name mine -Target '%OneDrive%\KeePass\mine.kdbx' -KeyFile E:\mine.keyx -Mirror
 ```
 
-### Example 5 - Open the team database with the password kept in your personal one
+### Example 5 - Keep your own values and a copy of every project in your personal database
+
+```powershell
+Register-VaultStore -Name mine -Target '%OneDrive%\KeePass\mine.kdbx' -Mirror -Personal
+```
+
+### Example 6 - Open the team database with the password kept in your personal one
 
 ```powershell
 Register-VaultStore -Name mine -Target '%OneDrive%\KeePass\mine.kdbx' -KeyFile E:\mine.keyx
@@ -226,6 +238,27 @@ With **Project**, the vault's repository is the project.
 ```yaml
 Type: System.String
 DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
+### -Personal
+
+Indicates that the store is this PC's personal store: it keeps your own values of required entries.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
 SupportsWildcards: false
 Aliases: []
 ParameterSets:
@@ -372,7 +405,7 @@ This cmdlet returns the store, as `Get-VaultStore` does.
 
 ## NOTES
 
-`lv store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror]` and
+`lv store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal]` and
 `lv store add <name> [<target>] --project [--default] [--mirror]` run this cmdlet.
 
 ## RELATED LINKS
