@@ -1,16 +1,18 @@
 using System.Security.AccessControl;
 using System.Security.Principal;
 
-namespace LocalVault.PowerShell;
+namespace LocalVault.Core;
 
-internal static class PrivateFile
+public static class PrivateFile
 {
+    public static void CreateFolder(string folder) => new DirectoryInfo(folder).Create(FolderSecurity());
+
     public static void Write(string path, ReadOnlySpan<byte> content)
     {
         var folder = Path.GetDirectoryName(path)!;
         if (!Directory.Exists(folder))
         {
-            new DirectoryInfo(folder).Create(FolderSecurity());
+            CreateFolder(folder);
         }
 
         if (File.Exists(path))
