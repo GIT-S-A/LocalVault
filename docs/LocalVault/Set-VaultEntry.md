@@ -104,6 +104,9 @@ the profile. Only a required entry's own value can have a `~/` path.
 `Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
 defined, and `Import-VaultFromStore` fills it in on another machine.
 
+The cmdlet refuses an SSH key entry, except with **Sharing**: a key is created with
+[New-VaultSshKey](New-VaultSshKey.md), and replaced with its **Replace** parameter.
+
 When the vault doesn't exist, the cmdlet creates it. It fails when git doesn't ignore the vault
 file. At the default path, it also fails when the repository has a vault file in another folder,
 and asks before it creates the vault; with **Path**, a repository can hold several vaults.

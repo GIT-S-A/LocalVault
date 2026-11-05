@@ -168,6 +168,19 @@ Describe 'SSH keys' {
         { Set-VaultSshKeyHost -Path $script:vault -Name deploy -HostName '-oProxyCommand=calc' } | Should -Throw '*is not a host*'
     }
 
+    It 'refuses to set an SSH key as a plain value' {
+        New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+        $other = Join-Path $env:USERPROFILE 'other-key'
+        Set-Content -LiteralPath $other -Value 'OTHER'
+
+        { Set-VaultEntry -Path $script:vault -Name deploy -FilePath $other -StoredPath '~/.ssh/proj/deploy' } | Should -Throw '*lv ssh-key new deploy --replace*'
+        { Set-VaultEntry -Path $script:vault -Name deploy -Value (ConvertTo-TestSecret 'x') } | Should -Throw '*is an SSH key*'
+        { Set-VaultEntry -Path $script:vault -Name 'deploy#user' -Value (ConvertTo-TestSecret 'x') } | Should -Throw '*is an SSH key*'
+        { Set-VaultEntry -Path $script:vault -Name deploy -Required } | Should -Throw '*is an SSH key*'
+        Set-VaultEntry -Path $script:vault -Name deploy -Sharing Local 6>$null
+        (Get-VaultSshKey -Path $script:vault -Name deploy).Type | Should -Be 'ed25519'
+    }
+
     It 'names the key file after the entry name' {
         $info = New-VaultSshKey -Path $script:vault -Name common/deploy -Shared 6>$null 3>$null
         Split-Path -Leaf $info.Path | Should -Be 'common.deploy'

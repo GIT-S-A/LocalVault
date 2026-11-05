@@ -280,11 +280,18 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     {
         if (Name.Contains(EntryReference.PartSeparator, StringComparison.Ordinal))
         {
-            SetPart(EntryReference.Parse(Name));
+            var reference = EntryReference.Parse(Name);
+            RefuseSshKey(reference.Name);
+            SetPart(reference);
             return;
         }
 
         var name = EntryName.Parse(Name);
+        if (ParameterSetName != SharingSet)
+        {
+            RefuseSshKey(name);
+        }
+
         if (ParameterSetName == RequiredSet)
         {
             if (ShouldProcess($"{name} in {Location.Path}", "Declare required"))
@@ -404,6 +411,16 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         }
 
         Say(text.Length == 0 ? $"Removed {reference}" : $"Stored {reference}");
+    }
+
+    private void RefuseSshKey(EntryName name)
+    {
+        if (VaultFile.Read().Body.Find(name) is { IsSshKey: true } key)
+        {
+            throw new VaultException(key.IsMissing
+                ? $"'{name}' is declared as an SSH key. Create yours with lv ssh-key new {name} (New-VaultSshKey). Nothing was changed."
+                : $"'{name}' is an SSH key. Replace it with lv ssh-key new {name} --replace (New-VaultSshKey -Replace). Nothing was changed.");
+        }
     }
 
     private static string Label(EntryReference reference) => reference.Part switch
