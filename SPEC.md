@@ -11,7 +11,7 @@ One machine-local secret store per project: PS module (contract) + thin CLI + Cl
 - C3: C# where logic lives: `LocalVault.Core` (no PS dependency) holds names, body, formats, crypto, store, backup, KeePass sync & registry. `LocalVault.PowerShell` = binary cmdlets (contract): prompts, SecureString, ShouldProcess, env. Legacy clixml read needs PS deserializer → cmdlet layer. CLI = dispatch only.
 - C4: vault in consuming project folder, gitignored. ⊥ `%LOCALAPPDATA%` for vault (KP registry, ⊥ secret, lives there).
 - C5: one vault file may serve several scripts of one project.
-- C6: SSH keys ⊥ in vault (place = KeePass/KeeAgent).
+- C6: SSH keys = `ssh-key` entries (§I.SSH keys), personal | shared, for SSH to hosts only; ⊥ git wiring (git over HTTPS). `__Ssh*` legacy import refused (V10, V139).
 - C7: dev & tests ⊥ read real vault file; temp vaults only. `reference/` (local, ⊥ published) read-only, ⊥ imported at runtime.
 - C8: formats evolve. ∀ published format (beta incl.) readable forever. Additive change (new field, new kind) → no bump (V20). Change old module can't rewrite safely → body `schema`+1. Change old module can't read (layout, sealing) → new magic `LOCALVAULT-<n+1>`. Crypto parameters in header → new KDF cost|cipher ⊥ new magic.
 - C9: distribution = signed GitHub releases of `GIT-S-A/LocalVault` (assets `LocalVault.zip` = `install.ps1` + `LocalVault/<ModuleVersion>/` + `skills/localvault/`, `LocalVault.zip.sha256`, `install.ps1`), made locally by `tools/release.ps1`; ⊥ CI pipeline (V103), ⊥ package feed, betas ⊥ GitHub prerelease flag (`/releases/latest` must reach them). `install.ps1` 3 modes: next to `LocalVault/<ver>/` (unpacked release) → installs it; in a checkout (`src/`) → builds it (.NET 10 SDK; PlatyPS 1.0.3 from PSGallery if missing), dev only, unsigned; `-Latest` | `-Version <tag>` | neither → downloads release (V110). Destination per V94, side by side by `<ModuleVersion>`; Claude skill → `~\.claude\skills\localvault` when `~\.claude` ∃. Module folder carries `install.ps1`: `lv update [<tag>]` runs it w/ `-Latest` | `-Version <tag>`. Consumers pin w/ `#Requires -Modules`. Semver in manifest = tag; prerelease label = manifest `PSData.Prerelease` (letters & digits).
@@ -46,8 +46,8 @@ skills/localvault/SKILL.md                   Claude skill: install line, usage
 ### Entry & body
 
 ```
-entry := { name, kind: "secret"|"file"|"credential"|"required", value: base64 ("" for required), meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file", path?: string }, kp?: { hash: hex, at: ISO-8601 UTC } } }
-body  := { schema: 4, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }] }   UTF-8 JSON
+entry := { name, kind: "secret"|"file"|"credential"|"required", value: base64 ("" for required), previous?: base64, meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file"|"ssh-key", path?: string, hosts?: [string] }, kp?: { hash: hex, at: ISO-8601 UTC }, ssh?: { type: "ed25519"|"rsa"|"ecdsa", hosts: [string], agent?: true, replacedAt?: ISO-8601 UTC }, ref?: { db: hex, uuid: hex, attachment?: string } } }
+body  := { schema: 5, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }] }   UTF-8 JSON
 ```
 
 - unknown body fields, entry fields, meta fields, kinds → kept verbatim on rewrite (V20).
@@ -72,10 +72,28 @@ body  := { schema: 4, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entr
 - personal value := entry w/ `meta.required` & value set (each person's own value of a declared entry).
 - personal store := common store named by `stores.json` `personal` (≤ 1, PC only, ⊥ project level, ⊥ default). Absent → personal values stay on this PC.
 - holds personal values, same group layout as §I.KeePass (per project & vault); entry = value as kind secret|credential|file, ⊥ declaration. Personal values ⊥ sent to any other store.
-- personal file value (e.g. SSH private key): file entry w/ `meta.required`; stored path may be `~/<rel>` = under `%USERPROFILE%` (V118); `~/` paths ⊥ for other entries. Declaration shape `file` (`lv require <name> --file <path>`) carries a default path (`meta.required.path`, KeePass `LocalVault.RequiredPath`).
+- personal file value (e.g. SSH private key): file entry w/ `meta.required`; stored path may be `~/<rel>` = under `%USERPROFILE%` (V118); `~/` paths ⊥ for other entries, except shared `ssh-key` entries (V122). Declaration shape `file` (`lv require <name> --file <path>`) carries a default path (`meta.required.path`, KeePass `LocalVault.RequiredPath`).
 - personal store may also be a mirror (`--mirror`, V95) → copy of shared entries + personal values in the same groups.
 - personal store id = id of the vault's primary (same DB) → console: warning (personal values readable by everyone w/ access to that DB) + one question per run, default no; yes → declaration & value in one entry (`LocalVault.Kind` = required, Notes = note, value fields set); no | non-interactive → personal values ⊥ written there, warning.
 - sync state per DB id (V79): personal value's base in `meta.kp."personal:<db id>"` (content hash of the value), removal markers `db: "personal:<db id>"`; ⊥ mixed w/ the declaration's base, even in the same DB.
+- reference (V131): personal store entry in vault group may point to an entry elsewhere in the same DB instead of holding the value; module ⊥ writes outside `LocalVault/` groups.
+
+### SSH keys
+
+- ssh-key entry := file entry w/ `meta.ssh`; personal (declaration shape `ssh-key`, value in personal store) | shared (project store). For SSH to hosts; ⊥ git.
+- value = private key (OpenSSH format) | public key when `meta.ssh.agent` (private key stays in the agent). `previous` = replaced key while not retired (V129).
+- hosts := `[user@]host[:port]` list, ⊥ secret; personal → `meta.required.hosts` (shared w/ declaration); shared → `meta.ssh.hosts`.
+- `<repo>` := last segment of `git remote get-url origin` w/o `.git`; ⊥ origin → git root leaf. Fixed at creation in the stored path → same path in every clone & for every teammate.
+- file := entry name, `/` → `.`, `:` → `_`; two entries → same file → second refused.
+- files: `~/.ssh/<repo>/<file>`, `<file>.pub`, while `previous`: `<file>.old`, `<file>.old.pub`; agent key → `<file>.pub` only. ACL per V119.
+- marker `~/.ssh/<repo>/.localvault` (⊥ secret, UTF-8 JSON) `{ schema: 1, origin, keys: { <file>: { fingerprint, writtenAt: ISO-8601 UTC, writtenBy: <vault path>, users: [<vault path>...] } } }`; lock `.localvault.lock` (V3 rules).
+- `~/.ssh/<repo>/lv.config` (V134): one block per host of each entry.
+- KeePass: attachment `<file>` (value), `<file>.old` (previous); `LocalVault.SshType`, `LocalVault.SshHosts` (one per line), `LocalVault.SshAgent` = `true`, `LocalVault.ReplacedAt`. Content hash of ssh-key entry covers value, previous & hosts; declaration hash (V118) covers hosts.
+- orphan := marker user whose vault file ⊥ exists (V133).
+
+### PC settings
+
+`%LOCALAPPDATA%\LocalVault\settings.json` (per Windows account & machine, ⊥ secrets, ⊥ project level) `{ schema: 1, sshDir?: "<absolute folder>", sshInclude?: true|false }`. Unknown fields kept.
 
 ### KeePass
 
@@ -184,6 +202,18 @@ cmd: Set-VaultStore [-Name] n [-Mirror[:$false]] [-UnlockWith s | -NoUnlock] [-D
                                                         → named settings only (V102); -Personal: ⊥ with -Project, clears it on any other store
 cmd: Get-VaultStore [[-Name] n]                         → {Name, Scope, Type, Target, KeyFile, Default, Personal, UnlockWith, Exists}[]; project stores first
 cmd: Clear-Vault                                        → delete vault, ConfirmImpact High
+cmd: Set-VaultEntry -Name n -Reference "<group/title>"  → personal value as reference (V131)
+cmd: Reset-VaultEntry -Name n[] [-NoPrompt]             → personal value removed, asked again (V137)
+cmd: New-VaultSshKey -Name n [-Host h[]] [-Shared] [-Type ed25519|rsa|ecdsa] [-Comment c] [-Overwrite]
+                                                        → key pair generated & stored (V123, V124)
+cmd: Set-VaultSshKeyHost -Name n -Host h[]              → hosts replaced
+cmd: Get-VaultSshKey [[-Name] n]                        → {Name, Sharing, Source(file|agent|reference), Type, Fingerprint, Hosts, Previous, Path}[]; ⊥ value
+cmd: Get-VaultSshKeyPath -Name n                        → current key path (agent → .pub); ⊥ fallback
+cmd: Invoke-VaultSsh -Name n [-Target t] [-ArgumentList a[]]   → ssh w/ key & fallback (V136); exit code passed
+cmd: Invoke-VaultScp -Name n -ArgumentList a[]          → scp, same options
+cmd: Remove-VaultSshOrphan                              → orphaned keys deleted, ConfirmImpact High (V133)
+cmd: Set-VaultSshInclude -Enabled bool                  → Include line in ~/.ssh/config (V134)
+cmd: Set-VaultSshTools [-Directory d | -Default]        → settings.json sshDir (V135); w/o args → folder in use
 ```
 
 ### CLI `lv` (alias of `Invoke-LocalVault`, exported by module)
@@ -213,6 +243,17 @@ cmd: lv store use <name>       Set-VaultProjectStore (--path: that vault only)
 cmd: lv store diff [--store s] Compare-VaultWithStore
 cmd: lv store copy <target | name> [--keyfile k]   Copy-VaultToStore
 cmd: lv clear
+cmd: lv set <name> --ref "<group/title>"   Set-VaultEntry -Reference
+cmd: lv reset <name>... [--no-ask]         Reset-VaultEntry
+cmd: lv ssh-key new <name> [--host h]... [--shared] [--type t] [--comment c] [--overwrite]
+cmd: lv ssh-key hosts <name> <host>...
+cmd: lv ssh-key list
+cmd: lv ssh-key path <name>
+cmd: lv ssh-key clean
+cmd: lv ssh-key include on|off
+cmd: lv ssh-key tools [<dir> | --default]
+cmd: lv ssh <name> [<target>] [-- <ssh args>]
+cmd: lv scp <name> -- <scp args>
 cmd: lv update [<tag>] [--downgrade]
 global: --path <vault>
 exit ($LASTEXITCODE): 0 ok, 1 error, 2 import conflicts unresolved
@@ -343,10 +384,28 @@ V114: declaration shape credential (`-Required -Credential`) → `meta.required.
 V115: after `Import-VaultFromStore` (`lv load`), ∀ vault, ∀ required entry still missing: interactive → asked one by one (vault & name & note shown; shape credential → user then password; secret → hidden value; empty → skipped, stays missing). Typed values → one vault write per vault; then personal store defined → "Save N value(s) to personal store <name>?" default yes → yes: written per V112 (personal pass only) in this run; no → stay on this PC. Personal store ⊥ defined → warning: values only on this PC, `lv store set <name> --personal`. Non-interactive → missing names listed, ⊥ prompt.
 V116: read (`Get-VaultEntry`, `Copy-VaultEntry`, `Use-VaultEnv`, template render) → after V85 load when it applies, requested entry required & still missing & interactive (V85 conditions: console, input ⊥ redirected, ⊥ `-NonInteractive`) → that entry asked on the host UI (⊥ pipeline output; V115 prompt & save offer), then read retried. Else plain error, as today.
 V117: `lv start` → personal values ∃ & personal store ⊥ defined → suggests `lv store set <name> --personal`.
-V118: stored path `~/<rel>` → `<USERPROFILE env | profile folder>/<rel>`, same segment rules as V-rel paths (⊥ `..`, ⊥ `.git`, ⊥ vault file), stays under the profile; only on required entries (else error, nothing written). Value path: `-StoredPath` > declaration path > `~/` form of `-FilePath` when under the profile > vault-relative. Declaration hash covers note, shape & path.
+V118: stored path `~/<rel>` → `<USERPROFILE env | profile folder>/<rel>`, same segment rules as V-rel paths (⊥ `..`, ⊥ `.git`, ⊥ vault file), stays under the profile; only on required entries & ssh-key entries (else error, nothing written). Value path: `-StoredPath` > declaration path > `~/` form of `-FilePath` when under the profile > vault-relative. Declaration hash covers note, shape & path.
 V119: file written to a `~/` path (`Restore-VaultFile`, `lv load`) → created w/ protected ACL: current user, SYSTEM, Administrators full control, ⊥ inherited; missing folders created the same way. Existing file differing → kept unless `-Overwrite` | console yes.
 V120: after `Import-VaultFromStore` (& its prompts) → ∀ personal file value w/ `~/` path & target absent → written (V119), reported by path; target ∃ & differs → warning naming `lv restore <name> --overwrite`; ⊥ overwrite. Prompt for a missing file-shaped value (V115) asks a file path (empty → declaration path if it exists, else skipped).
 V121: SSH private keys allowed as personal values (supersedes "no SSH key in the vault" for personal values only); `SAAS-VAULT-1` `__SshPrivateKey` import refusal unchanged.
+V122: ssh-key entry (§I.SSH keys) personal | shared; shared → value in project store like any shared entry, `~/.ssh/<repo>/` path allowed. Personal store ⊥ defined & new personal key → allowed, V31 warning.
+V123: `New-VaultSshKey` → `ssh-keygen -t <type> -N ""` (default ed25519, comment default `<USERNAME>@<COMPUTERNAME> <repo>/<name>`) into target (V119 ACL), value stored, `.pub` written, marker updated (V126), public key printed & copied to clipboard + warning "unusable until someone with access adds this public key". Personal → declaration (shape ssh-key, path, hosts) + value. Shared → warning "private key readable by everyone with access to <store>", ⊥ question.
+V124: entry w/ value & new key (`New-VaultSshKey`, V125 choice, `Set-VaultEntry`) = replacement: entry's store (personal store | project store) ⊥ defined → refused, nothing written. Else console → confirmation (default no) naming marker users (other clones), shared → "every teammate gets the new key on the next lv load", + "old public key stays registered where it was added"; non-interactive → error. Yes → `previous` := old value (an existing `previous` dropped), `meta.ssh.replacedAt` set, `<file>.old` & `.old.pub` written.
+V125: personal ssh-key value missing (V115 at `lv load`, V116 at read): file at stored path ∃ & listed in marker & marker origin = repo origin → adopted (value from file, vault added to users), ⊥ prompt. Else console → choice: 1 key from agent (`ssh-add -L`; value = public key, `meta.ssh.agent`; agent unreachable → choice hidden), 2 existing KeePass entry → reference (V131), 3 new key pair (V123), empty → skipped, stays missing.
+V126: ∀ ssh-key file write → under marker lock: marker origin ≠ repo origin → refused (other repo w/ same name). Target ∃ & ⊥ in marker → refused "`<path>` exists and wasn't written by LocalVault"; `-Overwrite`/`--overwrite` → overwritten, ⊥ copy kept. Target fp = marker fp & `writtenBy` ≠ this vault & `writtenAt` > entry `meta.created` & value fp ≠ → refused "newer key written by <vault> at <time>"; `-Overwrite` forces. After write → fingerprint, writtenAt, writtenBy set, vault ∈ users; users whose vault file ⊥ exists dropped.
+V127: stale vault: `lv load`, `lv list`, `lv start`, ssh-key read → vault value fp ≠ marker fp & target fp = marker fp & `writtenAt` > `meta.created` → vault adopts file w/o question (value := file; `<file>.old` ∃ & fp = old vault value → `previous` := old value); reported "<name>: key adopted from <vault>".
+V128: `previous` set → `Invoke-VaultSsh`/`Invoke-VaultScp` pass `-i <file> -i <file>.old -o IdentitiesOnly=yes`; agent key → `-i <file>.pub`; `lv.config` lists both IdentityFile lines.
+V129: retirement: `Import-VaultFromStore` & `previous` set & hosts ≠ ∅ → ∀ host: `ssh -i <file> -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 <host> exit`, default host-key check (⊥ `accept-new`). All succeed → `previous` & `meta.ssh.replacedAt` removed, `.old` files deleted, `lv.config` rewritten; shared | personal → change reaches the store on next save (three-way), other PCs drop `.old` files on load when entry has no `previous`. Any failure → kept, silent; unknown host key → "not tested: host key unknown for <host>; connect once with lv ssh <name>". Hosts ∅ → `previous` kept until `Clear-Vault`.
+V130: `Clear-Vault` → ∀ ssh-key file of the vault: vault removed from users; users ∅ & target fp = marker fp → `<file>`, `.pub`, `.old`, `.old.pub` deleted, key removed from marker; marker w/o keys → marker, `lv.config` & folder (if empty) deleted; ⊥ `~/.ssh` itself. Other users → kept, reported. Target differs → kept, warning. ⊥ file deleted that marker doesn't list.
+V131: reference: personal store entry in vault group → per part `{REF:<F>@I:<32 hex uuid>}` (U user name, P password, A URL, TOTP fields); file → custom string `LocalVault.Ref` = `<uuid>/<attachment name>`. Resolved by module: only `@I`, same DB, chain ≤ 8; dangling | wrong shape → warning, entry skipped, load proceeds. Vault keeps resolved value + `meta.ref`; three-way on resolved value (central change → taken w/o question). Created by V125 choice 2 | `Set-VaultEntry -Reference`: search personal DB by title excl. `LocalVault/`; entry in another DB → refused. Personal values only; shared entries ⊥ reference.
+V132: referenced value changed locally (`Set-VaultEntry`) → written locally + warning: `WARNING: <name> changed on this PC only.` / `Its value comes from KeePass entry '<group/title>' (store '<store>'); lv save won't change that entry.` / `To change it for every project, edit '<group/title>' in KeePass. To use another source here: lv reset <name>`. `Export-VaultToStore` → that entry refused w/ last 2 lines, rest saved.
+V133: orphans: `lv start`, `lv list`, `Clear-Vault` (after its deletion) → orphans ∃ → "N orphaned SSH keys: lv ssh-key clean"; ⊥ store opened. `Remove-VaultSshOrphan` → lists (repo, key, last write), one confirmation → orphan users removed, keys w/ users ∅ deleted per V130. ⊥ automatic deletion.
+V134: `settings.json` `sshInclude` true → `~/.ssh/config` starts w/ `Include ~/.ssh/*/lv.config` (added once before any `Host`/`Match`; file created if missing; ACL kept). ∀ ssh-key write → `lv.config` rewritten: ∀ entry, ∀ host → `Match host <host> user <user>` (⊥ user → `Match host <host>`) + `IdentityFile` current (+ old) + `IdentitiesOnly yes`. `Set-VaultSshInclude -Enabled:$false` → line removed. First ssh-key file write on PC & `sshInclude` absent & console → question default yes, answer stored; non-interactive → ⊥ asked.
+V135: `ssh.exe`, `ssh-keygen.exe`, `ssh-add.exe` from `settings.json` `sshDir` (absolute, all 3 present, else error naming missing) > `%SystemRoot%\System32\OpenSSH\` > error "Windows OpenSSH client not installed: Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0". ⊥ PATH, ⊥ `%VAR%` in sshDir. Tests substitute via test-only setting.
+V136: `Invoke-VaultSsh` target: given > sole host > error listing hosts; unlisted target allowed (⊥ retirement test). stdin, stdout, stderr passed through; exit code = ssh's. Key missing → V116 prompt in console, else error. Private key path ⊥ printed.
+V137: `Reset-VaultEntry` → personal value only (shared | declaration only | unknown → error, nothing changed); value, `previous` & `meta.ref` removed, declaration kept, removal marker `personal:<db id>` (V78) → next load ⊥ refills, next save deletes | overwrites store copy; ⊥ store opened. Console → V125/V115 prompt at once; `-NoPrompt` skips. ssh-key files untouched; next value = replacement (V124).
+V138: body schema 5 (`previous`, `meta.ssh`, `meta.ref`, shape `ssh-key`); schema 4 → 5 no-op upgrade on first write; older modules refuse to write (C8).
+V139: `__SshPrivateKey` refusal message (V10) → "`__SshPrivateKey` refused: add the key with lv ssh-key new <name> or choose 'existing KeePass entry' at lv load".
 
 ## §T Tasks
 
@@ -438,6 +497,13 @@ T83|x|signed GitHub releases made by `tools/release.ps1` (Key Vault, azuresignto
 T84|x|automatic backups removed: ⊥ `Enable/Disable/Invoke/Test/Get-VaultBackup`, ⊥ `lv backup`; leftovers found & offered for deletion by every command, deleted by `Clear-Vault`; `.lvbak` still imported; export warning narrowed to entries only on this PC; beta15|V31,V33,V39,V111,I.Old backups
 T86|x|personal file values (SSH keys): `lv require --file <path>`, `~/` stored paths, owner-only ACL, `lv load` writes missing ones; beta16|I.Personal store,V118-V121
 T85|x|personal store (`stores.json` `personal`, `-Personal`/`--personal`), personal values saved to & loaded from it, missing required values asked by `lv load` w/ save offer, credential declarations (`lv require --credential`), body schema 4; beta16|I.Personal store,V31,V102,V112-V117
+T87|.|ssh-key entries: `New-VaultSshKey`, hosts, list, path, OpenSSH lookup & `settings.json`, marker (adopt, refuse, users), replacement w/ `previous`, body schema 5, C6 & `__SshPrivateKey` message|C6,I.SSH keys,I.PC settings,V122-V124,V126,V127,V135,V138,V139
+T88|.|`lv load` prompt for missing personal key (adopt, agent, KeePass reference, new pair)|V125
+T89|.|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, Include opt-in & `lv.config`|V128,V129,V134,V136
+T90|.|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
+T91|.|personal values as KeePass references: resolve, three-way on resolved value, `-Reference`, warnings|V131,V132
+T92|.|`Reset-VaultEntry` / `lv reset`|V137
+T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset; beta17|C11
 
 ## §B Bugs
 
