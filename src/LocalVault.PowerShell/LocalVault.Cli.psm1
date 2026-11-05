@@ -22,12 +22,15 @@ $script:LvSyntax = @{
     update  = @{ Usage = 'lv update [<tag>] [--downgrade]'; Min = 0; Max = 1; Options = @('downgrade') }
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @() }
+    'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default]]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'default') }
 }
-$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture')
-$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help')
+$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment')
+$script:LvListOptions = @('host')
+$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared')
 $script:LvSubcommands = @{
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
+    'ssh-key' = @('list', 'new', 'hosts', 'path', 'tools')
 }
 $script:LvEntryCommands = @('get', 'clip', 'rm', 'mark', 'set', 'restore')
 $script:LvTargetPattern = '[\\/]|\.kdbx$|^[A-Za-z][A-Za-z0-9]+:'
@@ -79,6 +82,10 @@ function Get-LocalVaultCompletion {
         }
         elseif ($positional.Count -eq 1 -and $script:LvSubcommands.ContainsKey($command)) {
             $script:LvSubcommands[$command]
+        }
+        elseif ($command -eq 'ssh-key' -and $positional.Count -eq 2 -and $positional[1] -in 'hosts', 'path') {
+            $vault = if ($vaultPath) { @{ Path = $vaultPath } } else { @{} }
+            Get-VaultSshKey @vault -WarningAction SilentlyContinue -ErrorAction SilentlyContinue 6>$null | ForEach-Object Name
         }
         elseif ($script:LvEntryCommands -contains $command -and ($positional.Count -eq 1 -or $command -eq 'restore')) {
             $vault = if ($vaultPath) { @{ Path = $vaultPath } } else { @{} }
@@ -158,6 +165,15 @@ Files that need secrets
   template rm <file>                   stops managing a file
   run [VAR=name ...] [--] <command>    sets the variables, writes the templated files, runs, then deletes them
 
+SSH keys (for SSH to hosts; files in ~/.ssh/<repository>/)
+  ssh-key                              the repository's keys: personal or shared, fingerprint, hosts
+  ssh-key new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa]
+                                       creates a key pair: personal (your own, in your personal store) or
+                                       --shared (one key for the team, in the project's store)
+  ssh-key hosts <name> [<user@host> ...]   the hosts a key is for; none clears them
+  ssh-key path <name>                  the key file, for tools that take -i
+  ssh-key tools [<dir> | --default]    the OpenSSH folder in use; <dir> replaces Windows OpenSSH on this PC
+
   update [<tag>] [--downgrade]         installs the newest LocalVault release, or the given tag
 
 Details: Get-Help Invoke-LocalVault -Full
@@ -199,6 +215,7 @@ Details: Get-Help Invoke-LocalVault -Full
             }
             elseif ($valueOptions -contains $Matches[1]) {
                 if ($i + 1 -ge $Arguments.Count -or $Arguments[$i + 1].StartsWith('--')) { $badOptions.Add("$argument needs a value.") }
+                elseif ($script:LvListOptions -contains $Matches[1]) { $options[$Matches[1]] = @($options[$Matches[1]] | Where-Object { $null -ne $_ }) + $Arguments[++$i] }
                 else { $options[$Matches[1]] = $Arguments[++$i] }
             }
             elseif ($flagOptions -contains $Matches[1]) {
@@ -221,7 +238,7 @@ Details: Get-Help Invoke-LocalVault -Full
         }
         if ($Command -eq '-h') { $Command = 'help' }
         if (-not $syntax.ContainsKey($Command)) {
-            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run update. Run lv alone for details."
+            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run ssh-key update. Run lv alone for details."
         }
 
         $rule = $syntax[$Command]
@@ -542,6 +559,40 @@ Details: Get-Help Invoke-LocalVault -Full
                 }
                 Set-Variable -Name LASTEXITCODE -Scope Global -Value $(if ($null -eq $runExit) { 0 } else { $runExit })
                 return
+            }
+            'ssh-key' {
+                $sub = if ($words.Count -eq 0) { 'list' } else { $words[0] }
+                $rest = @($words | Select-Object -Skip 1)
+                $allowed = @{ list = @(); new = @('host', 'shared', 'type', 'comment', 'overwrite'); hosts = @(); path = @(); tools = @('default') }
+                if (-not $allowed.ContainsKey($sub)) { & $fail "Unknown ssh-key command '$sub'." }
+                foreach ($name in $options.Keys) {
+                    if ($name -notin 'path', 'help' -and $allowed[$sub] -notcontains $name) { & $fail "lv ssh-key $sub doesn't take --$name." }
+                }
+                $expected = @{ list = 0; new = 1; path = 1 }
+                if ($expected.ContainsKey($sub) -and $rest.Count -ne $expected[$sub]) { & $fail "lv ssh-key $sub takes $($expected[$sub]) word(s) after '$sub'." }
+                if ($sub -eq 'hosts' -and $rest.Count -lt 1) { & $fail 'lv ssh-key hosts needs the key name.' }
+                if ($sub -eq 'tools' -and ($rest.Count -gt 1 -or ($rest.Count -eq 1 -and $options['default']))) { & $fail 'lv ssh-key tools takes a folder or --default, not both.' }
+                switch ($sub) {
+                    'list' {
+                        $keys = @(Get-VaultSshKey @vault)
+                        if ($keys.Count -eq 0) { 'No SSH keys in this vault. lv ssh-key new <name> creates one.' }
+                        else { $keys | Format-Table Name, Sharing, Source, Type, Fingerprint, @{ Label = 'Hosts'; Expression = { $_.Hosts -join ', ' } }, Previous -AutoSize }
+                    }
+                    'new' {
+                        $create = @{ Name = $rest[0]; Shared = [bool]$options['shared']; Overwrite = [bool]$options['overwrite'] }
+                        if ($options.ContainsKey('host')) { $create.HostName = @($options.host) }
+                        if ($options.ContainsKey('type')) { $create.Type = $options.type }
+                        if ($options.ContainsKey('comment')) { $create.Comment = $options.comment }
+                        New-VaultSshKey @vault @create | Out-Null
+                    }
+                    'hosts' { Set-VaultSshKeyHost @vault -Name $rest[0] -HostName @($rest | Select-Object -Skip 1) }
+                    'path' { Get-VaultSshKeyPath @vault -Name $rest[0] }
+                    'tools' {
+                        $choice = if ($rest.Count -eq 1) { @{ Directory = $rest[0] } } elseif ($options['default']) { @{ Default = $true } } else { @{} }
+                        $tools = Set-VaultSshTools @choice
+                        "OpenSSH: $($tools.Directory)$(if ($tools.IsDefault) { ' (Windows OpenSSH)' } else { " (from $($tools.Settings))" })"
+                    }
+                }
             }
             'update' {
                 $installer = Join-Path $PSScriptRoot 'install.ps1'

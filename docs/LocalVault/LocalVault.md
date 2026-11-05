@@ -64,6 +64,14 @@ Gets the value of one vault entry.
 
 Gets the names, kinds and ages of the entries in a vault.
 
+### [Get-VaultSshKey](Get-VaultSshKey.md)
+
+Gets the SSH keys of a vault, without their private keys.
+
+### [Get-VaultSshKeyPath](Get-VaultSshKeyPath.md)
+
+Gets the path of the key file of an SSH key entry.
+
 ### [Get-VaultStore](Get-VaultStore.md)
 
 Gets the stores of the project and of this PC.
@@ -87,6 +95,10 @@ Loads the shared entries of the repository's vaults from their stores.
 ### [Invoke-LocalVault](Invoke-LocalVault.md)
 
 Runs a LocalVault command from a short command line.
+
+### [New-VaultSshKey](New-VaultSshKey.md)
+
+Creates an SSH key pair for the hosts of a project and stores it in the vault.
 
 ### [Register-VaultStore](Register-VaultStore.md)
 
@@ -115,6 +127,14 @@ Adds or replaces a secret or a file in a vault.
 ### [Set-VaultProjectStore](Set-VaultProjectStore.md)
 
 Names the project's primary store.
+
+### [Set-VaultSshKeyHost](Set-VaultSshKeyHost.md)
+
+Sets the hosts an SSH key of the vault is for.
+
+### [Set-VaultSshTools](Set-VaultSshTools.md)
+
+Sets or shows the OpenSSH folder that LocalVault uses on this PC.
 
 ### [Set-VaultStore](Set-VaultStore.md)
 

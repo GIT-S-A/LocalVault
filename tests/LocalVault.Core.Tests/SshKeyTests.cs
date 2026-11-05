@@ -249,6 +249,42 @@ public sealed class SshKeyTests : IDisposable
         Assert.Single(content.Skipped);
     }
 
+    [Theory]
+    [InlineData("deploy@srv1.example.com", true)]
+    [InlineData("srv1.example.com:2222", true)]
+    [InlineData("root@[2001:db8::1]:22", true)]
+    [InlineData("-oProxyCommand=calc", false)]
+    [InlineData("deploy@-srv", false)]
+    [InlineData("-user@srv", false)]
+    [InlineData("srv one", false)]
+    [InlineData("", false)]
+    public void HostIsUserHostAndPortOnly(string host, bool valid) => Assert.Equal(valid, SshKeyInfo.IsHost(host));
+
+    [Fact]
+    public void OptionGivenAsAHostIsRefusedInTheVaultAndInKeePass()
+    {
+        Assert.Throws<VaultException>(() => VaultEntry.NewRequired(Deploy, null, Now, VaultEntry.SshKeyShape, KeyPath, ["-oProxyCommand=calc"]));
+
+        var db = new PwDatabase();
+        db.Open(IOConnectionInfo.FromPath(team), Key(), null);
+        var group = db.RootGroup.FindCreateGroup("LocalVault", true).FindCreateGroup("proj", true);
+        var entry = new PwEntry(true, true);
+        entry.Strings.Set(PwDefs.TitleField, new ProtectedString(false, "deploy"));
+        entry.Strings.Set(KeePassVault.KindField, new ProtectedString(false, VaultEntry.FileKind));
+        entry.Strings.Set(KeePassVault.PathField, new ProtectedString(false, KeyPath));
+        entry.Strings.Set(KeePassVault.SshTypeField, new ProtectedString(false, SshKeyInfo.Ed25519));
+        entry.Strings.Set(KeePassVault.SshPublicKeyField, new ProtectedString(false, PublicKey));
+        entry.Strings.Set(KeePassVault.SshHostsField, new ProtectedString(false, "-oProxyCommand=calc"));
+        entry.Binaries.Set("deploy", new ProtectedBinary(true, "KEY"u8.ToArray()));
+        group.AddEntry(entry, true);
+        db.Save(null);
+        db.Close();
+
+        using var keePass = KeePassVault.Open(team, null, Master);
+        using var content = keePass.Read(Group);
+        Assert.Empty(content.Items);
+    }
+
     [Fact]
     public void LegacySshKeyRefusalNamesTheNewCommand()
     {

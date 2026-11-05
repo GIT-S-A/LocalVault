@@ -15,7 +15,8 @@
         'Use-VaultEnv', 'Restore-VaultFile', 'Export-Vault', 'Import-Vault', 'Clear-Vault',
         'Export-VaultToStore', 'Import-VaultFromStore', 'Compare-VaultWithStore', 'Copy-VaultToStore', 'Get-VaultStoreStatus', 'Set-VaultProjectStore',
         'Register-VaultStore', 'Set-VaultStore', 'Unregister-VaultStore', 'Get-VaultStore',
-        'Add-VaultTemplate', 'Update-VaultTemplate', 'Write-VaultTemplate', 'Clear-VaultTemplate', 'Remove-VaultTemplate', 'Get-VaultTemplate'
+        'Add-VaultTemplate', 'Update-VaultTemplate', 'Write-VaultTemplate', 'Clear-VaultTemplate', 'Remove-VaultTemplate', 'Get-VaultTemplate',
+        'New-VaultSshKey', 'Set-VaultSshKeyHost', 'Get-VaultSshKey', 'Get-VaultSshKeyPath', 'Set-VaultSshTools'
     )
     VariablesToExport    = @()
     AliasesToExport      = @('lv')

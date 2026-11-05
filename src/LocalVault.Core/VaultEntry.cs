@@ -436,7 +436,7 @@ public sealed class VaultEntry
         var required = new JsonObject();
         if (hosts is { Count: > 0 })
         {
-            required[HostsField] = ToArray(hosts);
+            required[HostsField] = ToArray(hosts.Select(SshKeyInfo.NormalizeHost));
         }
 
         if (!string.IsNullOrEmpty(note))
@@ -456,6 +456,26 @@ public sealed class VaultEntry
 
         EnsureMeta()[RequiredField] = required;
         Meta!.Remove(LocalField);
+    }
+
+    internal void SetSshHosts(IReadOnlyList<string> hosts)
+    {
+        if (IsRequired)
+        {
+            SetRequired(RequiredNote, RequiredShape, RequiredPath, hosts);
+        }
+        else if (Meta?[SshField] is JsonObject ssh)
+        {
+            ssh.Remove(HostsField);
+            if (hosts.Count > 0)
+            {
+                ssh[HostsField] = ToArray(hosts);
+            }
+        }
+        else
+        {
+            throw new VaultException($"'{Name}' is not an SSH key.");
+        }
     }
 
     internal void DropPersonalValue()
@@ -667,7 +687,7 @@ public sealed class VaultEntry
                 && IsOptionalString(requiredFields[NoteField])
                 && IsOptionalString(requiredFields[ShapeField])
                 && IsOptionalString(requiredFields[PathField])
-                && IsOptionalStrings(requiredFields[HostsField])))
+                && IsOptionalHosts(requiredFields[HostsField])))
         {
             throw new VaultException($"Vault entry '{Name}' has a 'required' field that is damaged.");
         }
@@ -677,7 +697,7 @@ public sealed class VaultEntry
                 && sshFields[TypeField] is JsonValue type && type.TryGetValue<string>(out var typeText) && SshKeyInfo.Types.Contains(typeText)
                 && sshFields[PublicKeyField] is JsonValue publicKey && publicKey.TryGetValue<string>(out var publicKeyText)
                 && IsPublicKey(publicKeyText)
-                && IsOptionalStrings(sshFields[HostsField])
+                && IsOptionalHosts(sshFields[HostsField])
                 && (sshFields[AgentField] is null || (sshFields[AgentField] is JsonValue agent && agent.TryGetValue<bool>(out _)))
                 && (sshFields[ReplacedAtField] is null
                     || (sshFields[ReplacedAtField] is JsonValue replaced && replaced.TryGetValue<string>(out var replacedText)
@@ -703,6 +723,9 @@ public sealed class VaultEntry
 
     private static bool IsOptionalStrings(JsonNode? node) =>
         node is null || (node is JsonArray items && items.All(item => item is JsonValue value && value.TryGetValue<string>(out _)));
+
+    private static bool IsOptionalHosts(JsonNode? node) =>
+        node is null || (node is JsonArray items && items.All(item => item is JsonValue value && value.TryGetValue<string>(out var host) && SshKeyInfo.IsHost(host)));
 
     private static bool IsPublicKey(string line)
     {

@@ -77,6 +77,11 @@ it says that the vault is missing or empty.
 | `template clear` | `[<file>]` | `Clear-VaultTemplate` |
 | `template rm` | `<file>` | `Remove-VaultTemplate` |
 | `run` | `[<variable>=<name> ...] [--] <command> [<arguments> ...]` | sets the variables for the command only, writes every templated file of the repository, runs the command, then deletes the written files and restores the variables, even when the command fails; `$LASTEXITCODE` is the command's |
+| `ssh-key` | | `Get-VaultSshKey` |
+| `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
+| `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
+| `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
+| `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
 | `update` | `[<tag>] [--downgrade]` | downloads the newest GitHub release (or the tag), checks its SHA256 and signatures, and installs it with the installed module's `install.ps1`; says it is up to date and does nothing when that release is installed; refuses an older release without `--downgrade` |
 | `--version` | | prints the installed release |
 

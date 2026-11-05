@@ -753,7 +753,8 @@ public sealed partial class KeePassVault : IDisposable
     }
 
     private static string[] ReadHosts(PwEntry entry) =>
-        entry.Strings.ReadSafe(SshHostsField).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        entry.Strings.ReadSafe(SshHostsField).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(SshKeyInfo.NormalizeHost).ToArray();
 
     private static KeePassItem? ReadSshKey(PwEntry entry, EntryName name, string storedPath, byte[] value, bool withHosts)
     {

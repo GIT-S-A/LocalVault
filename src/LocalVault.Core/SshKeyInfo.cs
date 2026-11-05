@@ -1,14 +1,29 @@
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 
 namespace LocalVault.Core;
 
-public sealed record SshKeyInfo(string Type, string PublicKey, IReadOnlyList<string> Hosts, bool Agent = false, DateTimeOffset? ReplacedAt = null)
+public sealed partial record SshKeyInfo(string Type, string PublicKey, IReadOnlyList<string> Hosts, bool Agent = false, DateTimeOffset? ReplacedAt = null)
 {
     public const string Ed25519 = "ed25519";
     public const string Rsa = "rsa";
     public const string Ecdsa = "ecdsa";
 
     public static IReadOnlyList<string> Types { get; } = [Ed25519, Rsa, Ecdsa];
+
+    public static bool IsHost(string host) => host is not null && HostPattern().IsMatch(host);
+
+    public static string NormalizeHost(string host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        var trimmed = host.Trim();
+        return IsHost(trimmed)
+            ? trimmed
+            : throw new VaultException($"'{host}' is not a host: give [user@]host[:port], e.g. deploy@srv1.example.com.");
+    }
+
+    [GeneratedRegex(@"^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$")]
+    private static partial Regex HostPattern();
 
     public string Fingerprint => FingerprintOf(PublicKey);
 

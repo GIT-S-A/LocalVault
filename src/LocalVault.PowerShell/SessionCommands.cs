@@ -105,12 +105,12 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
         var root = Destination is null ? Location.Directory : GetUnresolvedProviderPathFromPSPath(Destination);
 
         var targets = entries.Select(entry => entry.IsFile
-                ? (Entry: entry, Path: StoredPathRules.Resolve(root, entry.StoredPath ?? entry.Name.Key))
+                ? (Entry: entry, Path: entry.Ssh is not null ? SshKeyFiles.KeyFileOf(entry) : StoredPathRules.Resolve(root, entry.StoredPath ?? entry.Name.Key))
                 : throw new VaultException($"'{entry.Name}' is a {entry.Kind} entry, not a file."))
             .ToList();
         if (!SkipGitIgnoreCheck)
         {
-            foreach (var (_, target) in targets)
+            foreach (var (_, target) in targets.Where(item => item.Entry.Ssh is null))
             {
                 RequireIgnoredByGit(target);
             }
@@ -133,6 +133,18 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
 
     private string Restore(VaultEntry entry, string target)
     {
+        if (entry.Ssh is not null)
+        {
+            var plan = SshKeyFiles.Write(entry, Location.Path, RepositoryOrigin.Of(Location)?.Url, Overwrite, Now);
+            if (plan.Refused)
+            {
+                WriteWarning(SshKeyFiles.Describe(plan, entry.Name));
+                return "Kept";
+            }
+
+            return plan.State == SshKeyWriteState.Identical ? "Identical" : "Written";
+        }
+
         var content = entry.GetValue();
         try
         {

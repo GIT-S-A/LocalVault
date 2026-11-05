@@ -243,6 +243,12 @@ public sealed class VaultBody
         return true;
     }
 
+    public void SetSshHosts(EntryName name, IReadOnlyList<string> hosts)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        (Find(name) ?? throw new VaultException($"No entry '{name}'.")).SetSshHosts(hosts.Select(SshKeyInfo.NormalizeHost).ToList());
+    }
+
     public void SetSharing(EntryName name, bool local)
     {
         var existing = Find(name) ?? throw new VaultException($"No entry '{name}'.");

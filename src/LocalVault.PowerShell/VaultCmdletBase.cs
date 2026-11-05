@@ -146,7 +146,21 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
         ArgumentNullException.ThrowIfNull(vaults);
         foreach (var location in vaults)
         {
-            foreach (var entry in RepositoryVaults.StoreFor(location).Read().Body.Entries.Where(e => e.IsRequired && e.IsFile && e.IsUnderHome))
+            var entries = RepositoryVaults.StoreFor(location).Read().Body.Entries;
+            foreach (var key in entries.Where(e => e.Ssh is not null && !e.IsMissing))
+            {
+                var plan = SshKeyFiles.Write(key, location.Path, RepositoryOrigin.Of(location)?.Url, overwrite: false, Now);
+                if (plan.Refused)
+                {
+                    WriteWarning(SshKeyFiles.Describe(plan, key.Name));
+                }
+                else if (plan.State == SshKeyWriteState.Write)
+                {
+                    Say(SshKeyFiles.Describe(plan, key.Name));
+                }
+            }
+
+            foreach (var entry in entries.Where(e => e.IsRequired && e.IsFile && e.IsUnderHome && e.Ssh is null))
             {
                 var target = StoredPathRules.Resolve(location.Directory, entry.StoredPath!);
                 var content = entry.GetValue();
@@ -241,6 +255,12 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     private VaultEntry? AskRequiredValue(VaultLocation location, VaultEntry entry)
     {
+        if (entry.IsSshKeyShape)
+        {
+            Say($"{entry.Name} is an SSH key: create yours with lv ssh-key new {entry.Name}.");
+            return null;
+        }
+
         if (entry.IsFileShape)
         {
             var declared = entry.RequiredPath is { } path ? StoredPathRules.Resolve(location.Directory, path) : null;
