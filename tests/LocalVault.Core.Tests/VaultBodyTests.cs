@@ -108,7 +108,7 @@ public class VaultBodyTests
     [Fact]
     public void NewerSchemaIsReadableButNotWritable()
     {
-        var body = VaultBody.Parse("""{ "schema": 5, "entries": [] }"""u8);
+        var body = VaultBody.Parse("""{ "schema": 6, "entries": [] }"""u8);
 
         Assert.False(body.IsWritable);
     }
@@ -143,7 +143,7 @@ public class VaultBodyTests
     [Fact]
     public void CurrentSchemaIsNotUpgraded()
     {
-        Assert.Null(VaultBody.Parse("""{ "schema": 4, "entries": [] }"""u8).UpgradedFrom);
+        Assert.Null(VaultBody.Parse("""{ "schema": 5, "entries": [] }"""u8).UpgradedFrom);
     }
 
     [Fact]

@@ -14,7 +14,9 @@ public sealed class VaultEntry
     public const string CredentialKind = "credential";
     public const string CredentialShape = "credential";
     public const string FileShape = "file";
+    public const string SshKeyShape = "ssh-key";
     public const string PersonalBasePrefix = "personal:";
+    public const string OldKeySuffix = ".old";
 
     private const string NameField = "name";
     private const string UserField = "user";
@@ -32,6 +34,13 @@ public sealed class VaultEntry
     private const string RequiredField = "required";
     private const string NoteField = "note";
     private const string ShapeField = "shape";
+    private const string HostsField = "hosts";
+    private const string PreviousField = "previous";
+    private const string SshField = "ssh";
+    private const string TypeField = "type";
+    private const string PublicKeyField = "publicKey";
+    private const string AgentField = "agent";
+    private const string ReplacedAtField = "replacedAt";
 
     internal VaultEntry(JsonObject node)
     {
@@ -45,6 +54,21 @@ public sealed class VaultEntry
 
         ValidateMeta(node[MetaField]);
         ValidateCredential(node);
+        if (node[PreviousField] is { } previous
+            && !(previous is JsonValue previousValue && previousValue.TryGetValue<string>(out var previousText) && Base64.IsValid(previousText)))
+        {
+            throw new VaultException($"Vault entry '{Name}' has a previous key that is not base64.");
+        }
+
+        if (Meta?[SshField] is not null)
+        {
+            _ = SshKeyPath.Validate(StoredPath ?? throw new VaultException($"SSH key '{Name}' has no path."));
+        }
+
+        if (IsSshKeyShape && RequiredPath is { } requiredPath)
+        {
+            _ = SshKeyPath.Validate(requiredPath);
+        }
     }
 
     public EntryName Name { get; }
@@ -79,6 +103,38 @@ public sealed class VaultEntry
     public bool IsCredentialShape => RequiredShape == CredentialShape;
 
     public bool IsFileShape => RequiredShape == FileShape;
+
+    public bool IsSshKeyShape => RequiredShape == SshKeyShape;
+
+    public bool IsSshKey => Ssh is not null || IsSshKeyShape;
+
+    public IReadOnlyList<string> RequiredHosts => ReadStrings((Meta?[RequiredField] as JsonObject)?[HostsField]);
+
+    public IReadOnlyList<string> SshHosts => IsRequired ? RequiredHosts : Ssh?.Hosts ?? [];
+
+    public SshKeyInfo? Ssh
+    {
+        get
+        {
+            if (Meta?[SshField] is not JsonObject ssh)
+            {
+                return null;
+            }
+
+            var replacedAt = ssh[ReplacedAtField]?.GetValue<string>();
+            return new SshKeyInfo(
+                ssh[TypeField]!.GetValue<string>(),
+                ssh[PublicKeyField]!.GetValue<string>(),
+                ReadStrings(ssh[HostsField]),
+                ssh[AgentField] is JsonValue agent && agent.TryGetValue<bool>(out var isAgent) && isAgent,
+                replacedAt is null ? null : DateTimeOffset.Parse(replacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
+        }
+    }
+
+    public bool HasPrevious => Node[PreviousField] is not null;
+
+    public byte[]? GetPrevious() =>
+        Node[PreviousField] is JsonValue value && value.TryGetValue<string>(out var text) ? Convert.FromBase64String(text) : null;
 
     public string? RequiredPath =>
         (Meta?[RequiredField] as JsonObject)?[PathField] is JsonValue value && value.TryGetValue<string>(out var path) ? path : null;
@@ -150,11 +206,47 @@ public sealed class VaultEntry
     public static VaultEntry NewFile(EntryName name, ReadOnlySpan<byte> content, string storedPath, DateTimeOffset created) =>
         new(BuildNode(name, FileKind, content, created, StoredPathRules.Normalize(storedPath)));
 
-    public static VaultEntry NewRequired(EntryName name, string? note, DateTimeOffset created, string? shape = null, string? path = null)
+    public static VaultEntry NewRequired(
+        EntryName name, string? note, DateTimeOffset created, string? shape = null, string? path = null, IReadOnlyList<string>? hosts = null)
     {
         var entry = new VaultEntry(BuildNode(name, RequiredKind, [], created, null));
-        entry.SetRequired(note, shape, path);
+        entry.SetRequired(note, shape, path, hosts);
         return entry;
+    }
+
+    public static VaultEntry NewSshKey(
+        EntryName name, ReadOnlySpan<byte> content, string storedPath, SshKeyInfo ssh, ReadOnlySpan<byte> previous, DateTimeOffset created)
+    {
+        ArgumentNullException.ThrowIfNull(ssh);
+        var node = BuildNode(name, FileKind, content, created, StoredPathRules.Normalize(storedPath));
+        var meta = (JsonObject)node[MetaField]!;
+        var sshNode = new JsonObject
+        {
+            [TypeField] = ssh.Type,
+            [PublicKeyField] = SshKeyInfo.NormalizePublicKey(ssh.PublicKey),
+        };
+        if (ssh.Hosts.Count > 0)
+        {
+            sshNode[HostsField] = ToArray(ssh.Hosts);
+        }
+
+        if (ssh.Agent)
+        {
+            sshNode[AgentField] = true;
+        }
+
+        if (ssh.ReplacedAt is { } replacedAt)
+        {
+            sshNode[ReplacedAtField] = replacedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        }
+
+        meta[SshField] = sshNode;
+        if (!previous.IsEmpty)
+        {
+            node[PreviousField] = Convert.ToBase64String(previous);
+        }
+
+        return new VaultEntry(node);
     }
 
     public static VaultEntry NewCredential(
@@ -271,21 +363,59 @@ public sealed class VaultEntry
     public string ContentHash()
     {
         var value = GetValue();
+        var previous = GetPrevious();
         try
         {
-            return IsCredential ? ComputeCredentialHash(UserName, value, Totp, Urls) : ComputeContentHash(Kind, StoredPath, value);
+            if (IsCredential)
+            {
+                return ComputeCredentialHash(UserName, value, Totp, Urls);
+            }
+
+            return Ssh is { } ssh
+                ? ComputeSshKeyHash(StoredPath, value, previous, ssh.Hosts)
+                : ComputeContentHash(Kind, StoredPath, value);
         }
         finally
         {
             Array.Clear(value);
+            if (previous is not null)
+            {
+                Array.Clear(previous);
+            }
+        }
+    }
+
+    public static string ComputeSshKeyHash(string? storedPath, ReadOnlySpan<byte> value, ReadOnlySpan<byte> previous, IReadOnlyList<string> hosts)
+    {
+        ArgumentNullException.ThrowIfNull(hosts);
+        using var buffer = new MemoryStream();
+        AppendField(buffer, value);
+        AppendField(buffer, previous);
+        AppendField(buffer, Encoding.UTF8.GetBytes(string.Join('\n', hosts)));
+        var content = buffer.ToArray();
+        try
+        {
+            return ComputeContentHash(FileKind, storedPath, content);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(content);
         }
     }
 
     public string SyncHash() =>
-        IsRequired ? ComputeDeclarationHash(RequiredNote, RequiredShape, RequiredPath) : ContentHash();
+        IsRequired ? ComputeDeclarationHash(RequiredNote, RequiredShape, RequiredPath, RequiredHosts) : ContentHash();
 
-    public static string ComputeDeclarationHash(string? note, string? shape, string? path = null) =>
-        ComputeContentHash(RequiredKind, path is null ? shape : $"{shape}|{path}", Encoding.UTF8.GetBytes(note ?? string.Empty));
+    public static string ComputeDeclarationHash(string? note, string? shape, string? path = null, IReadOnlyList<string>? hosts = null)
+    {
+        var form = path is null ? shape : $"{shape}|{path}";
+        if (hosts is { Count: > 0 })
+        {
+            form = $"{form}|{string.Join(',', hosts)}";
+        }
+
+        return ComputeContentHash(RequiredKind, form, Encoding.UTF8.GetBytes(note ?? string.Empty));
+    }
 
     public VaultEntry AsPersonalValue()
     {
@@ -301,9 +431,14 @@ public sealed class VaultEntry
         return copy;
     }
 
-    internal void SetRequired(string? note, string? shape, string? path)
+    internal void SetRequired(string? note, string? shape, string? path, IReadOnlyList<string>? hosts = null)
     {
         var required = new JsonObject();
+        if (hosts is { Count: > 0 })
+        {
+            required[HostsField] = ToArray(hosts);
+        }
+
         if (!string.IsNullOrEmpty(note))
         {
             required[NoteField] = note;
@@ -330,6 +465,8 @@ public sealed class VaultEntry
             Node[KindField] = RequiredKind;
             Node[ValueField] = string.Empty;
             RemoveCredentialFields(Node);
+            Node.Remove(PreviousField);
+            Meta?.Remove(SshField);
         }
     }
 
@@ -406,7 +543,7 @@ public sealed class VaultEntry
             return false;
         }
 
-        if (IsCredential)
+        if (IsCredential || Ssh is not null || other.Ssh is not null)
         {
             return ContentHash() == other.ContentHash();
         }
@@ -428,6 +565,17 @@ public sealed class VaultEntry
     {
         Node[KindField] = source.Kind;
         Node[ValueField] = ReadString(source.Node, ValueField);
+        Node.Remove(PreviousField);
+        if (source.Node[PreviousField] is { } previous)
+        {
+            Node[PreviousField] = previous.DeepClone();
+        }
+
+        if (source.Meta?[SshField] is null)
+        {
+            Meta?.Remove(SshField);
+        }
+
         RemoveCredentialFields(Node);
         foreach (var field in CredentialFields.Where(field => source.Node[field] is not null))
         {
@@ -518,9 +666,24 @@ public sealed class VaultEntry
             && !(required is JsonObject requiredFields
                 && IsOptionalString(requiredFields[NoteField])
                 && IsOptionalString(requiredFields[ShapeField])
-                && IsOptionalString(requiredFields[PathField])))
+                && IsOptionalString(requiredFields[PathField])
+                && IsOptionalStrings(requiredFields[HostsField])))
         {
             throw new VaultException($"Vault entry '{Name}' has a 'required' field that is damaged.");
+        }
+
+        if (fields[SshField] is { } ssh
+            && !(ssh is JsonObject sshFields
+                && sshFields[TypeField] is JsonValue type && type.TryGetValue<string>(out var typeText) && SshKeyInfo.Types.Contains(typeText)
+                && sshFields[PublicKeyField] is JsonValue publicKey && publicKey.TryGetValue<string>(out var publicKeyText)
+                && IsPublicKey(publicKeyText)
+                && IsOptionalStrings(sshFields[HostsField])
+                && (sshFields[AgentField] is null || (sshFields[AgentField] is JsonValue agent && agent.TryGetValue<bool>(out _)))
+                && (sshFields[ReplacedAtField] is null
+                    || (sshFields[ReplacedAtField] is JsonValue replaced && replaced.TryGetValue<string>(out var replacedText)
+                        && DateTimeOffset.TryParse(replacedText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out _)))))
+        {
+            throw new VaultException($"Vault entry '{Name}' has SSH key data that is damaged.");
         }
 
         if (fields[LocalField] is { } local && !(local is JsonValue localValue && localValue.TryGetValue<bool>(out _)))
@@ -537,6 +700,28 @@ public sealed class VaultEntry
     }
 
     private static bool IsOptionalString(JsonNode? node) => node is null || (node is JsonValue value && value.TryGetValue<string>(out _));
+
+    private static bool IsOptionalStrings(JsonNode? node) =>
+        node is null || (node is JsonArray items && items.All(item => item is JsonValue value && value.TryGetValue<string>(out _)));
+
+    private static bool IsPublicKey(string line)
+    {
+        try
+        {
+            _ = SshKeyInfo.NormalizePublicKey(line);
+            return true;
+        }
+        catch (VaultException)
+        {
+            return false;
+        }
+    }
+
+    private static List<string> ReadStrings(JsonNode? node) =>
+        node is JsonArray items ? items.Select(item => item!.GetValue<string>()).ToList() : [];
+
+    private static JsonArray ToArray(IEnumerable<string> values) =>
+        new(values.Select(value => (JsonNode?)JsonValue.Create(value)).ToArray());
 
     private static readonly string[] CredentialFields = [UserField, UrlsField, TotpField];
 

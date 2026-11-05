@@ -109,7 +109,7 @@ public static class KeePassSync
         _ => null,
     };
 
-    private static KeePassItem? Shared(KeePassItem? item) => item is { IsUnderHome: true } ? null : item;
+    private static KeePassItem? Shared(KeePassItem? item) => item is { IsUnderHome: true } && item is not { Ssh: not null, IsPersonal: false } ? null : item;
 
     private static IEnumerable<KeePassRemoval> PersonalRemovals(VaultBody body, string key) =>
         body.KeePassRemovals.Where(r => string.Equals(r.Database, key, StringComparison.OrdinalIgnoreCase));

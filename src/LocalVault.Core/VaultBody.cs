@@ -6,7 +6,7 @@ namespace LocalVault.Core;
 
 public sealed class VaultBody
 {
-    public const int CurrentSchema = 4;
+    public const int CurrentSchema = 5;
 
     private const string SchemaField = "schema";
     private const string ExportedField = "exported";
@@ -175,11 +175,11 @@ public sealed class VaultBody
         var existing = Find(entry.Name);
         if (existing is not null && entry.IsMissing && !existing.IsMissing)
         {
-            existing.SetRequired(entry.RequiredNote, entry.RequiredShape, entry.RequiredPath);
+            existing.SetRequired(entry.RequiredNote, entry.RequiredShape, entry.RequiredPath, entry.RequiredHosts);
             return;
         }
 
-        if (entry.IsUnderHome && !entry.IsRequired && existing is not { IsRequired: true })
+        if (entry.IsUnderHome && !entry.IsRequired && entry.Ssh is null && existing is not { IsRequired: true })
         {
             throw new VaultException(
                 $"'{entry.Name}' would be restored under your profile ({entry.StoredPath}); only a required entry's personal value can. Declare it with lv require {entry.Name} --file <path> first.");

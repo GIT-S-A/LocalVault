@@ -8,5 +8,6 @@ internal static class BodyUpgrades
     {
         [2] = _ => { },
         [3] = _ => { },
+        [4] = _ => { },
     };
 }

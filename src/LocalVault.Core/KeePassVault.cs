@@ -63,15 +63,28 @@ public sealed class KeePassItem : IDisposable
         Hash = VaultEntry.ComputeContentHash(kind, storedPath, value);
     }
 
-    internal KeePassItem(EntryName name, string note, string? shape, string? requiredPath, KeePassItem? personalValue)
+    internal KeePassItem(EntryName name, string storedPath, byte[] value, byte[]? previous, SshKeyInfo ssh, bool isPersonal)
+    {
+        Name = name;
+        Kind = VaultEntry.FileKind;
+        StoredPath = storedPath;
+        Value = value;
+        Previous = previous;
+        Ssh = ssh;
+        IsPersonal = isPersonal;
+        Hash = VaultEntry.ComputeSshKeyHash(storedPath, value, previous ?? [], ssh.Hosts);
+    }
+
+    internal KeePassItem(EntryName name, string note, string? shape, string? requiredPath, IReadOnlyList<string> requiredHosts, KeePassItem? personalValue)
     {
         Name = name;
         Kind = VaultEntry.RequiredKind;
         Value = System.Text.Encoding.UTF8.GetBytes(note);
         Shape = shape;
         RequiredPath = requiredPath;
+        RequiredHosts = requiredHosts;
         PersonalValue = personalValue;
-        Hash = VaultEntry.ComputeDeclarationHash(note, shape, requiredPath);
+        Hash = VaultEntry.ComputeDeclarationHash(note, shape, requiredPath, requiredHosts);
     }
 
     internal KeePassItem(EntryName name, string? userName, byte[] password, TotpSecret? totp, IReadOnlyList<string> urls)
@@ -99,9 +112,17 @@ public sealed class KeePassItem : IDisposable
 
     public bool IsUnderHome => StoredPath is { } path && StoredPathRules.IsUnderHome(path);
 
+    public IReadOnlyList<string> RequiredHosts { get; } = [];
+
+    public SshKeyInfo? Ssh { get; }
+
+    public bool IsPersonal { get; }
+
     public KeePassItem? PersonalValue { get; }
 
     internal byte[] Value { get; }
+
+    internal byte[]? Previous { get; }
 
     internal string? UserName { get; }
 
@@ -111,8 +132,9 @@ public sealed class KeePassItem : IDisposable
 
     public VaultEntry ToVaultEntry(DateTimeOffset created) => Kind switch
     {
+        VaultEntry.FileKind when Ssh is not null => VaultEntry.NewSshKey(Name, Value, StoredPath!, Ssh, Previous ?? [], created),
         VaultEntry.FileKind => VaultEntry.NewFile(Name, Value, StoredPath!, created),
-        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath),
+        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath, RequiredHosts),
         VaultEntry.CredentialKind => VaultEntry.NewCredential(Name, UserName, Value, Totp, Urls, created),
         _ => VaultEntry.NewSecret(Name, Value, created),
     };
@@ -120,6 +142,11 @@ public sealed class KeePassItem : IDisposable
     public void Dispose()
     {
         CryptographicOperations.ZeroMemory(Value);
+        if (Previous is not null)
+        {
+            CryptographicOperations.ZeroMemory(Previous);
+        }
+
         PersonalValue?.Dispose();
     }
 }
@@ -170,6 +197,12 @@ public sealed partial class KeePassVault : IDisposable
     public const string ShapeField = "LocalVault.Shape";
     public const string RequiredPathField = "LocalVault.RequiredPath";
     public const string DatabaseIdField = "LocalVault.DatabaseId";
+    public const string SshTypeField = "LocalVault.SshType";
+    public const string SshPublicKeyField = "LocalVault.SshPublicKey";
+    public const string SshHostsField = "LocalVault.SshHosts";
+    public const string SshAgentField = "LocalVault.SshAgent";
+    public const string ReplacedAtField = "LocalVault.ReplacedAt";
+    public const string PersonalField = "LocalVault.Personal";
     public const string AutoOpenGroup = "AutoOpen";
     public const string OriginKind = "origin";
     public const string InstallKind = "install";
@@ -313,7 +346,9 @@ public sealed partial class KeePassVault : IDisposable
         return new KeePassGroupContent(items, skipped, DatabaseId);
     }
 
-    public void Put(IReadOnlyList<string> groupPath, VaultEntry entry)
+    public void Put(IReadOnlyList<string> groupPath, VaultEntry entry) => Put(groupPath, entry, personal: false);
+
+    private void Put(IReadOnlyList<string> groupPath, VaultEntry entry, bool personal)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var group = FindGroup(groupPath, create: true)!;
@@ -339,10 +374,12 @@ public sealed partial class KeePassVault : IDisposable
 
             target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
             target.Strings.Set(KindField, new ProtectedString(false, entry.IsRequired ? VaultEntry.RequiredKind : entry.Kind));
+            SetOrRemove(target, PersonalField, personal ? "true" : null);
             if (!entry.IsRequired)
             {
                 target.Strings.Remove(ShapeField);
                 target.Strings.Remove(RequiredPathField);
+                RemoveSshStrings(target);
             }
 
             if (entry.IsCredential && !entry.IsRequired)
@@ -357,6 +394,7 @@ public sealed partial class KeePassVault : IDisposable
                     target.Strings.Remove(PwDefs.PasswordField);
                     target.Strings.Remove(PathField);
                     target.Binaries.Clear();
+                    RemoveSshStrings(target);
                 }
 
                 WriteDeclaration(target, entry);
@@ -367,6 +405,7 @@ public sealed partial class KeePassVault : IDisposable
                 target.Strings.Set(PathField, new ProtectedString(false, entry.StoredPath!));
                 target.Binaries.Clear();
                 target.Binaries.Set(AttachmentName(entry.StoredPath!), new ProtectedBinary(true, value));
+                WriteSsh(target, entry, writeHosts: true);
             }
             else
             {
@@ -388,7 +427,7 @@ public sealed partial class KeePassVault : IDisposable
         ArgumentNullException.ThrowIfNull(entry);
         if (!withDeclaration)
         {
-            Put(groupPath, entry.AsPersonalValue());
+            Put(groupPath, entry.AsPersonalValue(), personal: true);
             return;
         }
 
@@ -408,6 +447,8 @@ public sealed partial class KeePassVault : IDisposable
         try
         {
             RemoveCredentialStrings(target);
+            RemoveSshStrings(target);
+            target.Strings.Remove(PersonalField);
             target.Strings.Remove(PathField);
             target.Strings.Remove(PwDefs.PasswordField);
             target.Binaries.Clear();
@@ -422,6 +463,7 @@ public sealed partial class KeePassVault : IDisposable
             {
                 target.Strings.Set(PathField, new ProtectedString(false, entry.StoredPath!));
                 target.Binaries.Set(AttachmentName(entry.StoredPath!), new ProtectedBinary(true, value));
+                WriteSsh(target, entry, writeHosts: false);
             }
             else
             {
@@ -662,6 +704,75 @@ public sealed partial class KeePassVault : IDisposable
         target.Strings.Set(PwDefs.NotesField, new ProtectedString(false, entry.RequiredNote ?? string.Empty));
         SetOrRemove(target, ShapeField, entry.RequiredShape);
         SetOrRemove(target, RequiredPathField, entry.RequiredPath);
+        SetOrRemove(target, SshHostsField, entry.RequiredHosts.Count > 0 ? string.Join('\n', entry.RequiredHosts) : null);
+    }
+
+    private static void WriteSsh(PwEntry target, VaultEntry entry, bool writeHosts)
+    {
+        if (entry.Ssh is not { } ssh)
+        {
+            if (writeHosts)
+            {
+                RemoveSshStrings(target);
+            }
+
+            return;
+        }
+
+        target.Strings.Set(SshTypeField, new ProtectedString(false, ssh.Type));
+        target.Strings.Set(SshPublicKeyField, new ProtectedString(false, ssh.PublicKey));
+        SetOrRemove(target, SshAgentField, ssh.Agent ? "true" : null);
+        SetOrRemove(target, ReplacedAtField, ssh.ReplacedAt?.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
+        if (writeHosts)
+        {
+            SetOrRemove(target, SshHostsField, ssh.Hosts.Count > 0 ? string.Join('\n', ssh.Hosts) : null);
+        }
+
+        var previous = entry.GetPrevious();
+        if (previous is null)
+        {
+            return;
+        }
+
+        try
+        {
+            target.Binaries.Set(AttachmentName(entry.StoredPath!) + VaultEntry.OldKeySuffix, new ProtectedBinary(true, previous));
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(previous);
+        }
+    }
+
+    private static void RemoveSshStrings(PwEntry target)
+    {
+        foreach (var field in new[] { SshTypeField, SshPublicKeyField, SshHostsField, SshAgentField, ReplacedAtField })
+        {
+            target.Strings.Remove(field);
+        }
+    }
+
+    private static string[] ReadHosts(PwEntry entry) =>
+        entry.Strings.ReadSafe(SshHostsField).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static KeePassItem? ReadSshKey(PwEntry entry, EntryName name, string storedPath, byte[] value, bool withHosts)
+    {
+        var type = entry.Strings.ReadSafe(SshTypeField);
+        if (type.Length == 0)
+        {
+            return null;
+        }
+
+        _ = SshKeyPath.Validate(storedPath);
+        var replacedAt = entry.Strings.ReadSafe(ReplacedAtField);
+        var ssh = new SshKeyInfo(
+            type,
+            SshKeyInfo.NormalizePublicKey(entry.Strings.ReadSafe(SshPublicKeyField)),
+            withHosts ? ReadHosts(entry) : [],
+            entry.Strings.ReadSafe(SshAgentField) == "true",
+            replacedAt.Length == 0 ? null : DateTimeOffset.Parse(replacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
+        var previous = entry.Binaries.Get(AttachmentName(storedPath) + VaultEntry.OldKeySuffix)?.ReadData();
+        return new KeePassItem(name, StoredPathRules.Normalize(storedPath), value, previous, ssh, entry.Strings.ReadSafe(PersonalField) == "true");
     }
 
     private static void SetOrRemove(PwEntry target, string field, string? value)
@@ -807,6 +918,7 @@ public sealed partial class KeePassVault : IDisposable
                 entry.Strings.ReadSafe(PwDefs.NotesField),
                 shape.Length == 0 ? null : shape,
                 requiredPath.Length == 0 ? null : StoredPathRules.Normalize(requiredPath),
+                ReadHosts(entry),
                 ReadPersonalValue(entry, name));
         }
 
@@ -819,7 +931,9 @@ public sealed partial class KeePassVault : IDisposable
                 return null;
             }
 
-            return new KeePassItem(name, VaultEntry.FileKind, storedPath, attachment.ReadData());
+            var content = attachment.ReadData();
+            return ReadSshKey(entry, name, storedPath, content, withHosts: true)
+                ?? new KeePassItem(name, VaultEntry.FileKind, storedPath, content);
         }
 
         return new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
@@ -830,7 +944,9 @@ public sealed partial class KeePassVault : IDisposable
         var storedPath = entry.Strings.ReadSafe(PathField);
         if (storedPath.Length > 0 && entry.Binaries.Get(AttachmentName(storedPath)) is { } attachment)
         {
-            return new KeePassItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), attachment.ReadData());
+            var content = attachment.ReadData();
+            return ReadSshKey(entry, name, storedPath, content, withHosts: false)
+                ?? new KeePassItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), content);
         }
 
         if (LooksLikeCredential(entry))

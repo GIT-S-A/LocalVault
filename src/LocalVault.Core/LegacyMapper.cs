@@ -52,7 +52,7 @@ public static class LegacyMapper
 
             if (sourceName.StartsWith(SshPrefix, StringComparison.Ordinal))
             {
-                refused.Add(new RefusedName(sourceName, "SSH keys belong in KeePass, not in the vault"));
+                refused.Add(new RefusedName(sourceName, "add the key with lv ssh-key new <name> or choose 'existing KeePass entry' at lv load"));
                 continue;
             }
 
