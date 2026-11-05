@@ -85,10 +85,10 @@ body  := { schema: 5, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entr
 - hosts := `[user@]host[:port]` list, ⊥ secret; personal → `meta.required.hosts` (shared w/ declaration); shared → `meta.ssh.hosts`.
 - `<repo>` := last segment of `git remote get-url origin` w/o `.git`; ⊥ origin → git root leaf. Fixed at creation in the stored path → same path in every clone & for every teammate.
 - file := entry name, `/` → `.`, `:` → `_`; two entries → same file → second refused.
-- files: `~/.ssh/<repo>/<file>`, `<file>.pub`, while `previous`: `<file>.old`, `<file>.old.pub`; agent key → `<file>.pub` only. ACL per V119.
+- files: `~/.ssh/<repo>/<file>`, `<file>.pub`, while `previous`: `<file>.old` (old private key) | `<file>.old.pub` (old agent key = public key); agent key → `<file>.pub` only. ACL per V119. Stored path rule V140.
 - marker `~/.ssh/<repo>/.localvault` (⊥ secret, UTF-8 JSON) `{ schema: 1, origin, keys: { <file>: { hash: hex SHA-256 of file bytes, writtenAt: ISO-8601 UTC, writtenBy: <vault path>, users: [<vault path>...] } } }`; lock `.localvault.lock` (V3 rules).
 - `~/.ssh/<repo>/lv.config` (V134): one block per host of each entry.
-- KeePass: attachment `<file>` (value), `<file>.old` (previous); `LocalVault.SshType`, `LocalVault.SshPublicKey`, `LocalVault.SshHosts` (one per line), `LocalVault.SshAgent` = `true`, `LocalVault.ReplacedAt`. Content hash of ssh-key entry covers value, previous & hosts; declaration hash (V118) covers hosts.
+- KeePass: attachment `<file>` (value), `<file>.old` (previous); `LocalVault.SshType`, `LocalVault.SshPublicKey`, `LocalVault.SshHosts` (one per line), `LocalVault.SshAgent` = `true`, `LocalVault.ReplacedAt`; personal value → `LocalVault.Personal` = `true` (V142). Content hash of ssh-key entry covers value, previous & hosts; declaration hash (V118) covers hosts.
 - orphan := marker user whose vault file ⊥ exists (V133).
 
 ### PC settings
@@ -204,11 +204,11 @@ cmd: Get-VaultStore [[-Name] n]                         → {Name, Scope, Type, 
 cmd: Clear-Vault                                        → delete vault, ConfirmImpact High
 cmd: Set-VaultEntry -Name n -Reference "<group/title>"  → personal value as reference (V131)
 cmd: Reset-VaultEntry -Name n[] [-NoPrompt]             → personal value removed, asked again (V137)
-cmd: New-VaultSshKey -Name n [-Host h[]] [-Shared] [-Type ed25519|rsa|ecdsa] [-Comment c] [-Overwrite]
+cmd: New-VaultSshKey -Name n [-HostName h[]] [-Shared] [-Type ed25519|rsa|ecdsa] [-Comment c] [-Overwrite] [-Replace]
                                                         → key pair generated & stored (V123, V124)
-cmd: Set-VaultSshKeyHost -Name n -Host h[]              → hosts replaced
-cmd: Get-VaultSshKey [[-Name] n]                        → {Name, Sharing, Source(file|agent|reference), Type, Fingerprint, Hosts, Previous, Path}[]; ⊥ value
-cmd: Get-VaultSshKeyPath -Name n                        → current key path (agent → .pub); ⊥ fallback
+cmd: Set-VaultSshKeyHost -Name n -HostName h[]          → hosts replaced (V141); empty → none
+cmd: Get-VaultSshKey [[-Name] n]                        → {Name, Sharing, Source(file|agent|reference|missing), Type, Fingerprint, Hosts, Previous, Path, PublicKey}[]; ⊥ value
+cmd: Get-VaultSshKeyPath -Name n                        → current key path (agent → .pub); file ⊥ exists → written (V126) first; ⊥ fallback
 cmd: Invoke-VaultSsh -Name n [-Target t] [-ArgumentList a[]]   → ssh w/ key & fallback (V136); exit code passed
 cmd: Invoke-VaultScp -Name n -ArgumentList a[]          → scp, same options
 cmd: Remove-VaultSshOrphan                              → orphaned keys deleted, ConfirmImpact High (V133)
@@ -245,7 +245,7 @@ cmd: lv store copy <target | name> [--keyfile k]   Copy-VaultToStore
 cmd: lv clear
 cmd: lv set <name> --ref "<group/title>"   Set-VaultEntry -Reference
 cmd: lv reset <name>... [--no-ask]         Reset-VaultEntry
-cmd: lv ssh-key new <name> [--host h]... [--shared] [--type t] [--comment c] [--overwrite]
+cmd: lv ssh-key new <name> [--host h]... [--shared] [--type t] [--comment c] [--overwrite] [--replace]
 cmd: lv ssh-key hosts <name> <host>...
 cmd: lv ssh-key list
 cmd: lv ssh-key path <name>
@@ -390,10 +390,10 @@ V120: after `Import-VaultFromStore` (& its prompts) → ∀ personal file value 
 V121: SSH private keys allowed as personal values (supersedes "no SSH key in the vault" for personal values only); `SAAS-VAULT-1` `__SshPrivateKey` import refusal unchanged.
 V122: ssh-key entry (§I.SSH keys) personal | shared; shared → value in project store like any shared entry, `~/.ssh/<repo>/` path allowed. Personal store ⊥ defined & new personal key → allowed, V31 warning.
 V123: `New-VaultSshKey` → `ssh-keygen -t <type> -N ""` (default ed25519, comment default `<USERNAME>@<COMPUTERNAME> <repo>/<name>`) into target (V119 ACL), value stored, `.pub` written, marker updated (V126), public key printed & copied to clipboard + warning "unusable until someone with access adds this public key". Personal → declaration (shape ssh-key, path, hosts) + value. Shared → warning "private key readable by everyone with access to <store>", ⊥ question.
-V124: entry w/ value & new key (`New-VaultSshKey`, V125 choice, `Set-VaultEntry`) = replacement: entry's store (personal store | project store) ⊥ defined → refused, nothing written. Else console → confirmation (default no) naming marker users (other clones), shared → "every teammate gets the new key on the next lv load", + "old public key stays registered where it was added"; non-interactive → error. Yes → `previous` := old value (an existing `previous` dropped), `meta.ssh.replacedAt` set, `<file>.old` & `.old.pub` written.
+V124: entry w/ value & new key (`New-VaultSshKey`, V125 choice) = replacement: entry's store (personal store | project store) ⊥ defined → refused, nothing written. Else console → confirmation (default no) naming marker users (other clones), shared → "every teammate gets the new key on the next lv load", + "old public key stays registered where it was added"; non-interactive → error "already holds a key. Add -Replace (--replace)". `-Replace`/`--replace` → ⊥ confirmation, store check kept; `--replace` = flag after `ssh-key`, value option elsewhere. Another clone wrote newer key than vault's (V126 newer rule vs vault value) → refused "Run lv load". Yes → `previous` := old value (an existing `previous` dropped), `meta.ssh.replacedAt` set, `<file>.old` (old private key) | `<file>.old.pub` (old agent key) written, other one deleted; key written w/ `previous` ∅ → both deleted.
 V125: personal ssh-key value missing (V115 at `lv load`, V116 at read): file at stored path ∃ & listed in marker & marker origin = repo origin → adopted (value from file, vault added to users), ⊥ prompt. Else console → choice: 1 key from agent (`ssh-add -L`; value = public key, `meta.ssh.agent`; agent unreachable → choice hidden), 2 existing KeePass entry → reference (V131), 3 new key pair (V123), empty → skipped, stays missing.
 V126: ∀ ssh-key file write → under marker lock: marker origin ≠ repo origin → refused (other repo w/ same name). Target ∃ & ⊥ in marker → refused "`<path>` exists and wasn't written by LocalVault"; `-Overwrite`/`--overwrite` → overwritten, ⊥ copy kept. Target hash = marker hash & `writtenBy` ≠ this vault & `writtenAt` > entry `meta.created` & value ≠ target → refused "newer key written by <vault> at <time>"; `-Overwrite` forces. After write → hash, writtenAt, writtenBy set, vault ∈ users; users whose vault file ⊥ exists dropped.
-V127: stale vault: `lv load`, `lv list`, `lv start`, ssh-key read → vault value hash ≠ marker hash & target hash = marker hash & `writtenAt` > `meta.created` → vault adopts file w/o question (value := file, public key from `<file>.pub`; `<file>.old` ∃ & = old vault value → `previous` := old value); reported "<name>: key adopted from <vault>".
+V127: stale vault: `lv load`, `lv list`, `lv start`, ssh-key read → vault value hash ≠ marker hash & target hash = marker hash & `writtenAt` > `meta.created` → vault adopts file w/o question (value := file, public key from `<file>.pub`; `<file>.old` ∃ & = old vault value → `previous` := old value); reported "<name>: key adopted from <vault>". Adopted only if target starts `-----BEGIN ` & target hash = marker hash & `<file>.pub` valid public key of supported type; agent keys ⊥ adopted. `.old` ≠ old vault value → `previous` ∅. Vault added to marker users. Marker lock | IO failure → warning "SSH keys of <vault> not checked against the other clones", command continues.
 V128: `previous` set → `Invoke-VaultSsh`/`Invoke-VaultScp` pass `-i <file> -i <file>.old -o IdentitiesOnly=yes`; agent key → `-i <file>.pub`; `lv.config` lists both IdentityFile lines.
 V129: retirement: `Import-VaultFromStore` & `previous` set & hosts ≠ ∅ → ∀ host: `ssh -i <file> -o IdentitiesOnly=yes -o BatchMode=yes -o ConnectTimeout=5 <host> exit`, default host-key check (⊥ `accept-new`). All succeed → `previous` & `meta.ssh.replacedAt` removed, `.old` files deleted, `lv.config` rewritten; shared | personal → change reaches the store on next save (three-way), other PCs drop `.old` files on load when entry has no `previous`. Any failure → kept, silent; unknown host key → "not tested: host key unknown for <host>; connect once with lv ssh <name>". Hosts ∅ → `previous` kept until `Clear-Vault`.
 V130: `Clear-Vault` → ∀ ssh-key file of the vault: vault removed from users; users ∅ & target hash = marker hash → `<file>`, `.pub`, `.old`, `.old.pub` deleted, key removed from marker; marker w/o keys → marker, `lv.config` & folder (if empty) deleted; ⊥ `~/.ssh` itself. Other users → kept, reported. Target differs → kept, warning. ⊥ file deleted that marker doesn't list.
@@ -406,6 +406,10 @@ V136: `Invoke-VaultSsh` target: given > sole host > error listing hosts; unliste
 V137: `Reset-VaultEntry` → personal value only (shared | declaration only | unknown → error, nothing changed); value, `previous` & `meta.ref` removed, declaration kept, removal marker `personal:<db id>` (V78) → next load ⊥ refills, next save deletes | overwrites store copy; ⊥ store opened. Console → V125/V115 prompt at once; `-NoPrompt` skips. ssh-key files untouched; next value = replacement (V124).
 V138: body schema 5 (`previous`, `meta.ssh`, `meta.ref`, shape `ssh-key`); schema 4 → 5 no-op upgrade on first write; older modules refuse to write (C8).
 V139: `__SshPrivateKey` refusal message (V10) → "`__SshPrivateKey` refused: add the key with lv ssh-key new <name> or choose 'existing KeePass entry' at lv load".
+V140: ssh-key stored path ! `~/.ssh/<dir>/<file>` (exactly 4 segments); `<file>` ∉ {`.localvault`, `.localvault.lock`, `lv.config`} & ⊥ ends `.pub` | `.old`. Else refused; KeePass item w/ ssh fields & other path → skipped. ∴ store ⊥ plants `~/.ssh/authorized_keys` | `~/.ssh/config`.
+V141: host ! match `^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$` → else refused "<h> is not a host"; KeePass item w/ invalid host → skipped. ∴ ⊥ option (`-oProxyCommand=…`) reaches ssh command line.
+V142: personal value written to KeePass → `LocalVault.Personal` = `true`. Shared load ⊥ takes item under `~/` except ssh-key item w/o `LocalVault.Personal` → personal key in team store ⊥ loaded as shared.
+V143: `Set-VaultEntry` on ssh-key entry (value, `-FilePath`, `-Credential`, `<name>#<part>`, `-Required`) → refused, nothing changed: value ∃ → "Replace it with lv ssh-key new <name> --replace (New-VaultSshKey -Replace)"; declaration only → "Create yours with lv ssh-key new <name> (New-VaultSshKey)". `-Sharing` allowed.
 
 ## §T Tasks
 
@@ -497,7 +501,7 @@ T83|x|signed GitHub releases made by `tools/release.ps1` (Key Vault, azuresignto
 T84|x|automatic backups removed: ⊥ `Enable/Disable/Invoke/Test/Get-VaultBackup`, ⊥ `lv backup`; leftovers found & offered for deletion by every command, deleted by `Clear-Vault`; `.lvbak` still imported; export warning narrowed to entries only on this PC; beta15|V31,V33,V39,V111,I.Old backups
 T86|x|personal file values (SSH keys): `lv require --file <path>`, `~/` stored paths, owner-only ACL, `lv load` writes missing ones; beta16|I.Personal store,V118-V121
 T85|x|personal store (`stores.json` `personal`, `-Personal`/`--personal`), personal values saved to & loaded from it, missing required values asked by `lv load` w/ save offer, credential declarations (`lv require --credential`), body schema 4; beta16|I.Personal store,V31,V102,V112-V117
-T87|x|ssh-key entries: `New-VaultSshKey`, hosts, list, path, OpenSSH lookup & `settings.json`, marker (adopt, refuse, users), replacement w/ `previous`, body schema 5, C6 & `__SshPrivateKey` message|C6,I.SSH keys,I.PC settings,V122-V124,V126,V127,V135,V138,V139
+T87|x|ssh-key entries: `New-VaultSshKey`, hosts, list, path, OpenSSH lookup & `settings.json`, marker (adopt, refuse, users), replacement w/ `previous`, body schema 5, C6 & `__SshPrivateKey` message|C6,I.SSH keys,I.PC settings,V122-V124,V126,V127,V135,V138-V143
 T88|.|`lv load` prompt for missing personal key (adopt, agent, KeePass reference, new pair)|V125
 T89|.|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, Include opt-in & `lv.config`|V128,V129,V134,V136
 T90|.|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
@@ -535,3 +539,5 @@ B24|2026-10-09|saving to a 2nd KP DB: one base per entry → entries already syn
 B25|2026-10-09|install instructions said `git checkout <tag>` in the shared clone → detached the dev working copy mid-work|V73
 B26|2026-10-09|global.json pinned SDK 10.0.401 → 10.0.400 refused; build failed yet install.ps1 reported success|V81
 B27|2026-10-09|`lv update` (-Latest = newest tag) could replace a newer dev build in the same version folder; plain install didn't record its source|V83
+B28|2026-11-05|shared ssh-key path under `~/` unchecked → team store could plant `~/.ssh/authorized_keys`; personal value in team store read as shared|V140,V142
+B29|2026-11-05|hosts unchecked → store host `-oProxyCommand=…` would run code via ssh command line|V141
