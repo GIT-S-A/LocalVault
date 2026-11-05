@@ -327,6 +327,7 @@ public sealed class GetVaultSshKeyCommand : SshKeyCmdletBase
 
     protected override void Run()
     {
+        AdoptNewerSshKeys([Location]);
         var body = ReadVault().Body;
         if (Name is not null)
         {
@@ -351,6 +352,7 @@ public sealed class GetVaultSshKeyPathCommand : SshKeyCmdletBase
     protected override void Run()
     {
         var name = EntryName.Parse(Name);
+        AdoptNewerSshKeys([Location]);
         var entry = RequireSshKey(ReadForUse(body => body.Find(name) is { IsMissing: false }, _ => [name]), name);
         RequireValue(entry);
         var path = SshKeyFiles.KeyFileOf(entry);

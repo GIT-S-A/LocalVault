@@ -1536,6 +1536,8 @@ last 30 days: local entries and personal values, or every entry when the vault h
 When the vault file doesn't exist and the same folder contains `secrets.local.clixml`, the cmdlet
 reads that file.
 
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
+
 ### Examples
 
 #### Example 1 - List the entries of the vault of the current repository
@@ -1646,6 +1648,8 @@ The `Get-VaultSshKey` cmdlet gets the SSH key entries of a vault: personal or sh
 fingerprint, the hosts, whether a previous key is kept, the key file and the public key. A personal key
 not set on this PC has the source `missing`. The cmdlet never returns a private key.
 
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
+
 ### Examples
 
 #### Example 1 - List the keys
@@ -1732,6 +1736,8 @@ tools that take the key with `-i`. For a key held by an SSH agent, the path is t
 the file is missing, the cmdlet writes it first, with the same checks as
 [Restore-VaultFile](#restore-vaultfile). In an interactive console, a personal key not set on this
 PC is loaded from the stores first, as other reads do.
+
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
 
 ### Examples
 
@@ -2295,6 +2301,8 @@ Then the cmdlet writes each required file whose path is under the user's profile
 SSH private key, when the file doesn't exist yet, readable by the current user, SYSTEM and
 Administrators only. It never replaces an existing file; a different one gives a warning, and
 `Restore-VaultFile -Overwrite` replaces it.
+
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
 
 ### Examples
 

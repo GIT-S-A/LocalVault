@@ -35,6 +35,8 @@ the file is missing, the cmdlet writes it first, with the same checks as
 [Restore-VaultFile](Restore-VaultFile.md). In an interactive console, a personal key not set on this
 PC is loaded from the stores first, as other reads do.
 
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
+
 ## EXAMPLES
 
 ### Example 1 - Run scp with the key

@@ -168,6 +168,41 @@ Describe 'SSH keys' {
         { Set-VaultSshKeyHost -Path $script:vault -Name deploy -HostName '-oProxyCommand=calc' } | Should -Throw '*is not a host*'
     }
 
+    It 'adopts the newer key another clone wrote, with the old key as fallback' {
+        Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+        Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+        $first = New-VaultSshKey -Path $script:vault -Name deploy -HostName deploy@srv1.example.com -Shared 6>$null 3>$null
+        $other = Initialize-TestRepository
+        $otherVault = Join-Path $other 'secrets.local.lv'
+        try {
+            Copy-Item -LiteralPath $script:vault -Destination $otherVault
+            Get-VaultSshKeyPath -Path $otherVault -Name deploy 6>$null | Out-Null
+            $replaced = New-VaultSshKey -Path $script:vault -Name deploy -Replace 6>$null 3>$null
+
+            Get-VaultEntryList -Path $otherVault -InformationVariable said 3>$null 6>$null | Out-Null
+
+            ($said -join "`n") | Should -Match ([regex]::Escape("deploy: key adopted from $((Resolve-Path $script:vault).Path)"))
+            $adopted = Get-VaultSshKey -Path $otherVault -Name deploy
+            $adopted.Fingerprint | Should -Be $replaced.Fingerprint
+            $adopted.Fingerprint | Should -Not -Be $first.Fingerprint
+            $adopted.Previous | Should -BeTrue
+            $adopted.Hosts | Should -Be @('deploy@srv1.example.com')
+            $marker = Get-Content -LiteralPath (Join-Path $script:keyFolder '.localvault') -Raw | ConvertFrom-Json
+            $marker.keys.deploy.users | Should -Contain (Resolve-Path $otherVault).Path
+            Get-VaultEntryList -Path $otherVault -InformationVariable again 3>$null 6>$null | Out-Null
+            ($again -join "`n") | Should -Not -Match 'adopted'
+        }
+        finally { Clear-TestFolder -Folder (Split-Path $other) }
+    }
+
+    It 'leaves the vault alone when the key file was changed by hand' {
+        New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+        $before = (Get-VaultSshKey -Path $script:vault -Name deploy).Fingerprint
+        Set-Content -LiteralPath (Join-Path $script:keyFolder 'deploy') -Value '-----BEGIN OPENSSH PRIVATE KEY----- hand made'
+
+        (Get-VaultSshKey -Path $script:vault -Name deploy).Fingerprint | Should -Be $before
+    }
+
     It 'refuses to set an SSH key as a plain value' {
         New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
         $other = Join-Path $env:USERPROFILE 'other-key'

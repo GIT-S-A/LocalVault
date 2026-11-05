@@ -24,6 +24,7 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
 
     protected override void Run()
     {
+        AdoptNewerSshKeys([Location]);
         var snapshot = ReadVault();
         var now = Now;
         var states = KeePassSync.ComparePending(snapshot.Body, PrimaryDatabaseId());

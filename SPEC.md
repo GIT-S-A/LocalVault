@@ -497,7 +497,7 @@ T83|x|signed GitHub releases made by `tools/release.ps1` (Key Vault, azuresignto
 T84|x|automatic backups removed: ⊥ `Enable/Disable/Invoke/Test/Get-VaultBackup`, ⊥ `lv backup`; leftovers found & offered for deletion by every command, deleted by `Clear-Vault`; `.lvbak` still imported; export warning narrowed to entries only on this PC; beta15|V31,V33,V39,V111,I.Old backups
 T86|x|personal file values (SSH keys): `lv require --file <path>`, `~/` stored paths, owner-only ACL, `lv load` writes missing ones; beta16|I.Personal store,V118-V121
 T85|x|personal store (`stores.json` `personal`, `-Personal`/`--personal`), personal values saved to & loaded from it, missing required values asked by `lv load` w/ save offer, credential declarations (`lv require --credential`), body schema 4; beta16|I.Personal store,V31,V102,V112-V117
-T87|.|ssh-key entries: `New-VaultSshKey`, hosts, list, path, OpenSSH lookup & `settings.json`, marker (adopt, refuse, users), replacement w/ `previous`, body schema 5, C6 & `__SshPrivateKey` message|C6,I.SSH keys,I.PC settings,V122-V124,V126,V127,V135,V138,V139
+T87|x|ssh-key entries: `New-VaultSshKey`, hosts, list, path, OpenSSH lookup & `settings.json`, marker (adopt, refuse, users), replacement w/ `previous`, body schema 5, C6 & `__SshPrivateKey` message|C6,I.SSH keys,I.PC settings,V122-V124,V126,V127,V135,V138,V139
 T88|.|`lv load` prompt for missing personal key (adopt, agent, KeePass reference, new pair)|V125
 T89|.|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, Include opt-in & `lv.config`|V128,V129,V134,V136
 T90|.|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133

@@ -33,6 +33,8 @@ The `Get-VaultSshKey` cmdlet gets the SSH key entries of a vault: personal or sh
 fingerprint, the hosts, whether a previous key is kept, the key file and the public key. A personal key
 not set on this PC has the source `missing`. The cmdlet never returns a private key.
 
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
+
 ## EXAMPLES
 
 ### Example 1 - List the keys

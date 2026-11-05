@@ -141,6 +141,41 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
         return ReadVault().Body;
     }
 
+    internal void AdoptNewerSshKeys(IReadOnlyList<VaultLocation> vaults)
+    {
+        ArgumentNullException.ThrowIfNull(vaults);
+        foreach (var location in vaults.Where(location => File.Exists(location.Path)))
+        {
+            try
+            {
+                var store = RepositoryVaults.StoreFor(location);
+                var origin = RepositoryOrigin.Of(location)?.Url;
+                var newer = SshKeyAdoption.FindNewer(store.Read().Body, origin, Now);
+                if (newer.Count == 0)
+                {
+                    continue;
+                }
+
+                Report(store.Update(body =>
+                {
+                    foreach (var key in newer)
+                    {
+                        body.Set(key.Entry);
+                    }
+                }));
+                foreach (var key in newer)
+                {
+                    SshKeyAdoption.AddUser(key.Entry, origin, location.Path);
+                    Say($"{key.Entry.Name}: key adopted from {key.WrittenBy}.");
+                }
+            }
+            catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+            {
+                WriteWarning($"SSH keys of {location.Path} not checked against the other clones: {ex.Message}");
+            }
+        }
+    }
+
     internal void WritePersonalFiles(IReadOnlyList<VaultLocation> vaults)
     {
         ArgumentNullException.ThrowIfNull(vaults);

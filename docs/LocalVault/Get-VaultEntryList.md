@@ -42,6 +42,8 @@ last 30 days: local entries and personal values, or every entry when the vault h
 When the vault file doesn't exist and the same folder contains `secrets.local.clixml`, the cmdlet
 reads that file.
 
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
+
 ## EXAMPLES
 
 ### Example 1 - List the entries of the vault of the current repository

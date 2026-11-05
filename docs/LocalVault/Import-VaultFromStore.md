@@ -94,6 +94,8 @@ SSH private key, when the file doesn't exist yet, readable by the current user, 
 Administrators only. It never replaces an existing file; a different one gives a warning, and
 `Restore-VaultFile -Overwrite` replaces it.
 
+An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
+
 ## EXAMPLES
 
 ### Example 1 - Get the shared entries of a project on a new machine

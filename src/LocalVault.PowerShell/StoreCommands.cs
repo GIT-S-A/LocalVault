@@ -367,6 +367,7 @@ public sealed class ImportVaultFromStoreCommand : StoreSyncCmdletBase
 
         var present = vaults.Where(location => File.Exists(location.Path)).ToList();
         FillMissingValues(access, present);
+        AdoptNewerSshKeys(present);
         WritePersonalFiles(present);
         WriteObject(new StoreLoadSummary(totals.Added, totals.Updated, totals.Kept, totals.Removed));
     }
