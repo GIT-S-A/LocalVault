@@ -4,6 +4,7 @@ Set-StrictMode -Version Latest
 BeforeAll {
     . (Join-Path $PSScriptRoot 'TestSupport.ps1')
     $script:savedProfile = $env:USERPROFILE
+    $script:savedLocalAppData = $env:LOCALAPPDATA
 
     function Initialize-TestRepository {
         param([string]$Origin = 'https://example.com/team/proj.git', [string]$Leaf = 'proj')
@@ -18,11 +19,13 @@ BeforeAll {
 
 AfterAll {
     $env:USERPROFILE = $script:savedProfile
+    $env:LOCALAPPDATA = $script:savedLocalAppData
 }
 
 Describe 'SSH keys' {
     BeforeEach {
         $env:USERPROFILE = Initialize-TestFolder
+        $env:LOCALAPPDATA = Join-Path $env:USERPROFILE 'appdata'
         $script:repo = Initialize-TestRepository
         $script:vault = Join-Path $script:repo 'secrets.local.lv'
         $script:keyFolder = Join-Path $env:USERPROFILE '.ssh\proj'
@@ -62,9 +65,59 @@ Describe 'SSH keys' {
         (Get-VaultSshKey -Path $script:vault -Name me).Hosts | Should -Be @('me@srv1.example.com')
     }
 
-    It 'refuses a second key for the same entry' {
+    It 'refuses to replace a key without a store to carry the new one' {
         New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
-        { New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null } | Should -Throw '*already holds a key*'
+        $before = Get-Content -LiteralPath (Join-Path $script:keyFolder 'deploy') -Raw
+
+        { New-VaultSshKey -Path $script:vault -Name deploy -Replace 6>$null 3>$null } | Should -Throw '*replacing it needs the store*'
+        Get-Content -LiteralPath (Join-Path $script:keyFolder 'deploy') -Raw | Should -Be $before
+        (Get-VaultSshKey -Path $script:vault -Name deploy).Previous | Should -BeFalse
+    }
+
+    It 'refuses to replace a key outside a console without -Replace' {
+        Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+        Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+        New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+
+        { New-VaultSshKey -Path $script:vault -Name deploy 6>$null 3>$null } | Should -Throw '*already holds a key. Add -Replace*'
+    }
+
+    It 'replaces a shared key and keeps the old one as fallback' {
+        Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+        Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+        $key = Join-Path $script:keyFolder 'deploy'
+        $first = New-VaultSshKey -Path $script:vault -Name deploy -HostName deploy@srv1.example.com -Shared 6>$null 3>$null
+        $firstKey = Get-Content -LiteralPath $key -Raw
+
+        $second = New-VaultSshKey -Path $script:vault -Name deploy -Replace 6>$null 3>$null
+        $secondKey = Get-Content -LiteralPath $key -Raw
+
+        $second.Sharing | Should -Be 'Shared'
+        $second.Hosts | Should -Be @('deploy@srv1.example.com')
+        $second.Previous | Should -BeTrue
+        $second.Fingerprint | Should -Not -Be $first.Fingerprint
+        $secondKey | Should -Not -Be $firstKey
+        Get-Content -LiteralPath "$key.old" -Raw | Should -Be $firstKey
+        (Get-Acl -LiteralPath "$key.old").AreAccessRulesProtected | Should -BeTrue
+        Test-Path -LiteralPath "$key.old.pub" | Should -BeFalse
+        (Get-Content -LiteralPath "$key.pub" -Raw).Trim() | Should -Be $second.PublicKey
+
+        New-VaultSshKey -Path $script:vault -Name deploy -Replace 6>$null 3>$null | Out-Null
+        Get-Content -LiteralPath "$key.old" -Raw | Should -Be $secondKey
+    }
+
+    It 'replaces a personal key when the personal store is defined' {
+        Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'mine.kdbx') -Master 'pester master 1'
+        Register-VaultStore -Name mine -Target (Join-Path $env:USERPROFILE 'mine.kdbx') -Personal 6>$null | Out-Null
+        New-VaultSshKey -Path $script:vault -Name me -HostName me@srv1.example.com 6>$null 3>$null | Out-Null
+
+        $replaced = New-VaultSshKey -Path $script:vault -Name me -Replace 6>$null 3>$null
+
+        $replaced.Sharing | Should -Be 'Personal'
+        $replaced.Hosts | Should -Be @('me@srv1.example.com')
+        $replaced.Previous | Should -BeTrue
+        Test-Path -LiteralPath (Join-Path $script:keyFolder 'me.old') | Should -BeTrue
+        { New-VaultSshKey -Path $script:vault -Name me -Shared -Replace 6>$null 3>$null } | Should -Throw '*declared as a personal key*'
     }
 
     It 'refuses a key another clone already wrote' {
@@ -149,6 +202,13 @@ Describe 'SSH keys' {
             (Get-VaultSshKey -Name deploy).Hosts.Count | Should -Be 0
             lv @('ssh-key', 'new', 'other', '--type', 'dsa') 2>$null
             $LASTEXITCODE | Should -Be 1
+            lv @('ssh-key', 'new', 'deploy', '--replace') 2>$null
+            $LASTEXITCODE | Should -Be 1
+            Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+            Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+            lv @('ssh-key', 'new', 'deploy', '--replace') 6>$null 3>$null
+            $LASTEXITCODE | Should -Be 0
+            (Get-VaultSshKey -Name deploy).Previous | Should -BeTrue
         }
         finally { Pop-Location }
     }

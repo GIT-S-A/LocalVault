@@ -2455,7 +2455,7 @@ it says that the vault is missing or empty.
 | `template rm` | `<file>` | `Remove-VaultTemplate` |
 | `run` | `[<variable>=<name> ...] [--] <command> [<arguments> ...]` | sets the variables for the command only, writes every templated file of the repository, runs the command, then deletes the written files and restores the variables, even when the command fails; `$LASTEXITCODE` is the command's |
 | `ssh-key` | | `Get-VaultSshKey` |
-| `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
+| `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite] [--replace]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
@@ -2548,7 +2548,8 @@ Creates an SSH key pair for the hosts of a project and stores it in the vault.
 
 ```text
 New-VaultSshKey [-Name] <string> [-HostName <string[]>] [-Shared] [-Type <string>]
- [-Comment <string>] [-Overwrite] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-Comment <string>] [-Overwrite] [-Replace] [-Path <string>] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
 ```
 
 ### Description
@@ -2568,6 +2569,12 @@ project's store.
 The file `.localvault` in the key folder records the repository, the hash of each key and the vaults
 that use it. The cmdlet refuses a folder that belongs to another repository, a file that LocalVault
 didn't write, and a key that another clone of the repository wrote, unless `-Overwrite` is given.
+
+An entry that already holds a key gets a new key pair only with confirmation, or with `-Replace`
+outside a console. The replacement requires the store that carries the entry: the personal store for
+a personal key, the project's store for a shared one. The old key becomes the entry's previous key,
+written to `<name>.old`, and replaces any previous key kept before. The old public key stays
+registered on the hosts.
 
 The cmdlet prints the public key and copies it to the clipboard for 2 minutes. The key is usable once
 the public key is added to the hosts it is for.
@@ -2590,6 +2597,12 @@ New-VaultSshKey -Name backup -HostName backup@nas.example.com -Shared
 
 ```powershell
 New-VaultSshKey -Name legacy -HostName root@old.example.com -Type rsa
+```
+
+#### Example 4 - Replace a key from a script
+
+```powershell
+New-VaultSshKey -Name backup -Replace
 ```
 
 ### Parameters
@@ -2681,6 +2694,20 @@ you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment varia
 | Default value | None |
 | Aliases | None |
 
+#### -Replace
+
+Indicates that the cmdlet replaces the key of an entry that already holds one, without asking.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
 #### -Shared
 
 Indicates that the key is shared: its private key is readable by everyone with access to the
@@ -2737,7 +2764,7 @@ the **PublicKey**.
 
 ### Notes
 
-`lv ssh-key new <name> [--host <user@host>]... [--shared] [--type <type>] [--comment <text>] [--overwrite]`
+`lv ssh-key new <name> [--host <user@host>]... [--shared] [--type <type>] [--comment <text>] [--overwrite] [--replace]`
 runs this cmdlet.
 
 ## Register-VaultStore

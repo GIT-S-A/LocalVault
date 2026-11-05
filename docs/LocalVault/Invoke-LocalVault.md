@@ -78,7 +78,7 @@ it says that the vault is missing or empty.
 | `template rm` | `<file>` | `Remove-VaultTemplate` |
 | `run` | `[<variable>=<name> ...] [--] <command> [<arguments> ...]` | sets the variables for the command only, writes every templated file of the repository, runs the command, then deletes the written files and restores the variables, even when the command fails; `$LASTEXITCODE` is the command's |
 | `ssh-key` | | `Get-VaultSshKey` |
-| `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
+| `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite] [--replace]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |

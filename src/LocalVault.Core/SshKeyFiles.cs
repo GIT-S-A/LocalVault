@@ -19,7 +19,13 @@ public static class SshKeyFiles
         return entry.Ssh is { Agent: true } ? target + SshKeyPath.PublicKeySuffix : target;
     }
 
-    public static SshKeyWritePlan Write(VaultEntry entry, string vaultPath, string? origin, bool overwrite, DateTimeOffset now)
+    public static string OldKeyOf(string target) => target + VaultEntry.OldKeySuffix;
+
+    public static string OldPublicKeyOf(string target) => OldKeyOf(target) + SshKeyPath.PublicKeySuffix;
+
+    public static bool IsPrivateKey(ReadOnlySpan<byte> value) => value.StartsWith(PrivateKeyStart);
+
+    public static byte[] KeyFileBytesOf(VaultEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         if (entry.IsMissing || entry.Ssh is not { } ssh)
@@ -27,13 +33,19 @@ public static class SshKeyFiles
             throw new VaultException($"'{entry.Name}' holds no SSH key on this PC.");
         }
 
+        return ssh.Agent ? PublicKeyFileBytes(ssh) : entry.GetValue();
+    }
+
+    public static SshKeyWritePlan Write(VaultEntry entry, string vaultPath, string? origin, bool overwrite, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var keyBytes = KeyFileBytesOf(entry);
+        var ssh = entry.Ssh!;
         var target = TargetOf(entry);
         var fileName = Path.GetFileName(target);
         using var folder = SshKeyFolder.Open(Path.GetDirectoryName(target)!);
-        var value = entry.GetValue();
         try
         {
-            var keyBytes = ssh.Agent ? Encoding.UTF8.GetBytes(ssh.PublicKey + "\n") : value;
             var plan = folder.Plan(fileName, origin, vaultPath, keyBytes, entry.Created ?? now, overwrite);
             if (plan.Refused)
             {
@@ -48,10 +60,11 @@ public static class SshKeyFiles
                 }
                 else
                 {
-                    PrivateFile.Write(target, value);
+                    PrivateFile.Write(target, keyBytes);
                 }
 
-                PrivateFile.Write(target + SshKeyPath.PublicKeySuffix, Encoding.UTF8.GetBytes(ssh.PublicKey + "\n"));
+                PrivateFile.Write(target + SshKeyPath.PublicKeySuffix, PublicKeyFileBytes(ssh));
+                WriteOldKey(target, entry.GetPrevious());
                 folder.Record(fileName, origin, vaultPath, keyBytes, now);
             }
             else
@@ -65,7 +78,32 @@ public static class SshKeyFiles
         }
         finally
         {
-            CryptographicOperations.ZeroMemory(value);
+            CryptographicOperations.ZeroMemory(keyBytes);
+        }
+    }
+
+    private static ReadOnlySpan<byte> PrivateKeyStart => "-----BEGIN "u8;
+
+    private static byte[] PublicKeyFileBytes(SshKeyInfo ssh) => Encoding.UTF8.GetBytes(ssh.PublicKey + "\n");
+
+    private static void WriteOldKey(string target, byte[]? previous)
+    {
+        if (previous is null)
+        {
+            File.Delete(OldKeyOf(target));
+            File.Delete(OldPublicKeyOf(target));
+            return;
+        }
+
+        try
+        {
+            var (written, deleted) = IsPrivateKey(previous) ? (OldKeyOf(target), OldPublicKeyOf(target)) : (OldPublicKeyOf(target), OldKeyOf(target));
+            PrivateFile.Write(written, previous);
+            File.Delete(deleted);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(previous);
         }
     }
 

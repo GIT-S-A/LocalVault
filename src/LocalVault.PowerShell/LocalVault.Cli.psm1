@@ -22,7 +22,7 @@ $script:LvSyntax = @{
     update  = @{ Usage = 'lv update [<tag>] [--downgrade]'; Min = 0; Max = 1; Options = @('downgrade') }
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @() }
-    'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default]]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'default') }
+    'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] [--replace] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default]]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace', 'default') }
 }
 $script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment')
 $script:LvListOptions = @('host')
@@ -53,7 +53,7 @@ function Get-LocalVaultCompletion {
     $vaultPath = $null
     for ($i = 0; $i -lt $typed.Count; $i++) {
         if ($typed[$i] -match '^--(.+)$') {
-            if ($script:LvValueOptions -contains $Matches[1] -and $i + 1 -lt $typed.Count) {
+            if ($script:LvValueOptions -contains $Matches[1] -and $i + 1 -lt $typed.Count -and -not ($Matches[1] -eq 'replace' -and $positional.Count -gt 0 -and $positional[0] -eq 'ssh-key')) {
                 if ($Matches[1] -eq 'path') { $vaultPath = $typed[$i + 1] }
                 $i++
             }
@@ -169,7 +169,8 @@ SSH keys (for SSH to hosts; files in ~/.ssh/<repository>/)
   ssh-key                              the repository's keys: personal or shared, fingerprint, hosts
   ssh-key new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa]
                                        creates a key pair: personal (your own, in your personal store) or
-                                       --shared (one key for the team, in the project's store)
+                                       --shared (one key for the team, in the project's store);
+                                       --replace replaces an existing key, the old one kept as fallback
   ssh-key hosts <name> [<user@host> ...]   the hosts a key is for; none clears them
   ssh-key path <name>                  the key file, for tools that take -i
   ssh-key tools [<dir> | --default]    the OpenSSH folder in use; <dir> replaces Windows OpenSSH on this PC
@@ -212,6 +213,9 @@ Details: Get-Help Invoke-LocalVault -Full
             $argument = $Arguments[$i]
             if ($argument -notmatch '^--(.+)$') {
                 $words.Add($argument)
+            }
+            elseif ($Matches[1] -eq 'replace' -and $words.Count -gt 0 -and $words[0] -eq 'ssh-key') {
+                $options['replace'] = $true
             }
             elseif ($valueOptions -contains $Matches[1]) {
                 if ($i + 1 -ge $Arguments.Count -or $Arguments[$i + 1].StartsWith('--')) { $badOptions.Add("$argument needs a value.") }
@@ -563,7 +567,7 @@ Details: Get-Help Invoke-LocalVault -Full
             'ssh-key' {
                 $sub = if ($words.Count -eq 0) { 'list' } else { $words[0] }
                 $rest = @($words | Select-Object -Skip 1)
-                $allowed = @{ list = @(); new = @('host', 'shared', 'type', 'comment', 'overwrite'); hosts = @(); path = @(); tools = @('default') }
+                $allowed = @{ list = @(); new = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace'); hosts = @(); path = @(); tools = @('default') }
                 if (-not $allowed.ContainsKey($sub)) { & $fail "Unknown ssh-key command '$sub'." }
                 foreach ($name in $options.Keys) {
                     if ($name -notin 'path', 'help' -and $allowed[$sub] -notcontains $name) { & $fail "lv ssh-key $sub doesn't take --$name." }
@@ -579,7 +583,7 @@ Details: Get-Help Invoke-LocalVault -Full
                         else { $keys | Format-Table Name, Sharing, Source, Type, Fingerprint, @{ Label = 'Hosts'; Expression = { $_.Hosts -join ', ' } }, Previous -AutoSize }
                     }
                     'new' {
-                        $create = @{ Name = $rest[0]; Shared = [bool]$options['shared']; Overwrite = [bool]$options['overwrite'] }
+                        $create = @{ Name = $rest[0]; Shared = [bool]$options['shared']; Overwrite = [bool]$options['overwrite']; Replace = [bool]$options['replace'] }
                         if ($options.ContainsKey('host')) { $create.HostName = @($options.host) }
                         if ($options.ContainsKey('type')) { $create.Type = $options.type }
                         if ($options.ContainsKey('comment')) { $create.Comment = $options.comment }

@@ -61,6 +61,15 @@ public sealed class SshKeyTests : IDisposable
         Assert.Equal(expected, SshKeyPath.RepositoryNameOf(origin, "folder"));
 
     [Fact]
+    public void OldKeyFileDependsOnWhetherThePreviousValueIsAPrivateKey()
+    {
+        Assert.True(SshKeyFiles.IsPrivateKey("-----BEGIN OPENSSH PRIVATE KEY-----\nabc\n"u8));
+        Assert.False(SshKeyFiles.IsPrivateKey(System.Text.Encoding.UTF8.GetBytes(PublicKey)));
+        Assert.Equal(Path.Combine("k", "deploy.old"), SshKeyFiles.OldKeyOf(Path.Combine("k", "deploy")));
+        Assert.Equal(Path.Combine("k", "deploy.old.pub"), SshKeyFiles.OldPublicKeyOf(Path.Combine("k", "deploy")));
+    }
+
+    [Fact]
     public void FingerprintIsTheOpenSshForm()
     {
         Assert.Equal(Fingerprint, SshKeyInfo.FingerprintOf(PublicKey));

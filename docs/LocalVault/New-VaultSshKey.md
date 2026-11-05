@@ -21,7 +21,7 @@ Creates an SSH key pair for the hosts of a project and stores it in the vault.
 
 ```
 New-VaultSshKey [-Name] <string> [-HostName <string[]>] [-Shared] [-Type <string>] [-Comment <string>]
- [-Overwrite] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-Overwrite] [-Replace] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -46,6 +46,12 @@ The file `.localvault` in the key folder records the repository, the hash of eac
 that use it. The cmdlet refuses a folder that belongs to another repository, a file that LocalVault
 didn't write, and a key that another clone of the repository wrote, unless `-Overwrite` is given.
 
+An entry that already holds a key gets a new key pair only with confirmation, or with `-Replace`
+outside a console. The replacement requires the store that carries the entry: the personal store for
+a personal key, the project's store for a shared one. The old key becomes the entry's previous key,
+written to `<name>.old`, and replaces any previous key kept before. The old public key stays
+registered on the hosts.
+
 The cmdlet prints the public key and copies it to the clipboard for 2 minutes. The key is usable once
 the public key is added to the hosts it is for.
 
@@ -67,6 +73,12 @@ New-VaultSshKey -Name backup -HostName backup@nas.example.com -Shared
 
 ```powershell
 New-VaultSshKey -Name legacy -HostName root@old.example.com -Type rsa
+```
+
+### Example 4 - Replace a key from a script
+
+```powershell
+New-VaultSshKey -Name backup -Replace
 ```
 
 ## PARAMETERS
@@ -201,6 +213,27 @@ AcceptedValues: []
 HelpMessage: ''
 ```
 
+### -Replace
+
+Indicates that the cmdlet replaces the key of an entry that already holds one, without asking.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
 ### -Shared
 
 Indicates that the key is shared: its private key is readable by everyone with access to the
@@ -293,7 +326,7 @@ the **PublicKey**.
 
 ## NOTES
 
-`lv ssh-key new <name> [--host <user@host>]... [--shared] [--type <type>] [--comment <text>] [--overwrite]`
+`lv ssh-key new <name> [--host <user@host>]... [--shared] [--type <type>] [--comment <text>] [--overwrite] [--replace]`
 runs this cmdlet.
 
 ## RELATED LINKS

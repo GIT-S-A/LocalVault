@@ -95,15 +95,16 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
     [Parameter]
     public SwitchParameter Overwrite { get; set; }
 
+    [Parameter]
+    public SwitchParameter Replace { get; set; }
+
     protected override void Run()
     {
         var name = EntryName.Parse(Name);
         var existing = ReadVault().Body.Find(name);
-        if (existing is { IsMissing: false })
+        if (existing is { IsMissing: false, IsSshKey: false })
         {
-            throw new VaultException(existing.IsSshKey
-                ? $"'{name}' already holds a key on this PC."
-                : $"'{name}' is a {existing.Kind} entry, not an SSH key.");
+            throw new VaultException($"'{name}' is a {existing.Kind} entry, not an SSH key.");
         }
 
         if (existing is { IsMissing: true } && !existing.IsSshKeyShape)
@@ -111,28 +112,43 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             throw new VaultException($"'{name}' is declared as a {existing.RequiredShape ?? "secret"}, not an SSH key.");
         }
 
-        if (existing is not null && Shared)
+        if (existing is { IsRequired: true } && Shared)
         {
             throw new VaultException($"'{name}' is declared as a personal key; -Shared doesn't apply to it.");
         }
 
-        var hosts = (HostName ?? existing?.RequiredHosts ?? []).Select(SshKeyInfo.NormalizeHost).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var replaced = existing is { IsMissing: false } ? existing : null;
+        var personal = existing?.IsRequired ?? !Shared;
+        var hosts = (HostName ?? existing?.SshHosts ?? []).Select(SshKeyInfo.NormalizeHost).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var repository = RepositoryName;
-        var storedPath = existing?.RequiredPath ?? SshKeyPath.For(repository, name);
+        var storedPath = existing?.RequiredPath ?? existing?.StoredPath ?? SshKeyPath.For(repository, name);
         var target = StoredPathRules.Resolve(StoredPathRules.HomeDirectory, storedPath);
+        if (replaced is not null)
+        {
+            RefuseReplacementWithoutStore(name, personal);
+        }
+
         var tools = Tools;
-        if (!ShouldProcess($"{name} in {Location.Path}", "Create SSH key"))
+        if (!ShouldProcess($"{name} in {Location.Path}", replaced is null ? "Create SSH key" : "Replace SSH key"))
         {
             return;
         }
 
-        RefuseOccupiedTarget(target, name);
-        var comment = Comment ?? $"{Environment.UserName}@{Environment.MachineName} {repository}/{name}";
-        VaultEntry stored;
-        using (var key = SshKeyGenerator.Generate(tools, System.IO.Path.GetDirectoryName(target)!, Type, comment))
+        RefuseOccupiedTarget(target, name, replaced);
+        if (replaced is not null && !Replace && !ConfirmReplacement(name, target, personal))
         {
-            var personal = !Shared;
-            var value = VaultEntry.NewSshKey(name, key.PrivateKey, storedPath, new SshKeyInfo(Type, key.PublicKey, personal ? [] : hosts), [], Now);
+            Say($"{name} keeps its key. Nothing was written.");
+            return;
+        }
+
+        var comment = Comment ?? $"{Environment.UserName}@{Environment.MachineName} {repository}/{name}";
+        byte[] previous = replaced?.GetValue() ?? [];
+        VaultEntry stored;
+        try
+        {
+            using var key = SshKeyGenerator.Generate(tools, System.IO.Path.GetDirectoryName(target)!, Type, comment);
+            var ssh = new SshKeyInfo(Type, key.PublicKey, personal ? [] : hosts, ReplacedAt: replaced is null ? null : Now);
+            var value = VaultEntry.NewSshKey(name, key.PrivateKey, storedPath, ssh, previous, Now);
             Report(VaultFile.Update(
                 body =>
                 {
@@ -146,14 +162,23 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
                 WriteOptions()));
             stored = ReadVault().Body.Find(name)!;
         }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(previous);
+        }
 
         WriteKeyFile(stored, Overwrite);
+        if (replaced is not null)
+        {
+            Say($"{name}: the old key stays as a fallback until every host accepts the new one.");
+        }
+
         var info = Describe(stored);
         Say($"Public key of {name} ({info.Fingerprint}):");
         Say(info.PublicKey!);
         CopyToClipboard(info.PublicKey!);
         WriteWarning($"{name} is unusable until someone with access adds this public key to {(hosts.Count > 0 ? string.Join(", ", hosts) : "the hosts it is for")}.");
-        if (Shared)
+        if (!personal)
         {
             WriteWarning($"{name} is shared: its private key is readable by everyone with access to {StoreLabel()}.");
         }
@@ -165,7 +190,56 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
         WriteObject(info);
     }
 
-    private void RefuseOccupiedTarget(string target, EntryName name)
+    private void RefuseReplacementWithoutStore(EntryName name, bool personal)
+    {
+        var registry = new StoreRegistry(StoreRegistry.DefaultPath);
+        var problem = personal
+            ? registry.Personal is null ? "no personal store is defined on this PC. Name one with lv store set <name> --personal." : null
+            : StoreResolver.For(Location, null, registry).Problem;
+        if (problem is not null)
+        {
+            throw new VaultException($"'{name}' already holds a key, and replacing it needs the store that carries it to the other PCs: {problem} Nothing was written.");
+        }
+    }
+
+    private bool ConfirmReplacement(EntryName name, string target, bool personal)
+    {
+        if (!IsInteractive)
+        {
+            throw new VaultException($"'{name}' already holds a key. Add -Replace (--replace) to replace it. Nothing was written.");
+        }
+
+        var question = new List<string> { $"'{name}' already holds a key. Replace it with a new one?" };
+        var clones = OtherClonesUsing(target);
+        if (clones.Count > 0)
+        {
+            question.Add($"Other clones using it on this PC: {string.Join(", ", clones)}.");
+        }
+
+        if (!personal)
+        {
+            question.Add("Every teammate gets the new key on the next lv load.");
+        }
+
+        question.Add("The old public key stays registered where it was added; the old key stays as a fallback until every host accepts the new one.");
+        return Confirm(string.Join(Environment.NewLine, question));
+    }
+
+    private List<string> OtherClonesUsing(string target)
+    {
+        var directory = System.IO.Path.GetDirectoryName(target)!;
+        if (!System.IO.Directory.Exists(directory))
+        {
+            return [];
+        }
+
+        using var folder = SshKeyFolder.Open(directory);
+        return folder.Keys.TryGetValue(System.IO.Path.GetFileName(target), out var record)
+            ? [.. record.Users.Where(user => !string.Equals(user, Location.Path, StringComparison.OrdinalIgnoreCase))]
+            : [];
+    }
+
+    private void RefuseOccupiedTarget(string target, EntryName name, VaultEntry? replaced)
     {
         var directory = System.IO.Path.GetDirectoryName(target)!;
         if (!System.IO.Directory.Exists(directory))
@@ -173,13 +247,22 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             return;
         }
 
-        using var folder = SshKeyFolder.Open(directory);
-        var plan = folder.Plan(System.IO.Path.GetFileName(target), OriginUrl, Location.Path, [], DateTimeOffset.MinValue, Overwrite);
-        if (plan.Refused)
+        byte[] current = replaced is null ? [] : SshKeyFiles.KeyFileBytesOf(replaced);
+        try
         {
-            throw new VaultException(plan.State == SshKeyWriteState.NewerElsewhere
-                ? $"'{target}' already holds {name}, written by {plan.Record!.WrittenBy}. Run lv load to use it, or -Overwrite (--overwrite) to replace it. Nothing was written."
-                : SshKeyFiles.Describe(plan, name) + " Nothing was written.");
+            using var folder = SshKeyFolder.Open(directory);
+            var created = replaced?.Created ?? DateTimeOffset.MinValue;
+            var plan = folder.Plan(System.IO.Path.GetFileName(target), OriginUrl, Location.Path, current, created, Overwrite);
+            if (plan.Refused)
+            {
+                throw new VaultException(plan.State == SshKeyWriteState.NewerElsewhere
+                    ? $"'{target}' already holds {name}, written by {plan.Record!.WrittenBy}. Run lv load to use it, or -Overwrite (--overwrite) to replace it. Nothing was written."
+                    : SshKeyFiles.Describe(plan, name) + " Nothing was written.");
+            }
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(current);
         }
     }
 
