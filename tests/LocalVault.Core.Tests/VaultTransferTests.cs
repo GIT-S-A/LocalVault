@@ -109,8 +109,8 @@ public sealed class VaultTransferTests : IDisposable
     [Fact]
     public void ExportOfNewerSchemaIsNotImported()
     {
-        var path = directory.Combine("schema5.export");
-        File.WriteAllText(path, Envelope.SealExport("""{"schema":6,"entries":[]}"""u8, Passphrase));
+        var path = directory.Combine("schema7.export");
+        File.WriteAllText(path, Envelope.SealExport("""{"schema":7,"entries":[]}"""u8, Passphrase));
 
         var error = Assert.Throws<VaultException>(() => VaultTransfer.OpenExport(path, Passphrase));
         Assert.Contains(Envelope.NewerFormatMessage, error.Message, StringComparison.Ordinal);

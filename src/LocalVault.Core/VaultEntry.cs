@@ -12,6 +12,7 @@ public sealed class VaultEntry
     public const string FileKind = "file";
     public const string RequiredKind = "required";
     public const string CredentialKind = "credential";
+    public const string HelloKind = "hello";
     public const string CredentialShape = "credential";
     public const string FileShape = "file";
     public const string SshKeyShape = "ssh-key";
@@ -41,6 +42,8 @@ public sealed class VaultEntry
     private const string PublicKeyField = "publicKey";
     private const string AgentField = "agent";
     private const string ReplacedAtField = "replacedAt";
+    private const string HelloField = "hello";
+    private const string VaultKeyField = "vaultKey";
 
     internal VaultEntry(JsonObject node)
     {
@@ -53,6 +56,11 @@ public sealed class VaultEntry
         }
 
         ValidateMeta(node[MetaField]);
+        if (IsHello && HelloInnerKind is null)
+        {
+            throw new VaultException($"Vault entry '{Name}' is sealed by Windows Hello but has no 'hello' data.");
+        }
+
         ValidateCredential(node);
         if (node[PreviousField] is { } previous
             && !(previous is JsonValue previousValue && previousValue.TryGetValue<string>(out var previousText) && Base64.IsValid(previousText)))
@@ -84,6 +92,16 @@ public sealed class VaultEntry
     public bool IsCredential => Kind == CredentialKind;
 
     public bool IsKnownKind => IsSecret || IsFile || IsMissing || IsCredential;
+
+    public bool IsHello => Kind == HelloKind;
+
+    public string? HelloInnerKind => (Meta?[HelloField] as JsonObject)?[KindField]?.GetValue<string>();
+
+    public string? HelloHash => (Meta?[HelloField] as JsonObject)?[HashField]?.GetValue<string>();
+
+    public string? HelloVaultKey => (Meta?[HelloField] as JsonObject)?[VaultKeyField]?.GetValue<string>();
+
+    public bool IsRequiredHello => (Meta?[RequiredField] as JsonObject)?[HelloField] is JsonValue value && value.TryGetValue<bool>(out var hello) && hello;
 
     public string? UserName => Node[UserField] is JsonValue value && value.TryGetValue<string>(out var user) ? user : null;
 
@@ -258,7 +276,55 @@ public sealed class VaultEntry
         return new VaultEntry(node);
     }
 
-    public byte[] GetValue() => Convert.FromBase64String(ReadString(Node, ValueField));
+    public byte[] GetValue() => IsHello
+        ? throw new HelloException($"'{Name}' is sealed by Windows Hello; unseal it first.")
+        : Convert.FromBase64String(ReadString(Node, ValueField));
+
+    internal byte[] GetSealedValue() => Convert.FromBase64String(ReadString(Node, ValueField));
+
+    internal JsonObject SealablePayload()
+    {
+        if (!(IsSecret || IsFile || IsCredential) || Ssh is not null)
+        {
+            throw new VaultException($"'{Name}' is a {(Ssh is null ? Kind : "ssh-key")} entry; Windows Hello seals secret, credential and file entries only.");
+        }
+
+        var payload = new JsonObject { [ValueField] = ReadString(Node, ValueField) };
+        foreach (var field in CredentialFields.Where(field => Node[field] is not null))
+        {
+            payload[field] = Node[field]!.DeepClone();
+        }
+
+        return payload;
+    }
+
+    internal VaultEntry ToSealed(ReadOnlySpan<byte> blob, string vaultKey)
+    {
+        var hash = ContentHash();
+        var node = (JsonObject)Node.DeepClone();
+        var innerKind = Kind;
+        node[KindField] = HelloKind;
+        node[ValueField] = Convert.ToBase64String(blob);
+        RemoveCredentialFields(node);
+        var meta = node[MetaField] as JsonObject ?? new JsonObject();
+        node[MetaField] = meta;
+        meta[HelloField] = new JsonObject { [KindField] = innerKind, [HashField] = hash, [VaultKeyField] = vaultKey };
+        return new VaultEntry(node);
+    }
+
+    internal VaultEntry ToUnsealed(JsonObject payload)
+    {
+        var node = (JsonObject)Node.DeepClone();
+        node[KindField] = HelloInnerKind;
+        node[ValueField] = payload[ValueField]!.GetValue<string>();
+        foreach (var field in CredentialFields.Where(field => payload[field] is not null))
+        {
+            node[field] = payload[field]!.DeepClone();
+        }
+
+        (node[MetaField] as JsonObject)?.Remove(HelloField);
+        return new VaultEntry(node);
+    }
 
     public byte[] ReadPart(EntryReference reference, DateTimeOffset now)
     {
@@ -362,6 +428,11 @@ public sealed class VaultEntry
 
     public string ContentHash()
     {
+        if (IsHello)
+        {
+            return HelloHash!;
+        }
+
         var value = GetValue();
         var previous = GetPrevious();
         try
@@ -596,6 +667,11 @@ public sealed class VaultEntry
             Meta?.Remove(SshField);
         }
 
+        if (source.Meta?[HelloField] is null)
+        {
+            Meta?.Remove(HelloField);
+        }
+
         RemoveCredentialFields(Node);
         foreach (var field in CredentialFields.Where(field => source.Node[field] is not null))
         {
@@ -704,6 +780,16 @@ public sealed class VaultEntry
                         && DateTimeOffset.TryParse(replacedText, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal, out _)))))
         {
             throw new VaultException($"Vault entry '{Name}' has SSH key data that is damaged.");
+        }
+
+        if (fields[HelloField] is { } hello
+            && !(hello is JsonObject helloFields
+                && helloFields[KindField] is JsonValue innerKind && innerKind.TryGetValue<string>(out var innerText)
+                && innerText is SecretKind or FileKind or CredentialKind
+                && helloFields[HashField] is JsonValue helloHash && helloHash.TryGetValue<string>(out _)
+                && helloFields[VaultKeyField] is JsonValue vaultKey && vaultKey.TryGetValue<string>(out _)))
+        {
+            throw new VaultException($"Vault entry '{Name}' has Windows Hello data that is damaged.");
         }
 
         if (fields[LocalField] is { } local && !(local is JsonValue localValue && localValue.TryGetValue<bool>(out _)))

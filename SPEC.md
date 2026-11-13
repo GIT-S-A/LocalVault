@@ -46,12 +46,12 @@ skills/localvault/SKILL.md                   Claude skill: install line, usage
 ### Entry & body
 
 ```
-entry := { name, kind: "secret"|"file"|"credential"|"required", value: base64 ("" for required), previous?: base64, meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file"|"ssh-key", path?: string, hosts?: [string] }, kp?: { hash: hex, at: ISO-8601 UTC }, ssh?: { type: "ed25519"|"rsa"|"ecdsa", publicKey: string, hosts?: [string], agent?: true, replacedAt?: ISO-8601 UTC }, ref?: { db: hex, uuid: hex, attachment?: string }, hello?: { hash: hex } } }
+entry := { name, kind: "secret"|"file"|"credential"|"required"|"hello", value: base64 ("" for required), previous?: base64, meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file"|"ssh-key", path?: string, hosts?: [string] }, kp?: { hash: hex, at: ISO-8601 UTC }, ssh?: { type: "ed25519"|"rsa"|"ecdsa", publicKey: string, hosts?: [string], agent?: true, replacedAt?: ISO-8601 UTC }, ref?: { db: hex, uuid: hex, attachment?: string }, hello?: { kind: "secret"|"file"|"credential", hash: hex, vaultKey: hex16 } } }
 body  := { schema: 5|6, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }], hello?: { keyId: hex, publicKey: b64, wrapped: b64, pad: "pkcs1" } }   UTF-8 JSON
 ```
 
 - unknown body fields, entry fields, meta fields, kinds → kept verbatim on rewrite (V20).
-- `meta.hello` ∃ → hello entry: `value` = sealed blob (§I.Hello), ⊥ plain; `meta.hello.hash` = content hash (§I.KeePass) of plain value. Required declaration may carry `meta.required.hello: true`.
+- kind `hello` → `value` = sealed blob (§I.Hello), ⊥ plain; credential fields (`user`, `urls`, `totp`) inside the seal; `meta.path` kept outside. `meta.hello.kind` = kind when unsealed, `hash` = content hash (§I.KeePass) of plain entry, `vaultKey` = first 16 hex of SHA-256(vault public key) it was sealed under. Older modules: unknown kind → skipped by store sync (V20). Required declaration may carry `meta.required.hello: true`.
 - local body only: `backup?: { id, destination, passphrase: b64, keyfile: b64, keyfileId: hex, lastBackup?, lastError? }`, left by releases ≤ beta14; read, ⊥ written. ⊥ in export (V33).
 
 ### Old backups
@@ -94,14 +94,14 @@ body  := { schema: 5|6, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, en
 
 ### Hello
 
-- hello entry := entry w/ `meta.hello`; kinds secret | credential | file; ⊥ ssh-key, ⊥ required w/o value. Opt-in per entry; other entries plain (vault file DPAPI-sealed as before, hello layer inside).
+- hello entry := entry of kind `hello`; sealed kinds secret | credential | file; ⊥ ssh-key, ⊥ required w/o value. Opt-in per entry; other entries plain (vault file DPAPI-sealed as before, hello layer inside).
 - Hello key := RSA-2048 in `Microsoft Passport Key Storage Provider` (`MS_NGC_KEY_STORAGE_PROVIDER`), one per Windows user, name `<user SID>//LocalVault/Hello/LocalVault-Hello`; `NCRYPT_NGC_CACHE_TYPE_PROPERTY` = `NCRYPT_NGC_CACHE_TYPE_PROPERTY_AUTH_MANDATORY_FLAG` (every decrypt prompts); export policy 0 (non-exportable). Created on first seal (one Hello prompt). `keyId` = hex SHA-256 of its `BCRYPT_RSAPUBLIC_BLOB`. Hardware := key property `NgcKeyImplType` has `NCRYPT_IMPL_HARDWARE_FLAG` (0x1) (TPM; 0x20 = virtual isolation); bit absent | property unreadable → software key, reported (V147). Key property `Impl Type` ⊥ supported; provider reports 3.
 - vault key := P-256 key pair per vault, made w/o prompt when first hello entry is sealed; body `hello.publicKey` = SubjectPublicKeyInfo; `hello.wrapped` = private scalar (32 B) encrypted by Hello key, RSA PKCS#1 v1.5 (`pad`; NGC KSP refuses OAEP SHA-1 & SHA-256 with `NTE_INVALID_PARAMETER`; decrypt gated by a Hello gesture per call); `hello.keyId` = Hello key that wrapped it.
-- sealed blob (base64 in `value`): `0x01` ‖ ephemeral P-256 public point (65 B, uncompressed) ‖ nonce (12 B) ‖ tag (16 B) ‖ ciphertext. Key = HKDF-SHA256(ECDH(ephemeral, vault key), salt = keyId bytes, info `LOCALVAULT hello`, 32 B); AES-256-GCM; AAD = UTF-8 `name` ‖ 0x00 ‖ `kind` ‖ 0x00 ‖ keyId. Plain = value bytes as for a plain entry of that kind.
+- sealed blob (base64 in `value`): `0x01` ‖ ephemeral P-256 public point (65 B, uncompressed) ‖ nonce (12 B) ‖ tag (16 B) ‖ ciphertext. Key = HKDF-SHA256(ECDH(ephemeral, vault key), salt = keyId bytes, info `LOCALVAULT hello`, 32 B); AES-256-GCM; AAD = UTF-8 `name` ‖ 0x00 ‖ sealed kind ‖ 0x00 ‖ keyId (lowercase hex). Plain = UTF-8 JSON `{ value: b64, user?, urls?, totp? }`.
 - seal: vault public key only → ⊥ prompt. unseal: one Hello decrypt of `hello.wrapped` per command → vault private key → entries; scalar & plain buffers zeroed after the command (V145).
-- Hello state := `ready` | `software` (key ∃, ⊥ TPM) | `none` (key ⊥ created) | `unavailable` (Hello ⊥ set up, remote session, ⊥ interactive, provider error) | `key changed` (vault `keyId` ≠ key's).
+- Hello state := `ready` | `software` (key ∃, ⊥ TPM) | `none` (key ⊥ created) | `unavailable` (Hello ⊥ set up, remote session, ⊥ interactive, provider error) | `key changed` (vault `keyId` ≠ key's). Entry Missing w/o prompt: state ≠ ready | vault `keyId` ≠ key's | `meta.hello.vaultKey` ≠ current vault key.
 - KeePass: hello entry stored plain as its kind + custom string `LocalVault.Hello` = `true`; declaration → `LocalVault.RequiredHello` = `true`. Flag ⊥ in content hash.
-- interface `IHelloKey` (Core): `KeyId`, `PublicKey`, `State`, `Create()`, `Decrypt(wrapped)`; Windows implementation in Core; tests substitute a software RSA key via test-only setting.
+- interface `IHelloKey` (Core): `State`, `UnavailableReason`, `IsHardware`, `KeyId`, `PublicKey`, `Create(message)`, `Decrypt(wrapped, message)`; `HelloKeys.Current` = Windows key; tests set internal `HelloKeys.Override` (in-process only, ⊥ setting on disk) to a software RSA key.
 
 ### PC settings
 
@@ -434,7 +434,7 @@ V147: Hello key created w/o hardware flag → warning "Windows Hello key is soft
 V148: Hello key ⊥ exists | `keyId` ≠ vault `hello.keyId` | unwrap fails → hello entries Missing, reason "Windows Hello key missing" | "Windows Hello key changed (PIN or Hello reset, other PC)"; read → error w/ reason + "lv load restores it from the store"; `Import-VaultFromStore` → missing hello entries taken from store regardless of hashes, resealed under new vault key (new pair, old `hello` replaced, other hello entries ⊥ in store stay Missing & reported). ⊥ deleted silently.
 V149: `lv run --stdin <name>` → value bytes (secret UTF-8, file raw, credential password) to child's stdin from a byte buffer, stdin closed after, buffer zeroed; ⊥ .NET string of the value, ⊥ temp file, ⊥ command line; child stdout/stderr passed through, exit code passed (V101). Name missing | unreadable → error before child starts.
 V150: KeePass `LocalVault.Hello` = `true` → load stores entry as hello (sealed), flag kept on vault; ⊥ flag on store & vault entry hello → vault keeps hello (local choice); save writes flag for hello entries. `-Protection Dpapi` → flag removed on next save. Export (`LOCALVAULT-2` export) → plain value + `meta.hello: {}`; import → resealed (V144).
-V151: body w/ ≥ 1 hello entry | `hello` → schema 6; else schema 5 kept. Older modules refuse schema 6 (C8). Last hello entry removed → `hello` dropped, schema 5.
+V151: body w/ ≥ 1 hello entry → schema 6 & `hello` kept; else `hello` dropped & schema 5 written. Older modules refuse to write schema 6 (C8) & skip kind `hello` in store sync.
 V152: Hello prompt only in an interactive session: ⊥ console | input redirected | `-NonInteractive` | remote session (`SM_REMOTESESSION`) → state `unavailable`, read → error, ⊥ prompt attempt. Prompt window owner = console window, else foreground window.
 
 ## §T Tasks
@@ -536,7 +536,7 @@ T92|.|`Reset-VaultEntry` / `lv reset`|V137
 T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset; beta18|C11
 T94|x|marker origin `""` ≠ URL; `lv start` shows adoption report & warning; `Get-VaultEntry` on ssh-key adopts first; tab completion ⊥ adopts|V126,V127,B30,B31
 T95|x|spike: NGC KSP → create OK (1 prompt); OAEP SHA-1/SHA-256 refused, PKCS#1 OK; AUTH_MANDATORY → 2nd decrypt on same handle prompts; `NgcKeyImplType` 0x21 = hardware; prompt shown w/ foreground hwnd when ⊥ console window|I.Hello
-T96|.|Core: `IHelloKey` + NGC impl + test impl, vault key pair, seal/unseal blob, body `hello`, `meta.hello`, schema 6 + xUnit (round trip, AAD swap fails, key missing, keyId mismatch, zeroing)|I.Hello,I.Entry,V144,V145,V148,V151
+T96|x|Core: `IHelloKey` + NGC impl + test impl, vault key pair, seal/unseal blob, body `hello`, `meta.hello`, schema 6 + xUnit (round trip, AAD swap fails, key missing, keyId mismatch, zeroing)|I.Hello,I.Entry,V144,V145,V148,V151
 T97|.|cmdlets & CLI: `-Hello`, `-Protection`, `--hello`, `lv mark hello|nohello`, `Get-VaultHelloStatus`/`lv hello`, one-prompt read path (get, clip, env, run, Resolve, Restore, templates), list column + Pester (fake key, unavailable, non-interactive)|V144-V147,V152
 T98|.|stores & transfer: `LocalVault.Hello`, diff w/o prompt, save prompt rule, load reseal & Missing restore, export/import + Pester|V146,V148,V150
 T99|.|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)|V149

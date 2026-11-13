@@ -7,6 +7,7 @@ namespace LocalVault.Core;
 public sealed class VaultBody
 {
     public const int CurrentSchema = 5;
+    public const int HelloSchema = 6;
 
     private const string SchemaField = "schema";
     private const string ExportedField = "exported";
@@ -18,6 +19,11 @@ public sealed class VaultBody
     private const string RemovedNameField = "name";
     private const string RemovedHashField = "hash";
     private const string RemovedDatabaseField = "db";
+    private const string HelloField = "hello";
+    private const string HelloKeyIdField = "keyId";
+    private const string HelloPublicKeyField = "publicKey";
+    private const string HelloWrappedField = "wrapped";
+    private const string HelloPadField = "pad";
 
     private static readonly JsonSerializerOptions WriteOptions = new() { WriteIndented = false };
 
@@ -35,7 +41,36 @@ public sealed class VaultBody
 
     public int Schema => root[SchemaField]!.GetValue<int>();
 
-    public bool IsWritable => Schema <= currentSchema;
+    public bool IsWritable => Schema <= (currentSchema == CurrentSchema ? HelloSchema : currentSchema);
+
+    public bool HasHello => root[HelloField] is not null || entries.Exists(entry => entry.IsHello);
+
+    public HelloVaultKey? HelloKey
+    {
+        get => root[HelloField] is JsonObject node
+            ? new HelloVaultKey(
+                node[HelloKeyIdField]!.GetValue<string>(),
+                Convert.FromBase64String(node[HelloPublicKeyField]!.GetValue<string>()),
+                Convert.FromBase64String(node[HelloWrappedField]!.GetValue<string>()),
+                node[HelloPadField]!.GetValue<string>())
+            : null;
+        set
+        {
+            if (value is null)
+            {
+                root.Remove(HelloField);
+                return;
+            }
+
+            root[HelloField] = new JsonObject
+            {
+                [HelloKeyIdField] = value.KeyId,
+                [HelloPublicKeyField] = Convert.ToBase64String(value.PublicKey),
+                [HelloWrappedField] = Convert.ToBase64String(value.Wrapped),
+                [HelloPadField] = value.Pad,
+            };
+        }
+    }
 
     public int? UpgradedFrom { get; }
 
@@ -136,6 +171,7 @@ public sealed class VaultBody
         }
 
         ValidateKeePassRemovals(root[KeePassRemovedField]);
+        ValidateHello(root[HelloField]);
 
         var parsed = new List<VaultEntry>(array.Count);
         var seen = new HashSet<string>(EntryName.Comparer);
@@ -316,7 +352,20 @@ public sealed class VaultBody
         return copy;
     }
 
-    public byte[] ToUtf8() => JsonSerializer.SerializeToUtf8Bytes(root, WriteOptions);
+    public byte[] ToUtf8()
+    {
+        if (!entries.Exists(entry => entry.IsHello))
+        {
+            root.Remove(HelloField);
+        }
+
+        if (currentSchema == CurrentSchema && Schema is CurrentSchema or HelloSchema)
+        {
+            root[SchemaField] = HasHello ? HelloSchema : CurrentSchema;
+        }
+
+        return JsonSerializer.SerializeToUtf8Bytes(root, WriteOptions);
+    }
 
     private JsonArray EntriesArray => (JsonArray)root[EntriesField]!;
 
@@ -351,6 +400,26 @@ public sealed class VaultBody
         }
     }
 
+    private static void ValidateHello(JsonNode? hello)
+    {
+        if (hello is null)
+        {
+            return;
+        }
+
+        if (hello is not JsonObject node
+            || !IsBase64String(node[HelloPublicKeyField])
+            || !IsBase64String(node[HelloWrappedField])
+            || node[HelloKeyIdField] is not JsonValue keyId || !keyId.TryGetValue<string>(out _)
+            || node[HelloPadField] is not JsonValue pad || !pad.TryGetValue<string>(out _))
+        {
+            throw new VaultException("Vault body has Windows Hello key data that is damaged.");
+        }
+    }
+
+    private static bool IsBase64String(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue<string>(out var text) && System.Buffers.Text.Base64.IsValid(text);
+
     private DateTimeOffset? ReadTime(string field)
     {
         var text = root[field]?.GetValue<string>();
@@ -370,6 +439,11 @@ public sealed class VaultBody
             root[field] = value.Value.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
         }
     }
+}
+
+public sealed record HelloVaultKey(string KeyId, byte[] PublicKey, byte[] Wrapped, string Pad)
+{
+    public string Fingerprint => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(PublicKey))[..16];
 }
 
 public sealed record KeePassRemoval(EntryName Name, string Hash, string? Database = null);

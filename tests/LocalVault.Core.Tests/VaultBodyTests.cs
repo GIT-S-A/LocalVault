@@ -108,7 +108,7 @@ public class VaultBodyTests
     [Fact]
     public void NewerSchemaIsReadableButNotWritable()
     {
-        var body = VaultBody.Parse("""{ "schema": 6, "entries": [] }"""u8);
+        var body = VaultBody.Parse("""{ "schema": 7, "entries": [] }"""u8);
 
         Assert.False(body.IsWritable);
     }
