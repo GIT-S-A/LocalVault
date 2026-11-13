@@ -52,6 +52,28 @@ public sealed class SshKeyFolderTests : IDisposable
     }
 
     [Fact]
+    public void FolderOfRepositoryWithoutOriginIsRefusedToOneWithOrigin()
+    {
+        using var keys = SshKeyFolder.Open(folder);
+        keys.Record("deploy", null, cloneA, "KEY A"u8, Now);
+        keys.Save();
+
+        Assert.Equal(string.Empty, keys.Origin);
+        Assert.Equal(SshKeyWriteState.OtherRepository, keys.Plan("deploy", Origin, cloneB, "KEY B"u8, Now, overwrite: true).State);
+        Assert.Equal(SshKeyWriteState.Write, keys.Plan("deploy", null, cloneB, "KEY B"u8, Now, overwrite: true).State);
+    }
+
+    [Fact]
+    public void UnclaimedFolderBelongsToAnyRepository()
+    {
+        using var keys = SshKeyFolder.Open(folder);
+
+        Assert.Null(keys.Origin);
+        Assert.True(keys.BelongsTo(Origin));
+        Assert.True(keys.BelongsTo(null));
+    }
+
+    [Fact]
     public void FileNotWrittenByLocalVaultIsRefusedUnlessOverwritten()
     {
         Directory.CreateDirectory(folder);

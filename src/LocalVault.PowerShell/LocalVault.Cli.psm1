@@ -84,14 +84,10 @@ function Get-LocalVaultCompletion {
             $script:LvSubcommands[$command]
         }
         elseif ($command -eq 'ssh-key' -and $positional.Count -eq 2 -and $positional[1] -in 'hosts', 'path') {
-            $vault = if ($vaultPath) { @{ Path = $vaultPath } } else { @{} }
-            Get-VaultSshKey @vault -WarningAction SilentlyContinue -ErrorAction SilentlyContinue 6>$null | ForEach-Object Name
+            [LocalVault.PowerShell.LocalVaultCompletion]::SshKeyNames($vaultPath, (Get-Location -PSProvider FileSystem).ProviderPath)
         }
         elseif ($script:LvEntryCommands -contains $command -and ($positional.Count -eq 1 -or $command -eq 'restore')) {
-            $vault = if ($vaultPath) { @{ Path = $vaultPath } } else { @{} }
-            Get-VaultEntryList @vault -WarningAction SilentlyContinue -ErrorAction SilentlyContinue 6>$null |
-                Where-Object { $command -ne 'restore' -or $_.Kind -eq 'file' } |
-                ForEach-Object Name
+            [LocalVault.PowerShell.LocalVaultCompletion]::EntryNames($vaultPath, (Get-Location -PSProvider FileSystem).ProviderPath, $command -eq 'restore')
         }
     )
 
@@ -307,6 +303,7 @@ Details: Get-Help Invoke-LocalVault -Full
                 }
 
                 $state = if ($exists) {
+                    $null = Get-VaultSshKey @vault
                     $entries = @(Get-VaultEntryList @vault 3>$null 6>$null)
                     "$($entries.Count) entries$(if ($current) { ", $($current.Pending + $current.RemovalsPending) change(s) not in the store" })"
                 }

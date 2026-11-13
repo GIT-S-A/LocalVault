@@ -140,6 +140,15 @@ Describe 'SSH keys' {
         finally { Clear-TestFolder -Folder (Split-Path $other) }
     }
 
+    It 'refuses the folder a repository without origin made to a repository with one' {
+        $local = Initialize-TestRepository -Origin ''
+        try {
+            New-VaultSshKey -Path (Join-Path $local 'secrets.local.lv') -Name deploy -Shared 6>$null 3>$null | Out-Null
+            { New-VaultSshKey -Path $script:vault -Name second -Shared 6>$null 3>$null } | Should -Throw '*another repository*'
+        }
+        finally { Clear-TestFolder -Folder (Split-Path $local) }
+    }
+
     It 'keeps a file LocalVault did not write unless told to overwrite it' {
         New-Item -ItemType Directory -Path $script:keyFolder -Force | Out-Null
         Set-Content -LiteralPath (Join-Path $script:keyFolder 'deploy') -Value 'HAND MADE'
@@ -193,6 +202,50 @@ Describe 'SSH keys' {
             ($again -join "`n") | Should -Not -Match 'adopted'
         }
         finally { Clear-TestFolder -Folder (Split-Path $other) }
+    }
+
+    Context 'a clone whose key another clone replaced' {
+        BeforeEach {
+            Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+            Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+            New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+            $script:other = Initialize-TestRepository
+            $script:otherVault = Join-Path $script:other 'secrets.local.lv'
+            Copy-Item -LiteralPath $script:vault -Destination $script:otherVault
+            Get-VaultSshKeyPath -Path $script:otherVault -Name deploy 6>$null | Out-Null
+            $script:replaced = New-VaultSshKey -Path $script:vault -Name deploy -Replace 6>$null 3>$null
+            $script:adoptedFrom = [regex]::Escape("deploy: key adopted from $((Resolve-Path $script:vault).Path)")
+        }
+
+        AfterEach { Clear-TestFolder -Folder (Split-Path $script:other) }
+
+        It 'adopts the newer key before Get-VaultEntry returns it' {
+            $value = Get-VaultEntry -Path $script:otherVault -Name deploy 6>$null 3>$null
+
+            [Convert]::ToBase64String($value) | Should -Be ([Convert]::ToBase64String([IO.File]::ReadAllBytes((Join-Path $script:keyFolder 'deploy'))))
+        }
+
+        It 'reports the adopted key in lv start' {
+            Push-Location $script:other
+            try { $said = lv start 6>&1 3>$null | Out-String }
+            finally { Pop-Location }
+
+            $said | Should -Match $script:adoptedFrom
+        }
+
+        It 'leaves the vault alone during tab completion' {
+            $before = Get-FileHash -LiteralPath $script:otherVault
+            Push-Location $script:other
+            try {
+                foreach ($line in 'lv ssh-key path ', 'lv get ') {
+                    $names = @((TabExpansion2 -inputScript $line -cursorColumn $line.Length).CompletionMatches.CompletionText)
+                    $names | Should -Contain 'deploy'
+                }
+            }
+            finally { Pop-Location }
+
+            (Get-FileHash -LiteralPath $script:otherVault).Hash | Should -Be $before.Hash
+        }
     }
 
     It 'leaves the vault alone when the key file was changed by hand' {

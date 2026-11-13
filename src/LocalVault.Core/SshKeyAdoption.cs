@@ -41,7 +41,7 @@ public static class SshKeyAdoption
         }
 
         using var folder = SshKeyFolder.Open(directory);
-        if (folder.Origin is { } marked && !string.Equals(marked, origin ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+        if (!folder.BelongsTo(origin))
         {
             return null;
         }

@@ -48,7 +48,11 @@ public sealed class SshKeyFolder : IDisposable
 
     public string MarkerPath => Path.Combine(Directory, SshKeyPath.MarkerFileName);
 
-    public string? Origin => root[OriginField] is JsonValue value && value.TryGetValue<string>(out var origin) && origin.Length > 0 ? origin : null;
+    public string? Origin => root[OriginField] is JsonValue value && value.TryGetValue<string>(out var origin) ? origin : null;
+
+    // No origin field: folder unclaimed. Empty origin: claimed by a repository without origin, never matching a URL.
+    public bool BelongsTo(string? origin) =>
+        Origin is not { } marked || string.Equals(marked, origin ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
     public IReadOnlyDictionary<string, SshKeyRecord> Keys =>
         root[KeysField] is JsonObject keys
@@ -94,7 +98,7 @@ public sealed class SshKeyFolder : IDisposable
     {
         var target = Path.Combine(Directory, fileName);
         Keys.TryGetValue(fileName, out var record);
-        if (Origin is { } markedOrigin && !string.Equals(markedOrigin, origin ?? string.Empty, StringComparison.OrdinalIgnoreCase))
+        if (!BelongsTo(origin))
         {
             return new SshKeyWritePlan(SshKeyWriteState.OtherRepository, target, record);
         }

@@ -143,6 +143,11 @@ public sealed class GetVaultEntryCommand : VaultCmdletBase
     protected override void Run()
     {
         var reference = EntryReference.Parse(Name);
+        if (VaultFile.Read().Body.Find(reference.Name) is { IsSshKey: true })
+        {
+            AdoptNewerSshKeys([Location]);
+        }
+
         var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null, _ => [reference.Name]), reference.Name);
         RequireValue(entry);
         if (AsCredential)
