@@ -46,11 +46,12 @@ skills/localvault/SKILL.md                   Claude skill: install line, usage
 ### Entry & body
 
 ```
-entry := { name, kind: "secret"|"file"|"credential"|"required", value: base64 ("" for required), previous?: base64, meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file"|"ssh-key", path?: string, hosts?: [string] }, kp?: { hash: hex, at: ISO-8601 UTC }, ssh?: { type: "ed25519"|"rsa"|"ecdsa", publicKey: string, hosts?: [string], agent?: true, replacedAt?: ISO-8601 UTC }, ref?: { db: hex, uuid: hex, attachment?: string } } }
-body  := { schema: 5, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }] }   UTF-8 JSON
+entry := { name, kind: "secret"|"file"|"credential"|"required", value: base64 ("" for required), previous?: base64, meta: { created: ISO-8601 UTC, path?: string, local?: true, required?: { note?: string, shape?: "credential"|"file"|"ssh-key", path?: string, hosts?: [string] }, kp?: { hash: hex, at: ISO-8601 UTC }, ssh?: { type: "ed25519"|"rsa"|"ecdsa", publicKey: string, hosts?: [string], agent?: true, replacedAt?: ISO-8601 UTC }, ref?: { db: hex, uuid: hex, attachment?: string }, hello?: { hash: hex } } }
+body  := { schema: 5|6, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entries: [entry...], kpRemoved?: [{ name, hash }], hello?: { keyId: hex, publicKey: b64, wrapped: b64, pad: "oaep-sha256" } }   UTF-8 JSON
 ```
 
 - unknown body fields, entry fields, meta fields, kinds → kept verbatim on rewrite (V20).
+- `meta.hello` ∃ → hello entry: `value` = sealed blob (§I.Hello), ⊥ plain; `meta.hello.hash` = content hash (§I.KeePass) of plain value. Required declaration may carry `meta.required.hello: true`.
 - local body only: `backup?: { id, destination, passphrase: b64, keyfile: b64, keyfileId: hex, lastBackup?, lastError? }`, left by releases ≤ beta14; read, ⊥ written. ⊥ in export (V33).
 
 ### Old backups
@@ -90,6 +91,17 @@ body  := { schema: 5, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, entr
 - `~/.ssh/<repo>/lv.config` (V134): one block per host of each entry.
 - KeePass: attachment `<file>` (value), `<file>.old` (previous); `LocalVault.SshType`, `LocalVault.SshPublicKey`, `LocalVault.SshHosts` (one per line), `LocalVault.SshAgent` = `true`, `LocalVault.ReplacedAt`; personal value → `LocalVault.Personal` = `true` (V142). Content hash of ssh-key entry covers value, previous & hosts; declaration hash (V118) covers hosts.
 - orphan := marker user whose vault file ⊥ exists (V133).
+
+### Hello
+
+- hello entry := entry w/ `meta.hello`; kinds secret | credential | file; ⊥ ssh-key, ⊥ required w/o value. Opt-in per entry; other entries plain (vault file DPAPI-sealed as before, hello layer inside).
+- Hello key := RSA-2048 in `Microsoft Passport Key Storage Provider` (`MS_NGC_KEY_STORAGE_PROVIDER`), one per Windows user, name `<user SID>//LocalVault/Hello/LocalVault-Hello`; `NCRYPT_NGC_CACHE_TYPE_PROPERTY` = `NCRYPT_NGC_CACHE_TYPE_PROPERTY_AUTH_MANDATORY_FLAG` (every decrypt prompts); export policy 0 (non-exportable). Created on first seal (one Hello prompt). `keyId` = hex SHA-256 of its `BCRYPT_RSAPUBLIC_BLOB`. Implementation `NCRYPT_IMPL_HARDWARE_FLAG` absent → software key, reported (V147).
+- vault key := P-256 key pair per vault, made w/o prompt when first hello entry is sealed; body `hello.publicKey` = SubjectPublicKeyInfo; `hello.wrapped` = private scalar (32 B) encrypted by Hello key, RSA-OAEP SHA-256 (`pad`); `hello.keyId` = Hello key that wrapped it.
+- sealed blob (base64 in `value`): `0x01` ‖ ephemeral P-256 public point (65 B, uncompressed) ‖ nonce (12 B) ‖ tag (16 B) ‖ ciphertext. Key = HKDF-SHA256(ECDH(ephemeral, vault key), salt = keyId bytes, info `LOCALVAULT hello`, 32 B); AES-256-GCM; AAD = UTF-8 `name` ‖ 0x00 ‖ `kind` ‖ 0x00 ‖ keyId. Plain = value bytes as for a plain entry of that kind.
+- seal: vault public key only → ⊥ prompt. unseal: one Hello decrypt of `hello.wrapped` per command → vault private key → entries; scalar & plain buffers zeroed after the command (V145).
+- Hello state := `ready` | `software` (key ∃, ⊥ TPM) | `none` (key ⊥ created) | `unavailable` (Hello ⊥ set up, remote session, ⊥ interactive, provider error) | `key changed` (vault `keyId` ≠ key's).
+- KeePass: hello entry stored plain as its kind + custom string `LocalVault.Hello` = `true`; declaration → `LocalVault.RequiredHello` = `true`. Flag ⊥ in content hash.
+- interface `IHelloKey` (Core): `KeyId`, `PublicKey`, `State`, `Create()`, `Decrypt(wrapped)`; Windows implementation in Core; tests substitute a software RSA key via test-only setting.
 
 ### PC settings
 
@@ -164,7 +176,10 @@ Creation of missing vault → V21.
 ### Cmdlets (all take `-Path`)
 
 ```
-cmd: Get-VaultEntryList [-Scope s]                      → {Name, Kind, Created, Age}[]   ⊥ value; export-age warning V31
+cmd: Get-VaultEntryList [-Scope s]                      → {Name, Kind, Created, Age, Hello}[]   ⊥ value; export-age warning V31; Hello ∈ '' | Ready | Missing (V148)
+cmd: Set-VaultEntry ... -Hello                          → with -Value | -FilePath | -Credential | -Required: entry sealed per §I.Hello (V144)
+cmd: Set-VaultEntry -Name n -Protection Hello|Dpapi     → flag only: value resealed | unsealed (Dpapi: one prompt)
+cmd: Get-VaultHelloStatus                               → {State, KeyId, Hardware, Provider, VaultKeyId, Entries}; ⊥ prompt
 cmd: Get-VaultEntry -Name n [-AsPlainText]              → secret: SecureString | string; file: byte[]
 cmd: Set-VaultEntry -Name n -Value <SecureString>       → secret; pipeline SecureString ok
 cmd: Set-VaultEntry -Name n -FilePath p [-StoredPath r] → file entry; meta.path = r ?? p rel. to vault dir
@@ -224,9 +239,11 @@ In-process cmdlet → `lv env` sets current window env directly.
 cmd: lv | lv help | lv --help | lv -h   commands + resolved vault path & state; vault ⊥ opened
 cmd: lv start [--path v]     project, vaults, stores → "Next:" commands ready to paste (carry --path); ⊥ store opened
 cmd: lv list [scope]       no entry → info line: vault missing | empty
-cmd: lv set <name> [--file <path>] [--local]   secret: stdin if redirected, else hidden prompt; --file → file entry
-cmd: lv require <name> [--credential] [--note <text>]   Set-VaultEntry -Required [-Credential]
-cmd: lv mark <name> shared|local         Set-VaultEntry -Sharing
+cmd: lv set <name> [--file <path>] [--local] [--hello]   secret: stdin if redirected, else hidden prompt; --file → file entry; --hello → Set-VaultEntry -Hello
+cmd: lv require <name> [--credential] [--note <text>] [--hello]   Set-VaultEntry -Required [-Credential] [-Hello]
+cmd: lv mark <name> shared|local|hello|nohello   Set-VaultEntry -Sharing | -Protection Hello|Dpapi
+cmd: lv hello                  Get-VaultHelloStatus
+cmd: lv run [VAR=name ...] [--stdin <name>] [--] <cmd> [args]   V101; --stdin → V149
 cmd: lv get <name> [--show]   plaintext to pipeline if output redirected|captured; on screen only w/ --show, else refuse w/ usage
 cmd: lv clip <name>            Copy-VaultEntry: clipboard, cleared after 20 s
 cmd: lv rm <name>
@@ -410,6 +427,15 @@ V140: ssh-key stored path ! `~/.ssh/<dir>/<file>` (exactly 4 segments); `<file>`
 V141: host ! match `^(?:[A-Za-z0-9_][A-Za-z0-9._-]*@)?(?:[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$` → else refused "<h> is not a host"; KeePass item w/ invalid host → skipped. ∴ ⊥ option (`-oProxyCommand=…`) reaches ssh command line.
 V142: personal value written to KeePass → `LocalVault.Personal` = `true`. Shared load ⊥ takes item under `~/` except ssh-key item w/o `LocalVault.Personal` → personal key in team store ⊥ loaded as shared.
 V143: `Set-VaultEntry` on ssh-key entry (value, `-FilePath`, `-Credential`, `<name>#<part>`, `-Required`) → refused, nothing changed: value ∃ → "Replace it with lv ssh-key new <name> --replace (New-VaultSshKey -Replace)"; declaration only → "Create yours with lv ssh-key new <name> (New-VaultSshKey)". `-Sharing` allowed.
+V144: hello entry value ⊥ written unsealed anywhere local: ⊥ DPAPI-only fallback. Seal impossible (state `unavailable`, Hello key ⊥ creatable) → error "Windows Hello is not available: <reason>", nothing written; `lv load` → that entry skipped & reported, rest proceeds. ssh-key | `-Protection` on required w/o value → refused.
+V145: one Hello prompt per command at most: ∀ hello entries a command reads → one decrypt of `hello.wrapped`; vault private key & plain buffers zeroed in `finally`; ⊥ cached across commands, ⊥ in session state. Command reading no hello entry → ⊥ prompt. Prompt text names vault & entries.
+V146: ⊥ prompt: `Get-VaultEntryList`, `Compare-VaultWithStore`, `Get-VaultStoreStatus`, `Get-VaultHelloStatus`, `lv start`, seal (`Set-VaultEntry`, `Import-VaultFromStore`, `Import-Vault`). Compare uses `meta.hello.hash` as vault content hash. `Export-VaultToStore` prompts once iff ≥ 1 hello entry must be written to a store (New | Changed); `Export-Vault` prompts once iff ≥ 1 hello entry.
+V147: Hello key created w/o hardware flag → warning "Windows Hello key is software-only (no TPM): <provider>"; `Get-VaultHelloStatus` State `software`; every seal → same warning once per command. ⊥ silent acceptance.
+V148: Hello key ⊥ exists | `keyId` ≠ vault `hello.keyId` | unwrap fails → hello entries Missing, reason "Windows Hello key missing" | "Windows Hello key changed (PIN or Hello reset, other PC)"; read → error w/ reason + "lv load restores it from the store"; `Import-VaultFromStore` → missing hello entries taken from store regardless of hashes, resealed under new vault key (new pair, old `hello` replaced, other hello entries ⊥ in store stay Missing & reported). ⊥ deleted silently.
+V149: `lv run --stdin <name>` → value bytes (secret UTF-8, file raw, credential password) to child's stdin from a byte buffer, stdin closed after, buffer zeroed; ⊥ .NET string of the value, ⊥ temp file, ⊥ command line; child stdout/stderr passed through, exit code passed (V101). Name missing | unreadable → error before child starts.
+V150: KeePass `LocalVault.Hello` = `true` → load stores entry as hello (sealed), flag kept on vault; ⊥ flag on store & vault entry hello → vault keeps hello (local choice); save writes flag for hello entries. `-Protection Dpapi` → flag removed on next save. Export (`LOCALVAULT-2` export) → plain value + `meta.hello: {}`; import → resealed (V144).
+V151: body w/ ≥ 1 hello entry | `hello` → schema 6; else schema 5 kept. Older modules refuse schema 6 (C8). Last hello entry removed → `hello` dropped, schema 5.
+V152: Hello prompt only in an interactive session: ⊥ console | input redirected | `-NonInteractive` | remote session (`SM_REMOTESESSION`) → state `unavailable`, read → error, ⊥ prompt attempt. Prompt window owner = console window.
 
 ## §T Tasks
 
@@ -507,8 +533,14 @@ T89|.|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, 
 T90|.|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
 T91|.|personal values as KeePass references: resolve, three-way on resolved value, `-Reference`, warnings|V131,V132
 T92|.|`Reset-VaultEntry` / `lv reset`|V137
-T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset; beta17|C11
+T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset; beta18|C11
 T94|x|marker origin `""` ≠ URL; `lv start` shows adoption report & warning; `Get-VaultEntry` on ssh-key adopts first; tab completion ⊥ adopts|V126,V127,B30,B31
+T95|.|spike: NGC KSP on this PC → key create, AUTH_MANDATORY, OAEP-SHA256 decrypt, prompt owner from pwsh in Windows Terminal, hardware flag; throwaway key deleted. OAEP refused → stop, ask|I.Hello
+T96|.|Core: `IHelloKey` + NGC impl + test impl, vault key pair, seal/unseal blob, body `hello`, `meta.hello`, schema 6 + xUnit (round trip, AAD swap fails, key missing, keyId mismatch, zeroing)|I.Hello,I.Entry,V144,V145,V148,V151
+T97|.|cmdlets & CLI: `-Hello`, `-Protection`, `--hello`, `lv mark hello|nohello`, `Get-VaultHelloStatus`/`lv hello`, one-prompt read path (get, clip, env, run, Resolve, Restore, templates), list column + Pester (fake key, unavailable, non-interactive)|V144-V147,V152
+T98|.|stores & transfer: `LocalVault.Hello`, diff w/o prompt, save prompt rule, load reseal & Missing restore, export/import + Pester|V146,V148,V150
+T99|.|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)|V149
+T100|.|help pages, `about_LocalVault` (Hello kind, one prompt per command, PIN always offered, biometric-only ⊥ enforceable via Passport KSP), SKILL.md, reference.md; beta17|C11,I.Hello
 
 ## §B Bugs
 
