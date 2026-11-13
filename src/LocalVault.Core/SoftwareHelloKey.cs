@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 
 namespace LocalVault.Core;
 
-internal sealed class SoftwareHelloKey : IHelloKey, IDisposable
+public sealed class SoftwareHelloKey : IHelloKey, IDisposable
 {
     private RSA? rsa;
 
@@ -13,6 +13,8 @@ internal sealed class SoftwareHelloKey : IHelloKey, IDisposable
     public string? UnavailableReason { get; set; }
 
     public bool IsHardware { get; set; } = true;
+
+    public bool NeedsConsole { get; set; }
 
     public bool CancelNext { get; set; }
 

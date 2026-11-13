@@ -20,22 +20,22 @@ Adds or replaces a secret, a credential or a file in a vault.
 ### Secret (Default)
 
 ```
-Set-VaultEntry [-Name] <string> [[-Value] <securestring>] [-Local] [-Path <string>] [-WhatIf]
- [-Confirm] [<CommonParameters>]
+Set-VaultEntry [-Name] <string> [[-Value] <securestring>] [-Hello] [-Local] [-Path <string>]
+ [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### File
 
 ```
-Set-VaultEntry [-Name] <string> -FilePath <string> [-StoredPath <string>] [-Local] [-Path <string>]
- [-WhatIf] [-Confirm] [<CommonParameters>]
+Set-VaultEntry [-Name] <string> -FilePath <string> [-StoredPath <string>] [-Hello] [-Local]
+ [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### Credential
 
 ```
 Set-VaultEntry [-Name] <string> -Credential [-UserName <string>] [-Password <securestring>]
- [-Totp <securestring>] [-Url <string[]>] [-Local] [-Path <string>] [-WhatIf] [-Confirm]
+ [-Totp <securestring>] [-Url <string[]>] [-Hello] [-Local] [-Path <string>] [-WhatIf] [-Confirm]
  [<CommonParameters>]
 ```
 
@@ -50,7 +50,14 @@ Set-VaultEntry [-Name] <string> -Sharing <VaultEntrySharing> [-Path <string>] [-
 
 ```
 Set-VaultEntry [-Name] <string> -Required [-Credential] [-StoredPath <string>] [-Note <string>]
- [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-Hello] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+```
+
+### Protection
+
+```
+Set-VaultEntry [-Name] <string> -Protection <VaultEntryProtection> [-Path <string>] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -103,6 +110,15 @@ the profile. Only a required entry's own value can have a `~/` path.
 
 `Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
 defined, and `Import-VaultFromStore` fills it in on another machine.
+
+With the **Hello** parameter, the entry is also sealed with Windows Hello. Reading its value then
+asks for Windows Hello: face, fingerprint or PIN. One command asks once, whatever the number of
+Windows Hello entries it reads. Sealing asks for nothing, except the first time on a PC, when the
+cmdlet creates the user's Windows Hello key. A new value for an entry sealed with Windows Hello is
+sealed too. The **Protection** parameter alone seals an existing entry, or removes its seal, and
+keeps its value. Windows Hello seals secrets, credentials and files, not SSH keys. A credential is
+sealed whole: its user name and URLs are hidden too. When Windows Hello is unavailable, the cmdlet
+fails and writes nothing: it never stores such an entry with DPAPI only.
 
 The cmdlet refuses an SSH key entry, except with **Sharing**: a key is created with
 [New-VaultSshKey](New-VaultSshKey.md), and replaced with its **Replace** parameter.
@@ -171,7 +187,23 @@ Set-VaultEntry -Name ssh/deploy -FilePath $HOME\.ssh\id_deploy
 The key stays out of the project store. `Export-VaultToStore` writes it to the personal store, and
 `Import-VaultFromStore` writes it to `~/.ssh/id_deploy` on another machine.
 
-### Example 6 - Copy a secret from another store
+### Example 6 - Seal a secret with Windows Hello
+
+```powershell
+Set-VaultEntry -Name registry.token -Hello
+Get-VaultEntry -Name registry.token -AsPlainText | docker login registry.example.com --username ci --password-stdin
+```
+
+The first command asks for the value. The second asks for Windows Hello, then passes the value to
+the standard input of `docker login`.
+
+### Example 7 - Remove the Windows Hello seal
+
+```powershell
+Set-VaultEntry -Name registry.token -Protection Dpapi
+```
+
+### Example 8 - Copy a secret from another store
 
 ```powershell
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
@@ -245,6 +277,46 @@ ParameterSets:
 - Name: File
   Position: Named
   IsRequired: true
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
+### -Hello
+
+Indicates that the entry is sealed with Windows Hello. Reading its value then asks for Windows Hello.
+With **Required**, the declaration asks each person's value to be sealed with Windows Hello.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: Secret
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+- Name: File
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+- Name: Credential
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+- Name: Required
+  Position: Named
+  IsRequired: false
   ValueFromPipeline: false
   ValueFromPipelineByPropertyName: false
   ValueFromRemainingArguments: false
@@ -370,6 +442,31 @@ ParameterSets:
   ValueFromRemainingArguments: false
 DontShow: false
 AcceptedValues: []
+HelpMessage: ''
+```
+
+### -Protection
+
+Specifies how the entry is protected, and keeps its value. `Hello` seals the entry with Windows
+Hello. `Dpapi` removes the Windows Hello seal, which asks for Windows Hello once. The kind, the value,
+the creation time and the sharing of the entry don't change.
+
+```yaml
+Type: LocalVault.PowerShell.VaultEntryProtection
+DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: Protection
+  Position: Named
+  IsRequired: true
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues:
+- Hello
+- Dpapi
 HelpMessage: ''
 ```
 

@@ -22,6 +22,12 @@ public sealed class UseVaultEnvCommand : VaultCmdletBase
         var body = ReadForUse(
             current => Map.Values.Cast<object?>().All(source => Find(current, source?.ToString() ?? string.Empty) is not null),
             current => Map.Values.Cast<object?>().Select(source => Find(current, source?.ToString() ?? string.Empty)?.Name).OfType<EntryName>());
+        foreach (var entry in Map.Values.Cast<object?>().Select(source => Find(body, source?.ToString() ?? string.Empty)).OfType<VaultEntry>())
+        {
+            RequireValue(entry);
+        }
+
+        body = Unseal(body, Map.Values.Cast<object?>().Select(source => Find(body, source?.ToString() ?? string.Empty)?.Name).OfType<EntryName>(), "put into the environment");
         var missing = 0;
         foreach (DictionaryEntry pair in Map)
         {
@@ -103,6 +109,8 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
             ? body.Entries.Where(e => e.IsFile).ToList()
             : Name.Select(n => FindEntry(body, EntryName.Parse(n))).ToList();
         var root = Destination is null ? Location.Directory : GetUnresolvedProviderPathFromPSPath(Destination);
+        var plain = Unseal(body, entries.Where(e => e.IsFile).Select(e => e.Name), "restore");
+        entries = entries.Select(e => plain.Find(e.Name) ?? e).ToList();
 
         var targets = entries.Select(entry => entry.IsFile
                 ? (Entry: entry, Path: entry.Ssh is not null ? SshKeyFiles.KeyFileOf(entry) : StoredPathRules.Resolve(root, entry.StoredPath ?? entry.Name.Key))

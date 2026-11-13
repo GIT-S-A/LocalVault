@@ -7,9 +7,10 @@ $script:LvSyntax = @{
     list    = @{ Usage = 'lv list [<scope>]'; Min = 0; Max = 1; Options = @() }
     get     = @{ Usage = 'lv get <name>[#user|#totp|#url<n>] [--show]   (secrets without --show: into a pipe or a redirection only)'; Min = 1; Max = 1; Options = @('show') }
     clip    = @{ Usage = 'lv clip <name>[#user|#totp|#url<n>]'; Min = 1; Max = 1; Options = @() }
-    set     = @{ Usage = 'lv set <name> [--file <path> | --credential] [--local]   or   lv set <name>#user|#password|#totp|#url<n>'; Min = 1; Max = 1; Options = @('file', 'local', 'credential') }
-    require = @{ Usage = 'lv require <name> [--credential | --file <restore path, e.g. ~/.ssh/id_ed25519>] [--note <where to get it>]'; Min = 1; Max = 1; Options = @('note', 'credential', 'file') }
-    mark    = @{ Usage = 'lv mark <name> shared|local'; Min = 2; Max = 2; Options = @() }
+    set     = @{ Usage = 'lv set <name> [--file <path> | --credential] [--local] [--hello]   or   lv set <name>#user|#password|#totp|#url<n>'; Min = 1; Max = 1; Options = @('file', 'local', 'credential', 'hello') }
+    require = @{ Usage = 'lv require <name> [--credential | --file <restore path, e.g. ~/.ssh/id_ed25519>] [--note <where to get it>] [--hello]'; Min = 1; Max = 1; Options = @('note', 'credential', 'file', 'hello') }
+    mark    = @{ Usage = 'lv mark <name> shared|local|hello|nohello'; Min = 2; Max = 2; Options = @() }
+    hello   = @{ Usage = 'lv hello   (Windows Hello key state on this PC)'; Min = 0; Max = 0; Options = @() }
     rm      = @{ Usage = 'lv rm <name>'; Min = 1; Max = 1; Options = @() }
     env     = @{ Usage = 'lv env <VARIABLE>=<name> [<VARIABLE>=<name> ...]'; Min = 1; Max = [int]::MaxValue; Options = @() }
     restore = @{ Usage = 'lv restore [<name> ...] [--overwrite]'; Min = 0; Max = [int]::MaxValue; Options = @('overwrite') }
@@ -26,7 +27,7 @@ $script:LvSyntax = @{
 }
 $script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment')
 $script:LvListOptions = @('host')
-$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared')
+$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'hello', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared')
 $script:LvSubcommands = @{
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
@@ -69,7 +70,7 @@ function Get-LocalVaultCompletion {
             Get-VaultStore @vault -ErrorAction SilentlyContinue | ForEach-Object Name | Select-Object -Unique
         }
         elseif ($command -eq 'mark' -and $positional.Count -eq 2) {
-            'shared', 'local'
+            'shared', 'local', 'hello', 'nohello'
         }
         elseif ($previous -match '^--(.+)$' -and $script:LvValueOptions -contains $Matches[1]) {
         }
@@ -127,6 +128,9 @@ Entries
   require <name> --credential          the same, for a user name and a password
   require <name> --file <path>         the same, for a file such as an SSH key; ~/ is your profile
   mark <name> shared|local             sends the entry to the store, or keeps it on this PC only
+  mark <name> hello|nohello            reads need Windows Hello (face, fingerprint or PIN), or DPAPI only
+  set|require <name> ... --hello       the same, when the value is set
+  hello                                Windows Hello on this PC: key, TPM or software, entries not readable here
   rm <name>                            removes an entry
   env <VARIABLE>=<name> ...            sets environment variables in this window
   restore [<name> ...] [--overwrite]   writes file entries back to disk
@@ -238,7 +242,7 @@ Details: Get-Help Invoke-LocalVault -Full
         }
         if ($Command -eq '-h') { $Command = 'help' }
         if (-not $syntax.ContainsKey($Command)) {
-            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run ssh-key update. Run lv alone for details."
+            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run ssh-key hello update. Run lv alone for details."
         }
 
         $rule = $syntax[$Command]
@@ -369,7 +373,7 @@ Details: Get-Help Invoke-LocalVault -Full
                 $scope = if ($words.Count -gt 0) { @{ Scope = $words[0] } } else { @{} }
                 $entries = @(Get-VaultEntryList @vault @scope)
                 if ($entries.Count -gt 0) {
-                    $columns = @('Name', 'Kind') + @(if (@($entries | Where-Object User).Count -gt 0) { 'User' }) + @('Sync', 'Created', 'Age')
+                    $columns = @('Name', 'Kind') + @(if (@($entries | Where-Object User).Count -gt 0) { 'User' }) + @(if (@($entries | Where-Object Hello).Count -gt 0) { 'Hello' }) + @('Sync', 'Created', 'Age')
                     $entries | Format-Table $columns -AutoSize
                 }
                 else {
@@ -388,20 +392,28 @@ Details: Get-Help Invoke-LocalVault -Full
                     if ($file.Count -gt 0) { & $fail 'Give --file or --credential, not both.' }
                     $file = @{ Credential = $true }
                 }
-                Set-VaultEntry @vault -Name $words[0] @file @sharing
+                Set-VaultEntry @vault -Name $words[0] @file @sharing -Hello:([bool]$options['hello'])
             }
             'require' {
                 $note = if ($options.ContainsKey('note')) { @{ Note = $options.note } } else { @{} }
                 $file = if ($options.ContainsKey('file')) { @{ StoredPath = $options.file } } else { @{} }
-                Set-VaultEntry @vault -Name $words[0] -Required -Credential:([bool]$options['credential']) @note @file
+                Set-VaultEntry @vault -Name $words[0] -Required -Credential:([bool]$options['credential']) @note @file -Hello:([bool]$options['hello'])
             }
             'mark' {
-                $sharing = switch ($words[1]) {
-                    'shared' { 'Shared' }
-                    'local' { 'Local' }
-                    default { & $fail "lv mark takes shared or local, not '$($words[1])'." }
+                switch ($words[1]) {
+                    'shared' { Set-VaultEntry @vault -Name $words[0] -Sharing Shared }
+                    'local' { Set-VaultEntry @vault -Name $words[0] -Sharing Local }
+                    'hello' { Set-VaultEntry @vault -Name $words[0] -Protection Hello }
+                    'nohello' { Set-VaultEntry @vault -Name $words[0] -Protection Dpapi }
+                    default { & $fail "lv mark takes shared, local, hello or nohello, not '$($words[1])'." }
                 }
-                Set-VaultEntry @vault -Name $words[0] -Sharing $sharing
+            }
+            'hello' {
+                $status = Get-VaultHelloStatus @vault
+                $hardware = switch ($status.Hardware) { $true { ', TPM' } $false { ', software only' } default { '' } }
+                "Windows Hello: $($status.State)$hardware$(if ($status.Reason) { " ($($status.Reason))" })"
+                "Key:           $(if ($status.KeyId) { $status.KeyId.Substring(0, 16) } else { 'none' }) in $($status.Provider)"
+                "This vault:    $($status.Entries) Hello entr$(if ($status.Entries -eq 1) { 'y' } else { 'ies' })$(if ($status.Missing.Count -gt 0) { "; not readable here: $($status.Missing -join ', ') (lv load restores them)" })"
             }
             'get' {
                 $plainPart = $words[0] -match '#(user|url\d*)$'

@@ -38,6 +38,8 @@ internal sealed partial class NgcHelloKey : IHelloKey
         }
     }
 
+    public bool NeedsConsole => true;
+
     public string KeyId => HelloKeys.ComputeKeyId(PublicKey);
 
     public RSAParameters PublicKey

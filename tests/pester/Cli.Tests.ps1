@@ -156,7 +156,7 @@ Describe 'lv' {
         & $complete 'lv s' | Should -Be @('save', 'set', 'ssh-key', 'start', 'store')
         & $complete 'lv store ' | Should -Be @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
         & $complete 'lv export --' | Should -Be @('--overwrite', '--path')
-        & $complete "lv mark --path '$vault' a " | Should -Be @('shared', 'local')
+        & $complete "lv mark --path '$vault' a " | Should -Be @('shared', 'local', 'hello', 'nohello')
         & $complete "lv get --path '$vault' " | Should -Be @('a')
     }
     It 'says where the project stands and what to run next' {

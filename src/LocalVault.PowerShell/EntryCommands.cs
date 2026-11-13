@@ -4,12 +4,20 @@ using LocalVault.Core;
 
 namespace LocalVault.PowerShell;
 
-public sealed record VaultEntryInfo(string Name, string? Scope, string Key, string Kind, string Sync, DateTimeOffset? Created, TimeSpan? Age, string? Note = null, string? User = null);
+public sealed record VaultEntryInfo(string Name, string? Scope, string Key, string Kind, string Sync, DateTimeOffset? Created, TimeSpan? Age, string? Note = null, string? User = null, string Hello = "");
+
+public sealed record VaultHelloStatus(string State, bool? Hardware, string Provider, string? KeyId, string? VaultKeyId, int Entries, string[] Missing, string? Reason);
 
 public enum VaultEntrySharing
 {
     Shared,
     Local,
+}
+
+public enum VaultEntryProtection
+{
+    Hello,
+    Dpapi,
 }
 
 [Cmdlet(VerbsCommon.Get, "VaultEntryList")]
@@ -34,14 +42,35 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         {
             sync[entry.Name.FullName] = entry.IsMissing ? "Missing" : "Personal";
         }
+        var unreadable = new List<(string Name, string Reason)>();
         foreach (var entry in snapshot.Body.Entries
                      .Where(e => Scope is null || string.Equals(e.Name.Scope, Scope, StringComparison.OrdinalIgnoreCase))
                      .OrderBy(e => e.Name.FullName, StringComparer.OrdinalIgnoreCase))
         {
+            var hello = string.Empty;
+            if (entry.IsHello)
+            {
+                var reason = HelloSeal.MissingReason(snapshot.Body, entry, HelloKey);
+                hello = reason is null ? "Ready" : "Missing";
+                if (reason is not null)
+                {
+                    unreadable.Add((entry.Name.FullName, reason));
+                }
+            }
+            else if (entry.IsMissing && entry.IsRequiredHello)
+            {
+                hello = "Required";
+            }
+
             WriteObject(new VaultEntryInfo(
                 entry.Name.FullName, entry.Name.Scope, entry.Name.Key, entry.Kind,
                 sync.TryGetValue(entry.Name.FullName, out var state) ? state : string.Empty,
-                entry.Created, now - entry.Created, entry.RequiredNote, entry.UserName));
+                entry.Created, now - entry.Created, entry.RequiredNote, entry.UserName, hello));
+        }
+
+        foreach (var group in unreadable.GroupBy(u => u.Reason))
+        {
+            WriteWarning($"Not readable on this PC ({group.Key}): {string.Join(", ", group.Select(u => u.Name))}. lv load restores them from the store.");
         }
 
         WarnAboutStore(states);
@@ -124,6 +153,38 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
     }
 }
 
+[Cmdlet(VerbsCommon.Get, "VaultHelloStatus")]
+[OutputType(typeof(VaultHelloStatus))]
+public sealed class GetVaultHelloStatusCommand : VaultCmdletBase
+{
+    protected override void Run()
+    {
+        var key = HelloKey;
+        var state = key.State;
+        var body = File.Exists(Location.Path) ? ReadVault().Body : null;
+        var hello = body?.Entries.Where(e => e.IsHello).ToList() ?? [];
+        var missing = body is null ? [] : hello.Where(e => HelloSeal.MissingReason(body, e, key) is not null).Select(e => e.Name.FullName).ToArray();
+        var keyId = state == HelloState.Ready ? key.KeyId : null;
+        var hardware = state == HelloState.Ready ? key.IsHardware : (bool?)null;
+        var shown = state switch
+        {
+            HelloState.Unavailable => "Unavailable",
+            HelloState.None => "None",
+            _ when body?.HelloKey is { } vaultKey && !string.Equals(vaultKey.KeyId, keyId, StringComparison.OrdinalIgnoreCase) => "KeyChanged",
+            _ when hardware == false => "Software",
+            _ => "Ready",
+        };
+        var reason = state == HelloState.Unavailable ? key.UnavailableReason
+            : key.NeedsConsole && !IsInteractive ? "reads need an interactive console"
+            : null;
+        WriteObject(new VaultHelloStatus(shown, hardware, key.ProviderName, keyId, body?.HelloKey?.KeyId, hello.Count, missing, reason));
+        if (hardware == false)
+        {
+            WriteWarning($"Windows Hello key is software-only (no TPM): {key.ProviderName}.");
+        }
+    }
+}
+
 [Cmdlet(VerbsCommon.Get, "VaultEntry", DefaultParameterSetName = ValueSet)]
 [OutputType(typeof(SecureString), typeof(string), typeof(byte[]), typeof(PSCredential))]
 public sealed class GetVaultEntryCommand : VaultCmdletBase
@@ -148,8 +209,9 @@ public sealed class GetVaultEntryCommand : VaultCmdletBase
             AdoptNewerSshKeys([Location]);
         }
 
-        var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null, _ => [reference.Name]), reference.Name);
-        RequireValue(entry);
+        var body = ReadForUse(current => current.Find(reference.Name) is not null, _ => [reference.Name]);
+        RequireValue(FindEntry(body, reference.Name));
+        var entry = FindEntry(Unseal(body, [reference.Name], "read"), reference.Name);
         if (AsCredential)
         {
             if (Name.Contains(EntryReference.PartSeparator, StringComparison.Ordinal))
@@ -204,13 +266,15 @@ public sealed class CopyVaultEntryCommand : VaultCmdletBase
     protected override void Run()
     {
         var reference = EntryReference.Parse(Name);
-        var entry = FindEntry(ReadForUse(body => body.Find(reference.Name) is not null, _ => [reference.Name]), reference.Name);
+        var body = ReadForUse(current => current.Find(reference.Name) is not null, _ => [reference.Name]);
+        var entry = FindEntry(body, reference.Name);
         RequireValue(entry);
         if (!entry.IsSecret && !entry.IsCredential)
         {
             throw new VaultException($"'{entry.Name}' is a {entry.Kind} entry, not a secret.");
         }
 
+        entry = FindEntry(Unseal(body, [reference.Name], "copy"), reference.Name);
         var bytes = entry.ReadPart(reference, Now);
         var chars = System.Text.Encoding.UTF8.GetChars(bytes);
         try
@@ -234,9 +298,19 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     private const string SharingSet = "Sharing";
     private const string RequiredSet = "Required";
     private const string CredentialSet = "Credential";
+    private const string ProtectionSet = "Protection";
 
     [Parameter(Mandatory = true, Position = 0)]
     public string Name { get; set; } = string.Empty;
+
+    [Parameter(Mandatory = true, ParameterSetName = ProtectionSet)]
+    public VaultEntryProtection Protection { get; set; }
+
+    [Parameter(ParameterSetName = SecretSet)]
+    [Parameter(ParameterSetName = FileSet)]
+    [Parameter(ParameterSetName = CredentialSet)]
+    [Parameter(ParameterSetName = RequiredSet)]
+    public SwitchParameter Hello { get; set; }
 
     [Parameter(Mandatory = true, ParameterSetName = CredentialSet)]
     [Parameter(ParameterSetName = RequiredSet)]
@@ -293,9 +367,15 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         }
 
         var name = EntryName.Parse(Name);
-        if (ParameterSetName != SharingSet)
+        if (ParameterSetName is not SharingSet and not ProtectionSet)
         {
             RefuseSshKey(name);
+        }
+
+        if (ParameterSetName == ProtectionSet)
+        {
+            SetProtection(name);
+            return;
         }
 
         if (ParameterSetName == RequiredSet)
@@ -308,7 +388,16 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
                 }
 
                 var shape = Credential ? VaultEntry.CredentialShape : StoredPath is not null ? VaultEntry.FileShape : null;
-                Report(VaultFile.Update(body => body.Set(VaultEntry.NewRequired(name, Note, Now, shape, StoredPath)), WriteOptions()));
+                Report(VaultFile.Update(
+                    body =>
+                    {
+                        body.Set(VaultEntry.NewRequired(name, Note, Now, shape, StoredPath, hello: Hello));
+                        if (Hello && body.Find(name) is { IsMissing: false, IsHello: false } personal)
+                        {
+                            body.Set(Seal(body, personal));
+                        }
+                    },
+                    WriteOptions()));
                 var what = Credential ? ", a user name and a password" : StoredPath is not null ? $", a file restored to {StoredPathRules.Normalize(StoredPath)}" : string.Empty;
                 var how = StoredPath is not null ? $"lv set {name} --file <path>" : $"lv set {name}";
                 Say($"{name} is required and personal{what}: each person sets their own value with {how}; lv save shares the declaration, never the value.");
@@ -335,12 +424,16 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
                 $"'{name}' is declared as a file{(fileShaped.RequiredPath is { } path ? $", restored to {path}" : string.Empty)}. Give it with lv set {name} --file <path> (Set-VaultEntry -FilePath).");
         }
 
-        var credentialShaped = ParameterSetName == SecretSet && Value is null && ReadVault().Body.Find(name) is { IsCredentialShape: true };
+        var before = ReadVault().Body;
+        var existing = before.Find(name);
+        var credentialShaped = ParameterSetName == SecretSet && Value is null && existing is { IsCredentialShape: true };
+        var needsCurrent = ParameterSetName == CredentialSet || credentialShaped || (ParameterSetName == SecretSet && existing is { IsCredential: true });
+        var existingPlain = existing is { IsHello: true } && needsCurrent ? Unseal(before, [name], "update").Find(name) : existing;
         var entry = ParameterSetName switch
         {
             FileSet => ReadFile(name),
-            CredentialSet => ReadCredential(name),
-            _ when credentialShaped => ReadCredential(name),
+            CredentialSet => ReadCredential(name, existingPlain),
+            _ when credentialShaped => ReadCredential(name, existingPlain),
             _ => ReadSecretEntry(name),
         };
         if (!ShouldProcess($"{name} in {Location.Path}", "Set"))
@@ -349,10 +442,12 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         }
 
         var now = Now;
+        var sealedWrite = false;
         Report(VaultFile.Update(
             body =>
             {
-                if (entry.IsSecret && body.Find(name) is { IsCredential: true } credential)
+                var current = PlainCurrent(body.Find(name), existingPlain);
+                if (entry.IsSecret && current is { IsCredential: true } credential)
                 {
                     var password = entry.GetValue();
                     try
@@ -365,14 +460,66 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
                     }
                 }
 
-                body.Set(entry);
+                sealedWrite = Hello || body.Find(name) is { IsHello: true } or { IsRequiredHello: true };
+                body.Set(sealedWrite ? Seal(body, entry) : entry);
                 if (Local)
                 {
                     body.SetSharing(name, local: true);
                 }
             },
             WriteOptions()));
-        Say($"Stored {name}");
+        Say(sealedWrite ? $"Stored {name}, sealed by Windows Hello" : $"Stored {name}");
+    }
+
+    private static VaultEntry? PlainCurrent(VaultEntry? current, VaultEntry? plain) =>
+        current is { IsHello: true } && plain is { IsHello: false } && current.ContentHash() == plain.ContentHash() ? plain : current;
+
+    private void SetProtection(EntryName name)
+    {
+        var before = ReadVault().Body;
+        var existing = FindEntry(before, name);
+        var hello = Protection == VaultEntryProtection.Hello;
+        if (hello == (existing.IsHello || (existing.IsMissing && existing.IsRequiredHello)))
+        {
+            Say($"{name} is already protected by {(hello ? "Windows Hello" : "DPAPI only")}.");
+            return;
+        }
+
+        if (!ShouldProcess($"{name} in {Location.Path}", hello ? "Protect with Windows Hello" : "Remove Windows Hello protection"))
+        {
+            return;
+        }
+
+        var plain = !hello && existing.IsHello ? Unseal(before, [name], "remove Windows Hello protection from").Find(name) : null;
+        Report(VaultFile.Update(body =>
+        {
+            var current = body.Find(name) ?? throw new VaultException($"No entry '{name}' in {Location.Path}.");
+            if (current.IsRequired)
+            {
+                body.SetRequiredHello(name, hello);
+            }
+
+            if (current.IsMissing)
+            {
+                return;
+            }
+
+            if (hello)
+            {
+                body.Set(Seal(body, current));
+            }
+            else if (PlainCurrent(current, plain) is { IsHello: false } unsealed)
+            {
+                body.Set(unsealed);
+            }
+            else
+            {
+                throw new VaultException($"'{name}' changed while it was being unsealed. Nothing was changed.");
+            }
+        }));
+        Say(hello
+            ? $"{name} is protected by Windows Hello: every read asks for your face, fingerprint or PIN."
+            : $"{name} is protected by DPAPI only: reads no longer ask for Windows Hello.");
     }
 
     private void SetPart(EntryReference reference)
@@ -382,6 +529,8 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
             throw new VaultException($"{reference} is one part of a credential: give its value alone, or use -Credential on {reference.Name}.");
         }
 
+        var before = ReadVault().Body;
+        var existingPlain = before.Find(reference.Name) is { IsHello: true } ? Unseal(before, [reference.Name], "update").Find(reference.Name) : null;
         var prompt = $"{Label(reference)} for {reference.Name}";
         var secret = Value ?? (reference.IsSecret ? ReadSecret(prompt) : null);
         var text = secret is null ? ReadText(prompt) : SecretText.ToPlain(secret);
@@ -402,8 +551,10 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
             Report(VaultFile.Update(
                 body =>
                 {
-                    var existing = body.Find(reference.Name) ?? VaultEntry.NewCredential(reference.Name, null, [], null, [], now);
-                    body.Set(existing.WithPart(reference, text, bytes, now));
+                    var current = body.Find(reference.Name);
+                    var existing = PlainCurrent(current, existingPlain) ?? VaultEntry.NewCredential(reference.Name, null, [], null, [], now);
+                    var updated = existing.WithPart(reference, text, bytes, now);
+                    body.Set(Hello || current is { IsHello: true } or { IsRequiredHello: true } ? Seal(body, updated) : updated);
                     if (Local)
                     {
                         body.SetSharing(reference.Name, local: true);
@@ -437,9 +588,8 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         _ => "Password",
     };
 
-    private VaultEntry ReadCredential(EntryName name)
+    private VaultEntry ReadCredential(EntryName name, VaultEntry? existing)
     {
-        var existing = ReadVault().Body.Find(name);
         if (existing is { IsFile: true })
         {
             throw new VaultException($"'{name}' is a file entry; it can't become a credential. Remove it first.");
@@ -602,7 +752,10 @@ public sealed class ResolveVaultEntryCommand : VaultCmdletBase
     protected override void Run()
     {
         var reference = EntryReference.Parse(Name);
-        var entry = Resolve(ReadForUse(body => TryResolve(body, Name, Scope, Fallback)), Name, Scope, Fallback);
+        var body = ReadForUse(current => TryResolve(current, Name, Scope, Fallback));
+        var entry = Resolve(body, Name, Scope, Fallback);
+        RequireValue(entry);
+        entry = FindEntry(Unseal(body, [entry.Name], "read"), entry.Name);
         WriteObject(PartOutput(entry, new EntryReference(entry.Name, reference.Part, reference.UrlNumber), AsPlainText));
     }
 

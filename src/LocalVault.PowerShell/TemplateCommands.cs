@@ -31,7 +31,7 @@ public abstract class TemplateCmdletBase : VaultCmdletBase
     internal static Dictionary<EntryReference, string> Secrets(VaultBody body)
     {
         var values = new Dictionary<EntryReference, string>();
-        foreach (var entry in body.Entries.Where(entry => entry.IsSecret || (entry.IsCredential && !entry.IsMissing)))
+        foreach (var entry in body.Entries.Where(entry => !entry.IsHello && (entry.IsSecret || (entry.IsCredential && !entry.IsMissing))))
         {
             values[new EntryReference(entry.Name)] = Encoding.UTF8.GetString(entry.GetValue());
             if (entry.UserName is { } user)
@@ -252,6 +252,7 @@ public sealed class WriteVaultTemplateCommand : TemplateCmdletBase
                     current => group.All(t => TemplateText.Placeholders(System.IO.File.ReadAllText(t.Template)).All(n => current.Find(n.Name) is not null)),
                     _ => group.SelectMany(t => TemplateText.Placeholders(System.IO.File.ReadAllText(t.Template)).Select(n => n.Name)))
                 : VaultAt(group.Key).Read().Body;
+            body = Unseal(body, group.SelectMany(t => TemplateText.Placeholders(System.IO.File.ReadAllText(t.Template)).Select(n => n.Name)), "write templates from");
             var rendered = group.Select(t => (Template: t, Text: Render(t, body))).ToList();
             foreach (var (template, text) in rendered)
             {

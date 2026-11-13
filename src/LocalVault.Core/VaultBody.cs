@@ -211,7 +211,7 @@ public sealed class VaultBody
         var existing = Find(entry.Name);
         if (existing is not null && entry.IsMissing && !existing.IsMissing)
         {
-            existing.SetRequired(entry.RequiredNote, entry.RequiredShape, entry.RequiredPath, entry.RequiredHosts);
+            existing.SetRequired(entry.RequiredNote, entry.RequiredShape, entry.RequiredPath, entry.RequiredHosts, entry.IsRequiredHello);
             return;
         }
 
@@ -294,6 +294,17 @@ public sealed class VaultBody
         }
 
         existing.SetLocal(local);
+    }
+
+    public void SetRequiredHello(EntryName name, bool hello)
+    {
+        var existing = Find(name) ?? throw new VaultException($"No entry '{name}'.");
+        if (!existing.IsRequired)
+        {
+            throw new VaultException($"'{name}' is not a required entry.");
+        }
+
+        existing.SetRequired(existing.RequiredNote, existing.RequiredShape, existing.RequiredPath, existing.RequiredHosts, hello);
     }
 
     public void RecordKeePassBase(EntryName name, string? databaseId, string? hash, DateTimeOffset at) =>

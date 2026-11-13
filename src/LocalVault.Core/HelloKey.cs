@@ -19,6 +19,8 @@ public interface IHelloKey
 
     bool IsHardware { get; }
 
+    bool NeedsConsole { get; }
+
     string KeyId { get; }
 
     RSAParameters PublicKey { get; }

@@ -97,3 +97,19 @@ function Initialize-TestKeePass {
     $database.Save($null)
     $database.Close()
 }
+function Use-TestHelloKey {
+    [CmdletBinding()]
+    [OutputType([LocalVault.Core.SoftwareHelloKey])]
+    param()
+
+    $key = [LocalVault.Core.SoftwareHelloKey]::new()
+    [LocalVault.Core.HelloKeys].GetProperty('Override', [Reflection.BindingFlags]'NonPublic, Static').SetValue($null, $key)
+    $key
+}
+
+function Clear-TestHelloKey {
+    [CmdletBinding()]
+    param()
+
+    [LocalVault.Core.HelloKeys].GetProperty('Override', [Reflection.BindingFlags]'NonPublic, Static').SetValue($null, $null)
+}

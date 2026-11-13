@@ -64,6 +64,10 @@ Gets the value of one vault entry.
 
 Gets the names, kinds and ages of the entries in a vault.
 
+### [Get-VaultHelloStatus](Get-VaultHelloStatus.md)
+
+Gets the state of the Windows Hello key on this PC and of the vault's Windows Hello entries.
+
 ### [Get-VaultSshKey](Get-VaultSshKey.md)
 
 Gets the SSH keys of a vault, without their private keys.

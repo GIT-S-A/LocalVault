@@ -81,7 +81,7 @@ public sealed class VaultEntry
 
     public EntryName Name { get; }
 
-    public string Kind => ReadString(Node, KindField);
+    public string Kind => IsHello ? HelloInnerKind! : StoredKind;
 
     public bool IsSecret => Kind == SecretKind;
 
@@ -91,9 +91,11 @@ public sealed class VaultEntry
 
     public bool IsCredential => Kind == CredentialKind;
 
-    public bool IsKnownKind => IsSecret || IsFile || IsMissing || IsCredential;
+    public bool IsKnownKind => !IsHello && (IsSecret || IsFile || IsMissing || IsCredential);
 
-    public bool IsHello => Kind == HelloKind;
+    public bool IsHello => StoredKind == HelloKind;
+
+    private string StoredKind => ReadString(Node, KindField);
 
     public string? HelloInnerKind => (Meta?[HelloField] as JsonObject)?[KindField]?.GetValue<string>();
 
@@ -225,10 +227,10 @@ public sealed class VaultEntry
         new(BuildNode(name, FileKind, content, created, StoredPathRules.Normalize(storedPath)));
 
     public static VaultEntry NewRequired(
-        EntryName name, string? note, DateTimeOffset created, string? shape = null, string? path = null, IReadOnlyList<string>? hosts = null)
+        EntryName name, string? note, DateTimeOffset created, string? shape = null, string? path = null, IReadOnlyList<string>? hosts = null, bool hello = false)
     {
         var entry = new VaultEntry(BuildNode(name, RequiredKind, [], created, null));
-        entry.SetRequired(note, shape, path, hosts);
+        entry.SetRequired(note, shape, path, hosts, hello);
         return entry;
     }
 
@@ -284,6 +286,11 @@ public sealed class VaultEntry
 
     internal JsonObject SealablePayload()
     {
+        if (IsHello)
+        {
+            throw new HelloException($"'{Name}' is already sealed by Windows Hello.");
+        }
+
         if (!(IsSecret || IsFile || IsCredential) || Ssh is not null)
         {
             throw new VaultException($"'{Name}' is a {(Ssh is null ? Kind : "ssh-key")} entry; Windows Hello seals secret, credential and file entries only.");
@@ -502,9 +509,19 @@ public sealed class VaultEntry
         return copy;
     }
 
-    internal void SetRequired(string? note, string? shape, string? path, IReadOnlyList<string>? hosts = null)
+    internal void SetRequired(string? note, string? shape, string? path, IReadOnlyList<string>? hosts = null, bool hello = false)
     {
+        if (hello && shape == SshKeyShape)
+        {
+            throw new VaultException($"'{Name}' is an SSH key; Windows Hello seals secret, credential and file entries only.");
+        }
+
         var required = new JsonObject();
+        if (hello)
+        {
+            required[HelloField] = true;
+        }
+
         if (hosts is { Count: > 0 })
         {
             required[HostsField] = ToArray(hosts.Select(SshKeyInfo.NormalizeHost));
@@ -533,7 +550,7 @@ public sealed class VaultEntry
     {
         if (IsRequired)
         {
-            SetRequired(RequiredNote, RequiredShape, RequiredPath, hosts);
+            SetRequired(RequiredNote, RequiredShape, RequiredPath, hosts, IsRequiredHello);
         }
         else if (Meta?[SshField] is JsonObject ssh)
         {
@@ -558,6 +575,7 @@ public sealed class VaultEntry
             RemoveCredentialFields(Node);
             Node.Remove(PreviousField);
             Meta?.Remove(SshField);
+            Meta?.Remove(HelloField);
         }
     }
 
@@ -634,7 +652,7 @@ public sealed class VaultEntry
             return false;
         }
 
-        if (IsCredential || Ssh is not null || other.Ssh is not null)
+        if (IsCredential || IsHello || other.IsHello || Ssh is not null || other.Ssh is not null)
         {
             return ContentHash() == other.ContentHash();
         }
@@ -654,7 +672,7 @@ public sealed class VaultEntry
 
     internal void CopyContentFrom(VaultEntry source)
     {
-        Node[KindField] = source.Kind;
+        Node[KindField] = source.StoredKind;
         Node[ValueField] = ReadString(source.Node, ValueField);
         Node.Remove(PreviousField);
         if (source.Node[PreviousField] is { } previous)
@@ -763,7 +781,8 @@ public sealed class VaultEntry
                 && IsOptionalString(requiredFields[NoteField])
                 && IsOptionalString(requiredFields[ShapeField])
                 && IsOptionalString(requiredFields[PathField])
-                && IsOptionalHosts(requiredFields[HostsField])))
+                && IsOptionalHosts(requiredFields[HostsField])
+                && (requiredFields[HelloField] is null || (requiredFields[HelloField] is JsonValue requiredHello && requiredHello.TryGetValue<bool>(out _)))))
         {
             throw new VaultException($"Vault entry '{Name}' has a 'required' field that is damaged.");
         }

@@ -21,6 +21,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Export-VaultToStore](#export-vaulttostore): Saves the shared entries of the repository's vaults to their stores.
 - [Get-VaultEntry](#get-vaultentry): Gets the value of one vault entry.
 - [Get-VaultEntryList](#get-vaultentrylist): Gets the names, kinds and ages of the entries in a vault.
+- [Get-VaultHelloStatus](#get-vaulthellostatus): Gets the state of the Windows Hello key on this PC and of the vault's Windows Hello entries.
 - [Get-VaultSshKey](#get-vaultsshkey): Gets the SSH keys of a vault, without their private keys.
 - [Get-VaultSshKeyPath](#get-vaultsshkeypath): Gets the path of the key file of an SSH key entry.
 - [Get-VaultStore](#get-vaultstore): Gets the stores of the project and of this PC.
@@ -1631,6 +1632,93 @@ name, which isn't a secret.
 ### Notes
 
 `lv list [<scope>]` runs this cmdlet and formats the result as a table.
+
+## Get-VaultHelloStatus
+
+Gets the state of the Windows Hello key on this PC and of the vault's Windows Hello entries.
+
+### Syntax
+
+```text
+Get-VaultHelloStatus [-Path <string>] [<CommonParameters>]
+```
+
+### Description
+
+The `Get-VaultHelloStatus` cmdlet reports whether this PC can seal and read Windows Hello entries.
+It never asks for Windows Hello.
+
+The Windows Hello key is an RSA key of the current Windows user in the Microsoft Passport Key
+Storage Provider, named `LocalVault-Hello`. Windows can't export it. The first entry sealed with
+Windows Hello creates it, which asks for Windows Hello once.
+
+**State** takes one of these values:
+
+| State | Meaning |
+|---|---|
+| `Ready` | The key exists and is held by the TPM. |
+| `Software` | The key exists but isn't held by a TPM. |
+| `None` | The key doesn't exist yet. |
+| `Unavailable` | Windows Hello can't be used: it isn't set up, the session is a remote desktop session, or the key provider fails. **Reason** says which. |
+| `KeyChanged` | The vault's Windows Hello entries were sealed for another key. A PIN or Windows Hello reset, or another PC, replaces the key. |
+
+**Missing** lists the vault's Windows Hello entries that this PC can't read. `Import-VaultFromStore`
+seals them again from the store.
+
+### Examples
+
+#### Example 1 - Check Windows Hello before sealing an entry
+
+```powershell
+Get-VaultHelloStatus
+```
+
+```Output
+State      : Ready
+Hardware   : True
+Provider   : Microsoft Passport Key Storage Provider
+KeyId      : bc1838ae770b812b...
+VaultKeyId : bc1838ae770b812b...
+Entries    : 1
+Missing    : {}
+Reason     :
+```
+
+### Parameters
+
+#### -Path
+
+Specifies the path to the vault file. A relative path is resolved from the current location. If
+you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
+`secrets.local.lv` at the root of the git repository that contains the current location.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**LocalVault.PowerShell.VaultHelloStatus**: This cmdlet returns one object with the **State**, **Hardware**, **Provider**, **KeyId** of the
+Windows Hello key, the **VaultKeyId** the vault's entries were sealed for, the number of Windows
+Hello **Entries**, the names of the **Missing** ones and the **Reason** when Windows Hello is
+unavailable.
+
+### Notes
+
+`lv hello` shows this status. A software key produces a warning.
+
+Windows Hello always offers the PIN as well as face or fingerprint recognition. The key provider
+can't require biometrics only.
 
 ## Get-VaultSshKey
 
@@ -3590,18 +3678,18 @@ Adds or replaces a secret, a credential or a file in a vault.
 ### Syntax
 
 ```text
-Set-VaultEntry [-Name] <string> [[-Value] <securestring>] [-Local] [-Path <string>] [-WhatIf]
- [-Confirm] [<CommonParameters>]
-```
-
-```text
-Set-VaultEntry [-Name] <string> -FilePath <string> [-StoredPath <string>] [-Local] [-Path <string>]
+Set-VaultEntry [-Name] <string> [[-Value] <securestring>] [-Hello] [-Local] [-Path <string>]
  [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ```text
+Set-VaultEntry [-Name] <string> -FilePath <string> [-StoredPath <string>] [-Hello] [-Local]
+ [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+```
+
+```text
 Set-VaultEntry [-Name] <string> -Credential [-UserName <string>] [-Password <securestring>]
- [-Totp <securestring>] [-Url <string[]>] [-Local] [-Path <string>] [-WhatIf] [-Confirm]
+ [-Totp <securestring>] [-Url <string[]>] [-Hello] [-Local] [-Path <string>] [-WhatIf] [-Confirm]
  [<CommonParameters>]
 ```
 
@@ -3612,7 +3700,12 @@ Set-VaultEntry [-Name] <string> -Sharing <VaultEntrySharing> [-Path <string>] [-
 
 ```text
 Set-VaultEntry [-Name] <string> -Required [-Credential] [-StoredPath <string>] [-Note <string>]
- [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-Hello] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+```
+
+```text
+Set-VaultEntry [-Name] <string> -Protection <VaultEntryProtection> [-Path <string>] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
 ### Description
@@ -3661,6 +3754,15 @@ the profile. Only a required entry's own value can have a `~/` path.
 
 `Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
 defined, and `Import-VaultFromStore` fills it in on another machine.
+
+With the **Hello** parameter, the entry is also sealed with Windows Hello. Reading its value then
+asks for Windows Hello: face, fingerprint or PIN. One command asks once, whatever the number of
+Windows Hello entries it reads. Sealing asks for nothing, except the first time on a PC, when the
+cmdlet creates the user's Windows Hello key. A new value for an entry sealed with Windows Hello is
+sealed too. The **Protection** parameter alone seals an existing entry, or removes its seal, and
+keeps its value. Windows Hello seals secrets, credentials and files, not SSH keys. A credential is
+sealed whole: its user name and URLs are hidden too. When Windows Hello is unavailable, the cmdlet
+fails and writes nothing: it never stores such an entry with DPAPI only.
 
 The cmdlet refuses an SSH key entry, except with **Sharing**: a key is created with
 [New-VaultSshKey](#new-vaultsshkey), and replaced with its **Replace** parameter.
@@ -3729,7 +3831,23 @@ Set-VaultEntry -Name ssh/deploy -FilePath $HOME\.ssh\id_deploy
 The key stays out of the project store. `Export-VaultToStore` writes it to the personal store, and
 `Import-VaultFromStore` writes it to `~/.ssh/id_deploy` on another machine.
 
-#### Example 6 - Copy a secret from another store
+#### Example 6 - Seal a secret with Windows Hello
+
+```powershell
+Set-VaultEntry -Name registry.token -Hello
+Get-VaultEntry -Name registry.token -AsPlainText | docker login registry.example.com --username ci --password-stdin
+```
+
+The first command asks for the value. The second asks for Windows Hello, then passes the value to
+the standard input of `docker login`.
+
+#### Example 7 - Remove the Windows Hello seal
+
+```powershell
+Set-VaultEntry -Name registry.token -Protection Dpapi
+```
+
+#### Example 8 - Copy a secret from another store
 
 ```powershell
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
@@ -3781,6 +3899,21 @@ Specifies the file to store. A relative path is resolved from the current locati
 | Required | File |
 | Pipeline input | False |
 | Default value | None |
+| Aliases | None |
+
+#### -Hello
+
+Indicates that the entry is sealed with Windows Hello. Reading its value then asks for Windows Hello.
+With **Required**, the declaration asks each person's value to be sealed with Windows Hello.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | Secret, File, Credential, Required |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
 | Aliases | None |
 
 #### -Local
@@ -3854,6 +3987,22 @@ you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment varia
 | Parameter sets | (All) |
 | Position | Named |
 | Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Protection
+
+Specifies how the entry is protected, and keeps its value. `Hello` seals the entry with Windows
+Hello. `Dpapi` removes the Windows Hello seal, which asks for Windows Hello once. The kind, the value,
+the creation time and the sharing of the entry don't change.
+
+| Property | Value |
+| --- | --- |
+| Type | LocalVault.PowerShell.VaultEntryProtection |
+| Parameter sets | Protection |
+| Position | Named |
+| Required | Protection |
 | Pipeline input | False |
 | Default value | None |
 | Aliases | None |

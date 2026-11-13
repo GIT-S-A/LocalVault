@@ -117,9 +117,10 @@ public sealed class HelloSealTests : IDisposable
         var sealedEntry = Seal(body, plain);
 
         Assert.Equal(plain.ContentHash(), sealedEntry.ContentHash());
-        Assert.Equal(VaultEntry.HelloKind, sealedEntry.Kind);
-        Assert.Equal(VaultEntry.SecretKind, sealedEntry.HelloInnerKind);
-        Assert.False(sealedEntry.IsKnownKind);
+        Assert.Equal(VaultEntry.SecretKind, sealedEntry.Kind);
+        Assert.True(sealedEntry.IsSecret);
+        Assert.True(sealedEntry.IsHello);
+        Assert.Equal(VaultEntry.HelloKind, JsonNode.Parse(body.ToUtf8())!["entries"]![0]!["kind"]!.GetValue<string>());
     }
 
     [Fact]
@@ -179,6 +180,59 @@ public sealed class HelloSealTests : IDisposable
         Assert.Null(entry.HelloInnerKind);
         Assert.Equal("b", Encoding.UTF8.GetString(entry.GetValue()));
         Assert.Equal(VaultBody.CurrentSchema, Schema(body));
+    }
+
+    [Theory]
+    [InlineData(VaultEntry.SecretKind)]
+    [InlineData(VaultEntry.FileKind)]
+    [InlineData(VaultEntry.CredentialKind)]
+    public void AnEntryMovesToHelloAndBackWithItsKindValueAndMeta(string kind)
+    {
+        var plain = kind switch
+        {
+            VaultEntry.FileKind => VaultEntry.NewFile(Cryptomator, [7, 8], "conf/key.bin", Now),
+            VaultEntry.CredentialKind => VaultEntry.NewCredential(Cryptomator, "jdoe", "pw"u8, TotpSecret.Parse("jbswy3dpehpk3pxp"), ["https://a.example.com"], Now),
+            _ => Secret(Cryptomator, "s3cret"),
+        };
+        var body = VaultBody.CreateEmpty();
+        body.Set(plain);
+        body.SetSharing(Cryptomator, local: true);
+        body.RecordKeePassBase(Cryptomator, "db1", plain.ContentHash(), Now);
+        var hash = plain.ContentHash();
+
+        body.Set(HelloSeal.Seal(body, body.Find(Cryptomator)!, key, "create"));
+
+        var sealedEntry = body.Find(Cryptomator)!;
+        Assert.True(sealedEntry.IsHello);
+        Assert.Equal(kind, sealedEntry.Kind);
+        Assert.Equal(hash, sealedEntry.ContentHash());
+        Assert.True(sealedEntry.IsLocal);
+        Assert.Equal(hash, sealedEntry.KeePassBaseFor("db1"));
+        Assert.Equal(Now, sealedEntry.Created);
+
+        using (var session = HelloSeal.Open(body, key, "read"))
+        {
+            body.Set(session.Unseal(sealedEntry));
+        }
+
+        var back = VaultBody.Parse(body.ToUtf8()).Find(Cryptomator)!;
+        Assert.False(back.IsHello);
+        Assert.Equal(kind, back.Kind);
+        Assert.Equal(hash, back.ContentHash());
+        Assert.True(back.IsLocal);
+        Assert.Equal(hash, back.KeePassBaseFor("db1"));
+        Assert.Equal(Now, back.Created);
+        Assert.Equal(VaultBody.CurrentSchema, Schema(body));
+        Assert.True(back.HasSameContent(plain));
+    }
+
+    [Fact]
+    public void ASealedEntryIsNotSealedTwice()
+    {
+        var body = VaultBody.CreateEmpty();
+        var sealedEntry = Seal(body, Secret(Cryptomator, "a"));
+
+        Assert.Throws<HelloException>(() => HelloSeal.Seal(body, sealedEntry, key, "create"));
     }
 
     [Fact]

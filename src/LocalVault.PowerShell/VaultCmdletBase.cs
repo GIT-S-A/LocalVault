@@ -195,7 +195,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
                 }
             }
 
-            foreach (var entry in entries.Where(e => e.IsRequired && e.IsFile && e.IsUnderHome && e.Ssh is null))
+            foreach (var entry in entries.Where(e => e.IsRequired && e.IsFile && e.IsUnderHome && e.Ssh is null && !e.IsHello))
             {
                 var target = StoredPathRules.Resolve(location.Directory, entry.StoredPath!);
                 var content = entry.GetValue();
@@ -569,6 +569,68 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
                 $"'{entry.Name}' is required but not set on this PC. Run lv set {entry.Name}" +
                 (entry.RequiredNote is { } note ? $" ({note})." : "."));
         }
+    }
+
+    internal static IHelloKey HelloKey => HelloKeys.Current;
+
+    private bool warnedSoftwareKey;
+
+    internal static void RequireHelloConsole()
+    {
+        if (HelloKey.NeedsConsole && !IsInteractive)
+        {
+            throw new HelloException("Windows Hello is not available: it needs an interactive console (input not redirected, no -NonInteractive). Nothing was read or written.");
+        }
+    }
+
+    internal VaultBody Unseal(VaultBody body, IEnumerable<EntryName> names, string action)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(names);
+        var sealedEntries = names.Select(body.Find).OfType<VaultEntry>().Where(e => e.IsHello)
+            .DistinctBy(e => e.Name.FullName, EntryName.Comparer).ToList();
+        if (sealedEntries.Count == 0)
+        {
+            return body;
+        }
+
+        foreach (var entry in sealedEntries)
+        {
+            if (HelloSeal.MissingReason(body, entry, HelloKey) is { } reason)
+            {
+                throw new HelloException($"'{entry.Name}' can't be read on this PC: {reason}. lv load restores it from the store.");
+            }
+        }
+
+        RequireHelloConsole();
+        var copy = body.Clone();
+        var listed = string.Join(", ", sealedEntries.Select(e => e.Name.FullName));
+        using var session = HelloSeal.Open(body, HelloKey, $"LocalVault: {action} {listed} ({Location.Path})");
+        foreach (var entry in sealedEntries)
+        {
+            copy.Set(session.Unseal(entry));
+        }
+
+        return copy;
+    }
+
+    internal VaultEntry Seal(VaultBody body, VaultEntry plain)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        ArgumentNullException.ThrowIfNull(plain);
+        if (HelloKey.State == HelloState.None)
+        {
+            RequireHelloConsole();
+        }
+
+        var result = HelloSeal.Seal(body, plain, HelloKey, $"LocalVault: create the Windows Hello key for {Environment.UserName}");
+        if (!warnedSoftwareKey && !HelloKey.IsHardware)
+        {
+            warnedSoftwareKey = true;
+            WriteWarning($"Windows Hello key is software-only (no TPM): {HelloKey.ProviderName}.");
+        }
+
+        return result;
     }
 
     protected VaultEntry FindEntry(VaultBody body, EntryName name) =>
