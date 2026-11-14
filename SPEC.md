@@ -540,7 +540,7 @@ T95|x|spike: NGC KSP → create OK (1 prompt); OAEP SHA-1/SHA-256 refused, PKCS#
 T96|x|Core: `IHelloKey` + NGC impl + test impl, vault key pair, seal/unseal blob, body `hello`, `meta.hello`, schema 6 + xUnit (round trip, AAD swap fails, key missing, keyId mismatch, zeroing)|I.Hello,I.Entry,V144,V145,V148,V151
 T97|x|cmdlets & CLI: `-Hello`, `-Protection`, `--hello`, `lv mark hello|nohello`, `Get-VaultHelloStatus`/`lv hello`, one-prompt read path (get, clip, env, run, Resolve, Restore, templates), list column + Pester (fake key, unavailable, non-interactive)|V144-V147,V152,V153
 T98|x|stores & transfer: `LocalVault.Hello`, diff w/o prompt, save prompt rule, load reseal & Missing restore, export/import + Pester|V146,V148,V150
-T99|.|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)|V149
+T99|x|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)|V149
 T100|.|help pages, `about_LocalVault` (Hello kind, one prompt per command, PIN always offered, biometric-only ⊥ enforceable via Passport KSP), SKILL.md, reference.md; beta17|C11,I.Hello
 
 ## §B Bugs

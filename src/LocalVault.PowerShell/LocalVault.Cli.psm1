@@ -22,10 +22,10 @@ $script:LvSyntax = @{
     store   = @{ Usage = 'lv store [list | add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal] | add <name> [<target>] --project [--default] [--mirror] | set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default] [--personal | --no-personal] [--project] | rm <name> [--project] | use <name> | diff [--store <name>] | copy <target | name> [--keyfile <file>]]'; Min = 0; Max = 4; Options = @('project', 'default', 'unlock-with', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'store', 'keyfile') }
     update  = @{ Usage = 'lv update [<tag>] [--downgrade]'; Min = 0; Max = 1; Options = @('downgrade') }
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
-    run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @() }
+    run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--stdin <name>] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @('stdin') }
     'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] [--replace] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default]]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace', 'default') }
 }
-$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment')
+$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment', 'stdin')
 $script:LvListOptions = @('host')
 $script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'hello', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared')
 $script:LvSubcommands = @{
@@ -164,6 +164,7 @@ Files that need secrets
   template clear [<file>]              deletes the written files
   template rm <file>                   stops managing a file
   run [VAR=name ...] [--] <command>    sets the variables, writes the templated files, runs, then deletes them
+  run --stdin <name> [--] <program>    also sends the value to the program's standard input, never as text
 
 SSH keys (for SSH to hosts; files in ~/.ssh/<repository>/)
   ssh-key                              the repository's keys: personal or shared, fingerprint, hosts
@@ -202,8 +203,8 @@ Details: Get-Help Invoke-LocalVault -Full
         while ($start + 1 -lt $Arguments.Count -and $Arguments[$start] -eq '--path') { $start += 2 }
         if ($start -lt $Arguments.Count -and $Arguments[$start] -eq 'run') {
             $start++
-            while ($start -lt $Arguments.Count -and ($Arguments[$start] -match '^[A-Za-z_][A-Za-z0-9_]*=' -or ($Arguments[$start] -eq '--path' -and $start + 1 -lt $Arguments.Count))) {
-                $start += if ($Arguments[$start] -eq '--path') { 2 } else { 1 }
+            while ($start -lt $Arguments.Count -and ($Arguments[$start] -match '^[A-Za-z_][A-Za-z0-9_]*=' -or ($Arguments[$start] -in '--path', '--stdin' -and $start + 1 -lt $Arguments.Count))) {
+                $start += if ($Arguments[$start] -in '--path', '--stdin') { 2 } else { 1 }
             }
             $runCommand = @($Arguments | Select-Object -Skip $start)
             if ($runCommand.Count -gt 0 -and $runCommand[0] -eq '--') { $runCommand = @($runCommand | Select-Object -Skip 1) }
@@ -563,8 +564,16 @@ Details: Get-Help Invoke-LocalVault -Full
                     if ($templates.Count -gt 0) { Write-VaultTemplate @vault | Out-Null }
                     $commandName = $runCommand[0]
                     $commandArguments = @($runCommand | Select-Object -Skip 1)
-                    & $commandName @commandArguments
-                    $runExit = $LASTEXITCODE
+                    if ($options['stdin']) {
+                        $program = Get-Command -Name $commandName -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+                        if (-not $program) { & $fail "lv run --stdin runs a program; '$commandName' is not one." }
+                        $sendToStdin = [System.Management.Automation.CmdletInfo]::new('Invoke-VaultStdin', [LocalVault.PowerShell.InvokeVaultStdinCommand])
+                        $runExit = & $sendToStdin @vault -Name $options['stdin'] -FilePath $program.Source -ArgumentList $commandArguments
+                    }
+                    else {
+                        & $commandName @commandArguments
+                        $runExit = $LASTEXITCODE
+                    }
                 }
                 finally {
                     if ($templates.Count -gt 0) { Clear-VaultTemplate @vault -Confirm:$false | Out-Null }

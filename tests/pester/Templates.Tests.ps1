@@ -142,3 +142,88 @@ Describe 'Changing one setting of a store' {
         (lv @arguments | Out-String) | Should -Match 'Stores: mine \(Computer, default\), team \(Computer\)'
     }
 }
+
+Describe 'A value on the standard input of a program' {
+    BeforeEach {
+        $script:folder = Initialize-TestFolder
+        $script:vault = Join-Path $script:folder 'secrets.local.lv'
+        $script:received = Join-Path $script:folder 'received.bin'
+        $script:reader = '$in = [Console]::OpenStandardInput(); $out = [IO.File]::Create(''{0}''); $in.CopyTo($out); $out.Close(); exit 4' -f $script:received
+        Push-Location $script:folder
+    }
+    AfterEach {
+        Pop-Location
+        Clear-TestHelloKey
+        Clear-TestFolder $script:folder
+    }
+
+    It 'sends a secret as UTF-8 bytes and passes the exit code' {
+        $text = 'p' + [char]0xE4 + 'ssword-1'
+        Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret $text) 6>$null
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'db', '--', 'pwsh', '-NoProfile', '-Command', $reader
+        lv @arguments 6>$null
+
+        $LASTEXITCODE | Should -Be 4
+        [IO.File]::ReadAllBytes($received) | Should -Be ([Text.Encoding]::UTF8.GetBytes($text))
+    }
+
+    It 'sends a file entry as its raw bytes' {
+        $bytes = [byte[]](0, 1, 255, 10, 13, 65)
+        [IO.File]::WriteAllBytes((Join-Path $folder 'blob.bin'), $bytes)
+        Set-VaultEntry -Path $vault -Name 'blob' -FilePath (Join-Path $folder 'blob.bin') 6>$null
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'blob', 'pwsh', '-NoProfile', '-Command', $reader
+        lv @arguments 6>$null
+
+        [IO.File]::ReadAllBytes($received) | Should -Be $bytes
+    }
+
+    It 'sends the password of a credential' {
+        Set-VaultEntry -Path $vault -Name 'svc' -Credential -UserName 'deploy' -Password (ConvertTo-TestSecret 'cred-pw-2') 6>$null
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'svc', 'pwsh', '-NoProfile', '-Command', $reader
+        lv @arguments 6>$null
+
+        [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($received)) | Should -Be 'cred-pw-2'
+    }
+
+    It 'reads a Hello entry with one prompt' {
+        $key = Use-TestHelloKey
+        Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'hello-pw') -Hello 6>$null
+        $before = $key.Prompts
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'db', 'pwsh', '-NoProfile', '-Command', $reader
+        lv @arguments 6>$null
+
+        $key.Prompts | Should -Be ($before + 1)
+        [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($received)) | Should -Be 'hello-pw'
+    }
+
+    It 'fails before the program starts when the name is not in the vault' {
+        Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'x') 6>$null
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'nope', 'pwsh', '-NoProfile', '-Command', $reader
+        lv @arguments 2>$null 6>$null
+
+        $LASTEXITCODE | Should -Be 1
+        Test-Path -LiteralPath $received | Should -BeFalse
+    }
+
+    It 'refuses a command that is not a program' {
+        Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'x') 6>$null
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'db', 'Get-ChildItem'
+        $errors = lv @arguments 2>&1 6>$null | Out-String
+
+        $LASTEXITCODE | Should -Be 1
+        $errors | Should -Match 'runs a program'
+    }
+
+    It 'never shows the value in any stream' {
+        Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'leak-check-stdin') 6>$null
+
+        $arguments = 'run', '--path', $vault, '--stdin', 'db', 'pwsh', '-NoProfile', '-Command', $reader
+        lv @arguments 6>&1 5>&1 4>&1 3>&1 2>&1 | Out-String | Should -Not -Match 'leak-check-stdin'
+    }
+}

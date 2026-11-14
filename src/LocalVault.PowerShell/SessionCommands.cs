@@ -187,3 +187,66 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
         }
     }
 }
+
+[Cmdlet(VerbsLifecycle.Invoke, "VaultStdin")]
+[OutputType(typeof(int))]
+public sealed class InvokeVaultStdinCommand : VaultCmdletBase
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    [ValidateNotNullOrEmpty]
+    public string Name { get; set; } = string.Empty;
+
+    [Parameter(Mandatory = true)]
+    [ValidateNotNullOrEmpty]
+    public string FilePath { get; set; } = string.Empty;
+
+    [Parameter]
+    public string[] ArgumentList { get; set; } = [];
+
+    protected override void Run()
+    {
+        var reference = EntryReference.Parse(Name);
+        var body = ReadForUse(current => current.Find(reference.Name) is not null, _ => [reference.Name]);
+        var entry = FindEntry(body, reference.Name);
+        RequireValue(entry);
+        entry = Unseal(body, [entry.Name], "send to the standard input of " + System.IO.Path.GetFileName(FilePath)).Find(entry.Name)!;
+        var bytes = entry.IsFile ? entry.GetValue() : entry.ReadPart(reference, Now);
+        try
+        {
+            WriteObject(RunWithInput(bytes));
+        }
+        finally
+        {
+            Array.Clear(bytes);
+        }
+    }
+
+    private int RunWithInput(byte[] input)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo(FilePath)
+        {
+            UseShellExecute = false,
+            RedirectStandardInput = true,
+            WorkingDirectory = SessionState.Path.CurrentFileSystemLocation.ProviderPath,
+        };
+        foreach (var argument in ArgumentList)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start)
+            ?? throw new VaultException($"'{FilePath}' did not start.");
+        try
+        {
+            using var stdin = process.StandardInput.BaseStream;
+            stdin.Write(input);
+            stdin.Flush();
+        }
+        catch (IOException) when (process.HasExited)
+        {
+        }
+
+        process.WaitForExit();
+        return process.ExitCode;
+    }
+}
