@@ -356,6 +356,23 @@ public sealed class HelloSealTests : IDisposable
         Assert.Equal(publicKey.Modulus, NgcHelloKey.ParsePublicBlob(blob).Modulus);
     }
 
+    [Theory]
+    [InlineData(0, HelloState.Ready)]
+    [InlineData(unchecked((int)0x80090016), HelloState.None)]
+    [InlineData(unchecked((int)0x80090011), HelloState.None)]
+    [InlineData(unchecked((int)0x8009000D), HelloState.Unavailable)]
+    [InlineData(unchecked((int)0x80090030), HelloState.Unavailable)]
+    public void OnlyANotFoundStatusLetsTheKeyBeCreated(int status, HelloState expected) =>
+        Assert.Equal(expected, NgcHelloKey.StateOf(status, out _));
+
+    [Fact]
+    public void AStaleWindowIsToldToOpenANewOne()
+    {
+        NgcHelloKey.StateOf(unchecked((int)0x8009000D), out var reason);
+
+        Assert.Contains("new PowerShell window", reason, StringComparison.Ordinal);
+    }
+
     private VaultEntry Seal(VaultBody body, VaultEntry plain)
     {
         var sealedEntry = HelloSeal.Seal(body, plain, key, "create");

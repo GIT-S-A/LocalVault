@@ -19,6 +19,7 @@ internal sealed partial class NgcHelloKey : IHelloKey
     private const int RsaKeyBytes = 256;
     private const int BadKeyset = unchecked((int)0x80090016);
     private const int NotFound = unchecked((int)0x80090011);
+    private const int NoKey = unchecked((int)0x8009000D);
     private const int UserCancelled = unchecked((int)0x80090036);
     private const int Cancelled = unchecked((int)0x800704C7);
 
@@ -129,16 +130,25 @@ internal sealed partial class NgcHelloKey : IHelloKey
         if (status == 0)
         {
             _ = NCryptFreeObject(key);
-            return HelloState.Ready;
         }
 
-        if (status is BadKeyset or NotFound)
+        return StateOf(status, out reason);
+    }
+
+    internal static HelloState StateOf(int openKeyStatus, out string? reason)
+    {
+        reason = openKeyStatus switch
         {
-            return HelloState.None;
-        }
-
-        reason = $"the Windows Hello key can't be opened (0x{status:X8})";
-        return HelloState.Unavailable;
+            0 or BadKeyset or NotFound => null,
+            NoKey => "it isn't ready in this window (0x8009000D). Open a new PowerShell window and retry",
+            _ => $"the Windows Hello key can't be opened (0x{openKeyStatus:X8})",
+        };
+        return openKeyStatus switch
+        {
+            0 => HelloState.Ready,
+            BadKeyset or NotFound => HelloState.None,
+            _ => HelloState.Unavailable,
+        };
     }
 
     private static NcryptHandle OpenProvider()

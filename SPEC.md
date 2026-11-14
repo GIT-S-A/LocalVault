@@ -437,6 +437,7 @@ V150: KeePass `LocalVault.Hello` = `true` → load stores entry as hello (sealed
 V151: body w/ ≥ 1 hello entry → schema 6 & `hello` kept; else `hello` dropped & schema 5 written. Older modules refuse to write schema 6 (C8) & skip kind `hello` in store sync.
 V152: Hello prompt only in an interactive session: ⊥ console | input redirected | `-NonInteractive` | remote session (`SM_REMOTESESSION`) → state `unavailable`, read → error, ⊥ prompt attempt. Prompt window owner = console window, else foreground window.
 V153: ∀ read of a Hello value outside the module (output, env, clipboard, file, template, child stdin) happens on an unsealed copy of the body that is never written; `Set-VaultEntry` on a Hello credential part (`n#user`) unseals once, then reseals. Personal file values sealed by Hello ⊥ written to `~/` by `lv load` (`lv restore <name>` writes them).
+V154: Hello key created only after `NCryptOpenKey` → `NTE_BAD_KEYSET` 0x80090016 | `NTE_NOT_FOUND` 0x80090011 (state `none`); `NTE_NO_KEY` 0x8009000D → `unavailable` "isn't ready in this window … open a new PowerShell window"; any other status → `unavailable` w/ hex code. ⊥ create | overwrite on other statuses.
 
 ## §T Tasks
 
@@ -577,3 +578,4 @@ B28|2026-11-05|shared ssh-key path under `~/` unchecked → team store could pla
 B29|2026-11-05|hosts unchecked → store host `-oProxyCommand=…` would run code via ssh command line|V141
 B30|2026-11-13|marker origin `""` (repo w/o origin) read as unclaimed → repo w/ origin & same leaf name wrote into its `~/.ssh/<repo>/` & claimed it|V126
 B31|2026-11-13|`lv start` ran list w/ `3>$null 6>$null` → key adoption report & "not checked" warning lost; tab completion adopted silently|V127
+B32|2026-11-14|Hello re-enabled while a PowerShell window was open → NGC KSP in that process answers `NTE_NO_KEY` for any key; reported as opaque "key can't be opened (0x8009000D)"; treating it as key absent would create w/ overwrite flag & destroy an existing key|V154
