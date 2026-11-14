@@ -72,6 +72,14 @@ commands; `lv start` in a project prints its state and the commands to run next.
   which moves its entries into the vault and renames it `.migrated-<time>`. Other .clixml files are
   imported with `Import-Vault -Source <file>`; the file itself stays where it is.
 
+- **Windows Hello.** `--hello` / `-Hello` seals an entry with Windows Hello on top of DPAPI. Every
+  read of it (`get`, `env`, `run`, templates, `save` of a changed entry, `export`) shows a Windows
+  Hello prompt that only the person at the console can answer. Run such commands in the person's
+  console, not from an agent shell. `lv list` and `lv hello` never prompt; `Missing` in the Hello
+  column means this PC's key can't open the entry, and `lv load` restores it.
+- **Standard input.** `lv run --stdin <name> -- <program>` sends a value to a program's standard
+  input as bytes. It replaces `Get-VaultEntry -AsPlainText | program`, which makes a string.
+
 ## Install or update
 
 `$d=New-Item -ItemType Directory "$env:TEMP\lv-$(New-Guid)"; irm https://github.com/GIT-S-A/LocalVault/releases/latest/download/install.ps1 -OutFile "$d\install.ps1"; & "$d\install.ps1"`
@@ -155,17 +163,17 @@ Writes merge: several scripts can share one vault. A script never rebuilds a who
 ## Commands
 
 Cmdlets: `Get-VaultEntryList`, `Get-VaultEntry`, `Copy-VaultEntry`, `Set-VaultEntry`,
-`Remove-VaultEntry`, `Resolve-VaultEntry`, `Use-VaultEnv`, `Restore-VaultFile`, `Export-Vault`,
+`Remove-VaultEntry`, `Resolve-VaultEntry`, `Use-VaultEnv`, `Restore-VaultFile`, `Get-VaultHelloStatus`, `Export-Vault`,
 `Import-Vault`, `Clear-Vault`,
 `Export-VaultToStore`, `Import-VaultFromStore`, `Compare-VaultWithStore`, `Get-VaultStoreStatus`,
 `Copy-VaultToStore`, `Set-VaultProjectStore`, `Register-/Set-/Unregister-/Get-VaultStore`,
 `Add-/Update-/Write-/Clear-/Remove-/Get-VaultTemplate`.
 
-`lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local]`, `require [--credential | --file <path>] [--note]`,
-`mark <name> shared|local`, `rm`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
+`lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local] [--hello]`, `require [--credential | --file <path>] [--note] [--hello]`,
+`mark <name> shared|local|hello|nohello`, `hello`, `rm`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
 `export [--overwrite]`, `import`,
 `store [list|add|set|rm|use|diff|copy]`, `template [add|update|render|clear|rm]`,
-`run [VAR=name ...] -- <command>`, `update [<tag>] [--downgrade]`, `--version`.
+`run [VAR=name ...] [--stdin <name>] -- <command>`, `update [<tag>] [--downgrade]`, `--version`.
 `lv store set <name> --mirror` (or `--unlock-with <store>`, `--no-mirror`, `--no-unlock`, `--default`, `--personal`, `--no-personal`)
 changes one setting without retyping the target and key file.
 Every vault command takes `--path <vault>`; `save`, `load` and `store diff` take `--store <name>`.

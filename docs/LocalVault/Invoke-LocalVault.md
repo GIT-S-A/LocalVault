@@ -49,10 +49,12 @@ it says that the vault is missing or empty.
 | `list` | `[<scope>]` | `Get-VaultEntryList` |
 | `get` | `<name>[#<part>] [--show]` | `Get-VaultEntry -AsPlainText` |
 | `clip` | `<name>[#<part>]` | `Copy-VaultEntry` |
-| `set` | `<name> [--file <path> \| --credential] [--local]` | `Set-VaultEntry` (`-FilePath` with `--file`, `-Credential` with `--credential`) |
+| `set` | `<name> [--file <path> \| --credential] [--local] [--hello]` | `Set-VaultEntry` (`-FilePath` with `--file`, `-Credential` with `--credential`, `-Hello` with `--hello`) |
 | `set` | `<name>#<part>` | `Set-VaultEntry`: one part of a credential |
-| `require` | `<name> [--credential \| --file <path>] [--note <text>]` | `Set-VaultEntry -Required [-Credential \| -StoredPath <path>]` |
+| `require` | `<name> [--credential \| --file <path>] [--note <text>] [--hello]` | `Set-VaultEntry -Required [-Credential \| -StoredPath <path>] [-Hello]` |
 | `mark` | `<name> shared\|local` | `Set-VaultEntry -Sharing` |
+| `mark` | `<name> hello\|nohello` | `Set-VaultEntry -Protection Hello\|Dpapi` |
+| `hello` | | `Get-VaultHelloStatus` |
 | `rm` | `<name>` | `Remove-VaultEntry` |
 | `env` | `<variable>=<name> ...` | `Use-VaultEnv` |
 | `restore` | `[<name> ...] [--overwrite]` | `Restore-VaultFile` |
@@ -77,6 +79,7 @@ it says that the vault is missing or empty.
 | `template clear` | `[<file>]` | `Clear-VaultTemplate` |
 | `template rm` | `<file>` | `Remove-VaultTemplate` |
 | `run` | `[<variable>=<name> ...] [--] <command> [<arguments> ...]` | sets the variables for the command only, writes every templated file of the repository, runs the command, then deletes the written files and restores the variables, even when the command fails; `$LASTEXITCODE` is the command's |
+| `run` | `[<variable>=<name> ...] --stdin <name> [--] <program> [<arguments> ...]` | as `run`, and also writes the value to the program's standard input, then closes it: a secret as UTF-8, a file as its bytes, a credential's password; the value never becomes a string, a file or a word of the command line; the program must be an executable file |
 | `ssh-key` | | `Get-VaultSshKey` |
 | `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite] [--replace]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |

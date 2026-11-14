@@ -58,6 +58,10 @@ The cmdlet writes the vault once, after all answers.
 An export or a backup whose content is damaged, such as an entry with a stored path outside the
 vault folder, into a `.git` folder or onto a vault file, isn't imported.
 
+An entry marked as sealed with Windows Hello in the export is sealed again in this vault, as is an
+imported entry that replaces a sealed one. Sealing doesn't ask for Windows Hello, except to create
+the key. When Windows Hello is unavailable, the cmdlet fails and writes nothing.
+
 ## EXAMPLES
 
 ### Example 1 - Import an export from a colleague

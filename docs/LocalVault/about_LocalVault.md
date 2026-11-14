@@ -119,6 +119,55 @@ missing entries, skips identical entries, and asks about entries that
 differ. It doesn't delete entries. `Import-Vault` also reads `SAAS-VAULT-1`
 exports.
 
+### Windows Hello
+
+An entry can also be sealed with Windows Hello: `Set-VaultEntry -Hello`,
+`lv set <name> --hello`, or `lv mark <name> hello` for an existing entry.
+Reading its value then needs a Windows Hello gesture. Secrets, credentials
+and files can be sealed; SSH keys can't.
+
+- The seal sits inside the DPAPI seal of the vault file.
+- Each Windows account has one Windows Hello key, kept by the Microsoft
+  Passport Key Storage Provider. The first seal on a PC creates it, after one
+  Windows Hello prompt.
+- Sealing never asks. A command that reads Windows Hello entries asks once,
+  whatever their number. The prompt names the vault and the entries.
+- Windows Hello always offers the PIN beside face and fingerprint. A seal
+  that accepts only biometrics isn't possible with this key provider.
+- Without a console, in a remote desktop session, or when Windows Hello
+  isn't set up, reads fail and nothing is asked.
+- A key without a TPM gives a warning in each command that seals. `Get-VaultHelloStatus`
+  (`lv hello`) shows the key state and the entries this PC can't read.
+
+After a PIN reset, a Windows Hello reset or a copy of the vault to another PC,
+the key no longer opens the vault's entries. They are listed as `Missing`.
+`lv load` takes them from the store and seals them again with the current
+key; the ones that the store doesn't hold stay `Missing` and are reported.
+
+| Operation | Windows Hello prompt |
+| --- | --- |
+| `lv list`, `lv hello`, `lv start`, `lv store diff` | None |
+| `lv set`, `lv load`, `lv import` | None, except to create the key |
+| `lv set <name>#<part>` on a sealed credential | One |
+| `lv save`, `lv store copy` | One per vault, when a sealed entry is written to the store |
+| `lv export` | One, when the vault holds a sealed entry |
+| `lv get`, `lv clip`, `lv env`, `lv restore`, `lv template render` | One per command |
+| `lv run` | One each for the variables, the templated files and `--stdin`, when they read a sealed entry |
+
+A store holds a sealed entry as an ordinary KeePass entry of its kind, with
+the custom string `LocalVault.Hello` set to `true`. `lv load` seals every
+entry that carries it. An entry sealed on this PC stays sealed when the store
+lacks the flag; `lv save` then sets it. `lv mark <name> nohello` removes the
+flag at the next `lv save`. A declaration made with `--hello` carries
+`LocalVault.RequiredHello`, and each person's value is then sealed.
+
+An export holds sealed entries in plain form, marked; `Import-Vault` seals
+them again, and fails without writing when Windows Hello is unavailable.
+
+A vault with a Windows Hello entry needs 1.0.0-beta17 or later. Earlier
+releases read the vault but don't change it, and leave its sealed entries
+out of `lv save` and `lv load`.
+
 ### Old backups
 
 LocalVault makes no automatic backups. Releases up to 1.0.0-beta14 wrote
@@ -365,6 +414,7 @@ one, and does nothing when it is already installed.
 
 - [LocalVault Module](LocalVault.md)
 - [Set-VaultEntry](Set-VaultEntry.md)
+- [Get-VaultHelloStatus](Get-VaultHelloStatus.md)
 - [Get-VaultEntry](Get-VaultEntry.md)
 - [Use-VaultEnv](Use-VaultEnv.md)
 - [Import-Vault](Import-Vault.md)

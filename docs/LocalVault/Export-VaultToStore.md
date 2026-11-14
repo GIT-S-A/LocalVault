@@ -103,6 +103,12 @@ KeePass is a `.kdbx` file. The cmdlet asks for its master password, unless the s
 the password from its `AutoOpen` group. When that group doesn't hold it yet, the cmdlet asks for the
 database's password, then offers to keep it there.
 
+An entry sealed with Windows Hello is written as an ordinary KeePass entry of its kind, with the
+custom string `LocalVault.Hello` set to `true`. The cmdlet asks for Windows Hello once per vault,
+and only when such an entry must be written. An entry whose content is unchanged gets its flag set
+or removed without a prompt. A sealed entry that this PC can't unseal isn't saved, and the cmdlet
+writes a warning. A declaration made with **Hello** carries `LocalVault.RequiredHello`.
+
 ## EXAMPLES
 
 ### Example 1 - Save every vault of the repository

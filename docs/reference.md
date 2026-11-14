@@ -153,6 +153,55 @@ missing entries, skips identical entries, and asks about entries that
 differ. It doesn't delete entries. `Import-Vault` also reads `SAAS-VAULT-1`
 exports.
 
+### Windows Hello
+
+An entry can also be sealed with Windows Hello: `Set-VaultEntry -Hello`,
+`lv set <name> --hello`, or `lv mark <name> hello` for an existing entry.
+Reading its value then needs a Windows Hello gesture. Secrets, credentials
+and files can be sealed; SSH keys can't.
+
+- The seal sits inside the DPAPI seal of the vault file.
+- Each Windows account has one Windows Hello key, kept by the Microsoft
+  Passport Key Storage Provider. The first seal on a PC creates it, after one
+  Windows Hello prompt.
+- Sealing never asks. A command that reads Windows Hello entries asks once,
+  whatever their number. The prompt names the vault and the entries.
+- Windows Hello always offers the PIN beside face and fingerprint. A seal
+  that accepts only biometrics isn't possible with this key provider.
+- Without a console, in a remote desktop session, or when Windows Hello
+  isn't set up, reads fail and nothing is asked.
+- A key without a TPM gives a warning in each command that seals. `Get-VaultHelloStatus`
+  (`lv hello`) shows the key state and the entries this PC can't read.
+
+After a PIN reset, a Windows Hello reset or a copy of the vault to another PC,
+the key no longer opens the vault's entries. They are listed as `Missing`.
+`lv load` takes them from the store and seals them again with the current
+key; the ones that the store doesn't hold stay `Missing` and are reported.
+
+| Operation | Windows Hello prompt |
+| --- | --- |
+| `lv list`, `lv hello`, `lv start`, `lv store diff` | None |
+| `lv set`, `lv load`, `lv import` | None, except to create the key |
+| `lv set <name>#<part>` on a sealed credential | One |
+| `lv save`, `lv store copy` | One per vault, when a sealed entry is written to the store |
+| `lv export` | One, when the vault holds a sealed entry |
+| `lv get`, `lv clip`, `lv env`, `lv restore`, `lv template render` | One per command |
+| `lv run` | One each for the variables, the templated files and `--stdin`, when they read a sealed entry |
+
+A store holds a sealed entry as an ordinary KeePass entry of its kind, with
+the custom string `LocalVault.Hello` set to `true`. `lv load` seals every
+entry that carries it. An entry sealed on this PC stays sealed when the store
+lacks the flag; `lv save` then sets it. `lv mark <name> nohello` removes the
+flag at the next `lv save`. A declaration made with `--hello` carries
+`LocalVault.RequiredHello`, and each person's value is then sealed.
+
+An export holds sealed entries in plain form, marked; `Import-Vault` seals
+them again, and fails without writing when Windows Hello is unavailable.
+
+A vault with a Windows Hello entry needs 1.0.0-beta17 or later. Earlier
+releases read the vault but don't change it, and leave its sealed entries
+out of `lv save` and `lv load`.
+
 ### Old backups
 
 LocalVault makes no automatic backups. Releases up to 1.0.0-beta14 wrote
@@ -963,6 +1012,9 @@ writes the `Repository origin` and install instructions entries as `Export-Vault
 The copy is one-off: the vault records nothing about it, so the next `Export-VaultToStore` and
 `Import-VaultFromStore` with the vault's own store work as before.
 
+Entries sealed with Windows Hello are written as `Export-VaultToStore` writes them, after one
+Windows Hello prompt.
+
 ### Examples
 
 #### Example 1 - Copy the shared entries to another KeePass file
@@ -1077,6 +1129,10 @@ opens the file on any machine.
 The cmdlet asks for the passphrase twice. Without a console, it reads the **Passphrase** parameter
 or one line of redirected standard input. The cmdlet verifies the file after it writes it, and
 records the time of the export in the vault.
+
+An entry sealed with Windows Hello is written in plain form, marked as such. When the vault holds
+one, the cmdlet asks for Windows Hello once. An entry that this PC can't unseal makes the cmdlet
+fail before it writes the file; `Import-VaultFromStore` restores it first.
 
 ### Examples
 
@@ -1263,6 +1319,12 @@ KeePass is a `.kdbx` file. The cmdlet asks for its master password, unless the s
 `Register-VaultStore -UnlockWith <store>`: the cmdlet then opens that other store first, and takes
 the password from its `AutoOpen` group. When that group doesn't hold it yet, the cmdlet asks for the
 database's password, then offers to keep it there.
+
+An entry sealed with Windows Hello is written as an ordinary KeePass entry of its kind, with the
+custom string `LocalVault.Hello` set to `true`. The cmdlet asks for Windows Hello once per vault,
+and only when such an entry must be written. An entry whose content is unchanged gets its flag set
+or removed without a prompt. A sealed entry that this PC can't unseal isn't saved, and the cmdlet
+writes a warning. A declaration made with **Hello** carries `LocalVault.RequiredHello`.
 
 ### Examples
 
@@ -2156,6 +2218,10 @@ The cmdlet writes the vault once, after all answers.
 An export or a backup whose content is damaged, such as an entry with a stored path outside the
 vault folder, into a `.git` folder or onto a vault file, isn't imported.
 
+An entry marked as sealed with Windows Hello in the export is sealed again in this vault, as is an
+imported entry that replaces a sealed one. Sealing doesn't ask for Windows Hello, except to create
+the key. When Windows Hello is unavailable, the cmdlet fails and writes nothing.
+
 ### Examples
 
 #### Example 1 - Import an export from a colleague
@@ -2392,6 +2458,13 @@ Administrators only. It never replaces an existing file; a different one gives a
 
 An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
 
+An entry with the custom string `LocalVault.Hello` set to `true`, and an entry already sealed in the
+vault, is sealed with Windows Hello when it is taken. Sealing doesn't ask for Windows Hello, except
+to create the key. When Windows Hello is unavailable, that entry isn't loaded, the cmdlet writes a
+warning, and the other entries load. Entries sealed here that the current Windows Hello key can't
+open, after a PIN reset or on another PC, are taken from the store whatever their state, and sealed
+again with the current key; the ones that the store doesn't hold are reported.
+
 ### Examples
 
 #### Example 1 - Get the shared entries of a project on a new machine
@@ -2522,10 +2595,12 @@ it says that the vault is missing or empty.
 | `list` | `[<scope>]` | `Get-VaultEntryList` |
 | `get` | `<name>[#<part>] [--show]` | `Get-VaultEntry -AsPlainText` |
 | `clip` | `<name>[#<part>]` | `Copy-VaultEntry` |
-| `set` | `<name> [--file <path> \| --credential] [--local]` | `Set-VaultEntry` (`-FilePath` with `--file`, `-Credential` with `--credential`) |
+| `set` | `<name> [--file <path> \| --credential] [--local] [--hello]` | `Set-VaultEntry` (`-FilePath` with `--file`, `-Credential` with `--credential`, `-Hello` with `--hello`) |
 | `set` | `<name>#<part>` | `Set-VaultEntry`: one part of a credential |
-| `require` | `<name> [--credential \| --file <path>] [--note <text>]` | `Set-VaultEntry -Required [-Credential \| -StoredPath <path>]` |
+| `require` | `<name> [--credential \| --file <path>] [--note <text>] [--hello]` | `Set-VaultEntry -Required [-Credential \| -StoredPath <path>] [-Hello]` |
 | `mark` | `<name> shared\|local` | `Set-VaultEntry -Sharing` |
+| `mark` | `<name> hello\|nohello` | `Set-VaultEntry -Protection Hello\|Dpapi` |
+| `hello` | | `Get-VaultHelloStatus` |
 | `rm` | `<name>` | `Remove-VaultEntry` |
 | `env` | `<variable>=<name> ...` | `Use-VaultEnv` |
 | `restore` | `[<name> ...] [--overwrite]` | `Restore-VaultFile` |
@@ -2550,6 +2625,7 @@ it says that the vault is missing or empty.
 | `template clear` | `[<file>]` | `Clear-VaultTemplate` |
 | `template rm` | `<file>` | `Remove-VaultTemplate` |
 | `run` | `[<variable>=<name> ...] [--] <command> [<arguments> ...]` | sets the variables for the command only, writes every templated file of the repository, runs the command, then deletes the written files and restores the variables, even when the command fails; `$LASTEXITCODE` is the command's |
+| `run` | `[<variable>=<name> ...] --stdin <name> [--] <program> [<arguments> ...]` | as `run`, and also writes the value to the program's standard input, then closes it: a secret as UTF-8, a file as its bytes, a credential's password; the value never becomes a string, a file or a word of the command line; the program must be an executable file |
 | `ssh-key` | | `Get-VaultSshKey` |
 | `ssh-key new` | `<name> [--host <user@host>]... [--shared] [--type ed25519\|rsa\|ecdsa] [--comment <text>] [--overwrite] [--replace]` | `New-VaultSshKey` (`-HostName` with each `--host`) |
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |

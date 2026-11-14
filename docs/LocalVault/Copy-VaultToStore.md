@@ -42,6 +42,9 @@ writes the `Repository origin` and install instructions entries as `Export-Vault
 The copy is one-off: the vault records nothing about it, so the next `Export-VaultToStore` and
 `Import-VaultFromStore` with the vault's own store work as before.
 
+Entries sealed with Windows Hello are written as `Export-VaultToStore` writes them, after one
+Windows Hello prompt.
+
 ## EXAMPLES
 
 ### Example 1 - Copy the shared entries to another KeePass file

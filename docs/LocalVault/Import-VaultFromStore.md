@@ -96,6 +96,13 @@ Administrators only. It never replaces an existing file; a different one gives a
 
 An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
 
+An entry with the custom string `LocalVault.Hello` set to `true`, and an entry already sealed in the
+vault, is sealed with Windows Hello when it is taken. Sealing doesn't ask for Windows Hello, except
+to create the key. When Windows Hello is unavailable, that entry isn't loaded, the cmdlet writes a
+warning, and the other entries load. Entries sealed here that the current Windows Hello key can't
+open, after a PIN reset or on another PC, are taken from the store whatever their state, and sealed
+again with the current key; the ones that the store doesn't hold are reported.
+
 ## EXAMPLES
 
 ### Example 1 - Get the shared entries of a project on a new machine

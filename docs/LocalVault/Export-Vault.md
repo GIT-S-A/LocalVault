@@ -38,6 +38,10 @@ The cmdlet asks for the passphrase twice. Without a console, it reads the **Pass
 or one line of redirected standard input. The cmdlet verifies the file after it writes it, and
 records the time of the export in the vault.
 
+An entry sealed with Windows Hello is written in plain form, marked as such. When the vault holds
+one, the cmdlet asks for Windows Hello once. An entry that this PC can't unseal makes the cmdlet
+fail before it writes the file; `Import-VaultFromStore` restores it first.
+
 ## EXAMPLES
 
 ### Example 1 - Export the vault to a USB drive
