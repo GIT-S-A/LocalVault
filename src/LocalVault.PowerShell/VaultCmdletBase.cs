@@ -161,6 +161,22 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
         return ReadVault().Body;
     }
 
+    protected string? OriginUrl => RepositoryOrigin.Of(Location)?.Url;
+
+    internal void WriteKeyFile(VaultEntry entry, bool overwrite)
+    {
+        ArgumentNullException.ThrowIfNull(entry);
+        var plan = SshKeyFiles.Write(entry, Location.Path, OriginUrl, overwrite, Now);
+        if (plan.Refused)
+        {
+            WriteWarning(SshKeyFiles.Describe(plan, entry.Name));
+        }
+        else if (plan.State == SshKeyWriteState.Write)
+        {
+            Say(SshKeyFiles.Describe(plan, entry.Name));
+        }
+    }
+
     internal void AdoptNewerSshKeys(IReadOnlyList<VaultLocation> vaults)
     {
         ArgumentNullException.ThrowIfNull(vaults);

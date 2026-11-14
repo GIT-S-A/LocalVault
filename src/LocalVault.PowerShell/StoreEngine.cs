@@ -466,6 +466,11 @@ internal static class VaultSync
             host.Warn($"{label}: '{missing.Name}' not saved to '{saved.Target.Name}': {missing.Reason}. lv load restores it from the store.");
         }
 
+        foreach (var refused in result.ReferenceRefused)
+        {
+            host.Warn($"{label}: your value of '{refused.Name}' not saved: it changed on this PC only. {ReferenceOrigin(refused.Reference, saved.Target.Name)} {ReferenceAdvice(refused.Name, refused.Reference)}");
+        }
+
         if (saved.Personal)
         {
             host.Tell($"{label} -> personal store '{saved.Target.Name}', {KeePassGroupPath.Display(KeePassGroupPath.For(saved.Location))}: {result.Added} of your values added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
@@ -520,9 +525,15 @@ internal static class VaultSync
             var mayHaveRequired = snapshot.Body.Entries.Any(e => e.IsRequired) || content.Items.Any(i => i.Kind == VaultEntry.RequiredKind);
             var personalTarget = mayHaveRequired ? personal.Open(primary, keePass.DatabaseId) : null;
             using var personalContent = personalTarget?.Vault.Read(group);
+            if (personalContent is not null && !personalTarget!.WithDeclaration)
+            {
+                ReportSkipped(host, personalContent);
+            }
+
             var personalAnswers = personalContent is null
                 ? new Dictionary<EntryName, bool>()
-                : KeePassSync.ComparePersonal(snapshot.Body, personalContent).Where(c => c.State == KeePassSyncState.Conflict)
+                : KeePassSync.ComparePersonal(snapshot.Body, personalContent)
+                    .Where(c => c.State == KeePassSyncState.Conflict && KeePassSync.PersonalValueOf(personalContent.Find(c.Name))?.Reference is null)
                     .ToDictionary(c => c.Name, c => take(location, c.Name) == true);
 
             var remove = comparisons.Where(c => c.State == KeePassSyncState.RemovedInKeePass)
@@ -615,6 +626,12 @@ internal static class VaultSync
             host.Warn($"{label}: '{missing.Name}' can't be read on this PC ({missing.Reason}) and the store has no copy of it.");
         }
     }
+
+    public static string ReferenceOrigin(KeePassReference reference, string store) =>
+        $"Its value comes from KeePass entry '{reference.Title}' (store '{store}'); lv save won't change that entry.";
+
+    public static string ReferenceAdvice(EntryName name, KeePassReference reference) =>
+        $"To change it for every project, edit '{reference.Title}' in KeePass. To use another source here: lv reset {name}";
 
     private static void ReportSkipped(IVaultHost host, KeePassGroupContent content)
     {

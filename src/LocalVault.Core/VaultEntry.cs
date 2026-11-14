@@ -44,6 +44,11 @@ public sealed class VaultEntry
     private const string ReplacedAtField = "replacedAt";
     private const string HelloField = "hello";
     private const string VaultKeyField = "vaultKey";
+    private const string RefField = "ref";
+    private const string RefDatabaseField = "db";
+    private const string RefUuidField = "uuid";
+    private const string RefAttachmentField = "attachment";
+    private const string RefTitleField = "title";
 
     internal VaultEntry(JsonObject node)
     {
@@ -155,6 +160,44 @@ public sealed class VaultEntry
                 ssh[AgentField] is JsonValue agent && agent.TryGetValue<bool>(out var isAgent) && isAgent,
                 replacedAt is null ? null : DateTimeOffset.Parse(replacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
         }
+    }
+
+    public KeePassReference? Reference =>
+        Meta?[RefField] is JsonObject reference
+            ? new KeePassReference(
+                reference[RefDatabaseField]!.GetValue<string>(),
+                reference[RefUuidField]!.GetValue<string>(),
+                reference[RefAttachmentField]?.GetValue<string>(),
+                reference[RefTitleField]!.GetValue<string>())
+            : null;
+
+    public VaultEntry WithReference(KeePassReference? reference)
+    {
+        var copy = Clone();
+        copy.SetReference(reference);
+        return copy;
+    }
+
+    private void SetReference(KeePassReference? reference)
+    {
+        if (reference is null)
+        {
+            Meta?.Remove(RefField);
+            return;
+        }
+
+        var node = new JsonObject
+        {
+            [RefDatabaseField] = reference.DatabaseId,
+            [RefUuidField] = reference.Uuid,
+            [RefTitleField] = reference.Title,
+        };
+        if (reference.Attachment is not null)
+        {
+            node[RefAttachmentField] = reference.Attachment;
+        }
+
+        EnsureMeta()[RefField] = node;
     }
 
     public bool HasPrevious => Node[PreviousField] is not null;
@@ -582,6 +625,7 @@ public sealed class VaultEntry
             Node.Remove(PreviousField);
             Meta?.Remove(SshField);
             Meta?.Remove(HelloField);
+            Meta?.Remove(RefField);
         }
     }
 
@@ -696,6 +740,11 @@ public sealed class VaultEntry
         if (source.Meta?[HelloField] is null)
         {
             Meta?.Remove(HelloField);
+        }
+
+        if (source.Meta?[RefField] is null)
+        {
+            Meta?.Remove(RefField);
         }
 
         RemoveCredentialFields(Node);
@@ -818,6 +867,16 @@ public sealed class VaultEntry
                 && helloFields[VaultKeyField] is JsonValue vaultKey && vaultKey.TryGetValue<string>(out _)))
         {
             throw new VaultException($"Vault entry '{Name}' has Windows Hello data that is damaged.");
+        }
+
+        if (fields[RefField] is { } reference
+            && !(reference is JsonObject refFields
+                && refFields[RefDatabaseField] is JsonValue database && database.TryGetValue<string>(out _)
+                && refFields[RefUuidField] is JsonValue uuid && uuid.TryGetValue<string>(out var uuidText) && KeePassReference.IsUuid(uuidText)
+                && refFields[RefTitleField] is JsonValue title && title.TryGetValue<string>(out _)
+                && IsOptionalString(refFields[RefAttachmentField])))
+        {
+            throw new VaultException($"Vault entry '{Name}' has KeePass reference data that is damaged.");
         }
 
         if (fields[LocalField] is { } local && !(local is JsonValue localValue && localValue.TryGetValue<bool>(out _)))

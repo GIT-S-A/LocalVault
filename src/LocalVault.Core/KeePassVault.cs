@@ -124,6 +124,8 @@ public sealed class KeePassItem : IDisposable
 
     public bool IsRequiredHello { get; internal set; }
 
+    public KeePassReference? Reference { get; internal set; }
+
     internal byte[] Value { get; }
 
     internal byte[]? Previous { get; }
@@ -134,14 +136,18 @@ public sealed class KeePassItem : IDisposable
 
     internal IReadOnlyList<string> Urls { get; } = [];
 
-    public VaultEntry ToVaultEntry(DateTimeOffset created) => Kind switch
+    public VaultEntry ToVaultEntry(DateTimeOffset created)
     {
-        VaultEntry.FileKind when Ssh is not null => VaultEntry.NewSshKey(Name, Value, StoredPath!, Ssh, Previous ?? [], created),
-        VaultEntry.FileKind => VaultEntry.NewFile(Name, Value, StoredPath!, created),
-        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath, RequiredHosts, IsRequiredHello),
-        VaultEntry.CredentialKind => VaultEntry.NewCredential(Name, UserName, Value, Totp, Urls, created),
-        _ => VaultEntry.NewSecret(Name, Value, created),
-    };
+        var entry = Kind switch
+        {
+            VaultEntry.FileKind when Ssh is not null => VaultEntry.NewSshKey(Name, Value, StoredPath!, Ssh, Previous ?? [], created),
+            VaultEntry.FileKind => VaultEntry.NewFile(Name, Value, StoredPath!, created),
+            VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath, RequiredHosts, IsRequiredHello),
+            VaultEntry.CredentialKind => VaultEntry.NewCredential(Name, UserName, Value, Totp, Urls, created),
+            _ => VaultEntry.NewSecret(Name, Value, created),
+        };
+        return Reference is null ? entry : entry.WithReference(Reference);
+    }
 
     public void Dispose()
     {
@@ -331,7 +337,7 @@ public sealed partial class KeePassVault : IDisposable
             KeePassItem? item;
             try
             {
-                item = ReadItem(entry, name);
+                item = ReadItem(entry, name, skipped);
             }
             catch (Exception ex) when (ex is VaultException or FormatException)
             {
@@ -380,7 +386,8 @@ public sealed partial class KeePassVault : IDisposable
             target.CreateBackup(database);
         }
 
-        var value = entry.IsRequired ? [] : entry.GetValue();
+        var reference = personal ? entry.Reference : null;
+        var value = entry.IsRequired || reference is not null ? [] : entry.GetValue();
         try
         {
             var previousKind = target.Strings.ReadSafe(KindField);
@@ -389,6 +396,7 @@ public sealed partial class KeePassVault : IDisposable
                 RemoveCredentialStrings(target);
             }
 
+            target.Strings.Remove(RefField);
             target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
             target.Strings.Set(KindField, new ProtectedString(false, entry.IsRequired ? VaultEntry.RequiredKind : entry.Kind));
             SetOrRemove(target, PersonalField, personal ? "true" : null);
@@ -401,7 +409,11 @@ public sealed partial class KeePassVault : IDisposable
                 RemoveSshStrings(target);
             }
 
-            if (entry.IsCredential && !entry.IsRequired)
+            if (reference is not null)
+            {
+                WriteReference(target, entry, reference);
+            }
+            else if (entry.IsCredential && !entry.IsRequired)
             {
                 target.Strings.Remove(PathField);
                 WriteCredential(target, entry, value);
@@ -462,11 +474,13 @@ public sealed partial class KeePassVault : IDisposable
             target.CreateBackup(database);
         }
 
-        var value = entry.GetValue();
+        var reference = entry.Reference;
+        var value = reference is null ? entry.GetValue() : [];
         try
         {
             RemoveCredentialStrings(target);
             RemoveSshStrings(target);
+            target.Strings.Remove(RefField);
             target.Strings.Remove(PersonalField);
             target.Strings.Remove(PathField);
             target.Strings.Remove(PwDefs.PasswordField);
@@ -476,7 +490,11 @@ public sealed partial class KeePassVault : IDisposable
             SetOrRemove(target, HelloField, hello ? "true" : null);
             SetOrRemove(target, RequiredHelloField, entry.IsRequiredHello ? "true" : null);
             WriteDeclaration(target, entry);
-            if (entry.IsCredential)
+            if (reference is not null)
+            {
+                WriteReference(target, entry, reference);
+            }
+            else if (entry.IsCredential)
             {
                 WriteCredential(target, entry, value);
             }
@@ -923,11 +941,24 @@ public sealed partial class KeePassVault : IDisposable
         || entry.Strings.ReadSafe(PwDefs.UrlField).Length > 0
         || entry.Strings.GetKeys().Any(key => key == XcOtpField || key.StartsWith(TotpFieldPrefix, StringComparison.Ordinal));
 
-    private static KeePassItem? ReadItem(PwEntry entry, EntryName name)
+    private KeePassItem? ReadItem(PwEntry entry, EntryName name, List<string> skipped)
     {
-        var item = ReadContent(entry, name);
+        var source = entry;
+        KeePassReference? reference = null;
+        if (entry.Strings.ReadSafe(KindField) != VaultEntry.RequiredKind && HasReference(entry))
+        {
+            if (!IsSet(entry, PersonalField))
+            {
+                throw new VaultException("references are for personal values only");
+            }
+
+            (source, reference) = Resolve(entry);
+        }
+
+        var item = ReadContent(source, name, skipped);
         if (item is not null)
         {
+            item.Reference = reference;
             item.IsHello = item.Kind != VaultEntry.RequiredKind && IsSet(entry, HelloField);
             item.IsRequiredHello = item.Kind == VaultEntry.RequiredKind && IsSet(entry, RequiredHelloField);
             if (item.PersonalValue is { } personalValue)
@@ -941,7 +972,7 @@ public sealed partial class KeePassVault : IDisposable
 
     private static bool IsSet(PwEntry entry, string field) => entry.Strings.ReadSafe(field) == "true";
 
-    private static KeePassItem? ReadContent(PwEntry entry, EntryName name)
+    private KeePassItem? ReadContent(PwEntry entry, EntryName name, List<string> skipped)
     {
         var kind = entry.Strings.ReadSafe(KindField);
         if (kind == VaultEntry.CredentialKind || (kind.Length == 0 && LooksLikeCredential(entry)))
@@ -959,7 +990,7 @@ public sealed partial class KeePassVault : IDisposable
                 shape.Length == 0 ? null : shape,
                 requiredPath.Length == 0 ? null : StoredPathRules.Normalize(requiredPath),
                 ReadHosts(entry),
-                ReadPersonalValue(entry, name));
+                ReadPersonalValue(entry, name, skipped));
         }
 
         if (kind == VaultEntry.FileKind)
@@ -979,7 +1010,32 @@ public sealed partial class KeePassVault : IDisposable
         return new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
     }
 
-    private static KeePassItem? ReadPersonalValue(PwEntry entry, EntryName name)
+    private KeePassItem? ReadPersonalValue(PwEntry entry, EntryName name, List<string> skipped)
+    {
+        if (!HasReference(entry))
+        {
+            return ReadPersonalContent(entry, name);
+        }
+
+        try
+        {
+            var (resolved, reference) = Resolve(entry);
+            var item = ReadPersonalContent(resolved, name);
+            if (item is not null)
+            {
+                item.Reference = reference;
+            }
+
+            return item;
+        }
+        catch (Exception ex) when (ex is VaultException or FormatException)
+        {
+            skipped.Add($"{name.FullName}: your value not loaded ({ex.Message})");
+            return null;
+        }
+    }
+
+    private static KeePassItem? ReadPersonalContent(PwEntry entry, EntryName name)
     {
         var storedPath = entry.Strings.ReadSafe(PathField);
         if (storedPath.Length > 0 && entry.Binaries.Get(AttachmentName(storedPath)) is { } attachment)

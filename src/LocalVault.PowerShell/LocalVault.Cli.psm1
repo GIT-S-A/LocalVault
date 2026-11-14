@@ -7,7 +7,7 @@ $script:LvSyntax = @{
     list    = @{ Usage = 'lv list [<scope>]'; Min = 0; Max = 1; Options = @() }
     get     = @{ Usage = 'lv get <name>[#user|#totp|#url<n>] [--show]   (secrets without --show: into a pipe or a redirection only)'; Min = 1; Max = 1; Options = @('show') }
     clip    = @{ Usage = 'lv clip <name>[#user|#totp|#url<n>]'; Min = 1; Max = 1; Options = @() }
-    set     = @{ Usage = 'lv set <name> [--file <path> | --credential] [--local] [--hello]   or   lv set <name>#user|#password|#totp|#url<n>'; Min = 1; Max = 1; Options = @('file', 'local', 'credential', 'hello') }
+    set     = @{ Usage = 'lv set <name> [--file <path> | --credential] [--local] [--hello]   or   lv set <name>#user|#password|#totp|#url<n>   or   lv set <name> --ref <group/title>'; Min = 1; Max = 1; Options = @('file', 'local', 'credential', 'hello', 'ref') }
     require = @{ Usage = 'lv require <name> [--credential | --file <restore path, e.g. ~/.ssh/id_ed25519>] [--note <where to get it>] [--hello]'; Min = 1; Max = 1; Options = @('note', 'credential', 'file', 'hello') }
     mark    = @{ Usage = 'lv mark <name> shared|local|hello|nohello'; Min = 2; Max = 2; Options = @() }
     hello   = @{ Usage = 'lv hello   (Windows Hello key state on this PC)'; Min = 0; Max = 0; Options = @() }
@@ -25,7 +25,7 @@ $script:LvSyntax = @{
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--stdin <name>] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @('stdin') }
     'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] [--replace] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default]]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace', 'default') }
 }
-$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment', 'stdin')
+$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment', 'stdin', 'ref')
 $script:LvListOptions = @('host')
 $script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'hello', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared')
 $script:LvSubcommands = @{
@@ -122,6 +122,8 @@ Entries
   clip <name>                          copies a value to the clipboard for 20 s
   set <name> [--file <path>] [--local] asks for the value (or reads redirected input); --file carries a file
   set <name> --credential              asks for a user name, password, TOTP and URLs, kept as one entry
+  set <name> --ref <group/title>       takes your value from an entry of your personal store; lv save
+                                       writes a KeePass reference there, never the value
   <name>#user #totp #url #url2 ...     one part of a credential, for get, clip, set, env, run and templates;
                                        #totp is the current code
   require <name> [--note <text>]       declares a personal value each person sets; the store gets the declaration only
@@ -387,6 +389,11 @@ Details: Get-Help Invoke-LocalVault -Full
                 }
             }
             'set' {
+                if ($options.ContainsKey('ref')) {
+                    if ($options.Keys | Where-Object { $_ -in 'file', 'credential', 'local', 'hello' }) { & $fail 'lv set --ref takes no other option.' }
+                    Set-VaultEntry @vault -Name $words[0] -Reference $options.ref
+                    break
+                }
                 $sharing = if ($options['local']) { @{ Local = $true } } else { @{} }
                 $file = if ($options.ContainsKey('file')) { @{ FilePath = $options.file } } else { @{} }
                 if ($options['credential']) {

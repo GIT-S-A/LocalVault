@@ -60,6 +60,13 @@ Set-VaultEntry [-Name] <string> -Protection <VaultEntryProtection> [-Path <strin
  [-Confirm] [<CommonParameters>]
 ```
 
+### Reference
+
+```
+Set-VaultEntry [-Name] <string> -Reference <string> [-Path <string>] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
+```
+
 ## ALIASES
 
 This cmdlet has no aliases.
@@ -110,6 +117,15 @@ the profile. Only a required entry's own value can have a `~/` path.
 
 `Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
 defined, and `Import-VaultFromStore` fills it in on another machine.
+
+With the **Reference** parameter, a personal value comes from an entry of the personal store outside
+the `LocalVault` group, found by its group path and title, or by its title alone. The cmdlet opens
+the personal store, which asks for its password, and stores the value it reads. A secret takes the
+entry's password; a credential takes its user name, password, URL and TOTP; a file or SSH key takes
+its attachment. `Export-VaultToStore` then writes KeePass references to that entry, never the value,
+and `Import-VaultFromStore` takes a change made in KeePass without a question. A value changed on
+this machine stays on this machine, with a warning, and `Export-VaultToStore` refuses to save it.
+Shared entries can't be references.
 
 With the **Hello** parameter, the entry is also sealed with Windows Hello. Reading its value then
 asks for Windows Hello: face, fingerprint or PIN. One command asks once, whatever the number of
@@ -208,6 +224,15 @@ Set-VaultEntry -Name registry.token -Protection Dpapi
 ```powershell
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
 ```
+
+### Example 9 - Take a personal value from an entry of the personal store
+
+```powershell
+Set-VaultEntry -Name github.token -Reference Internet/GitHub
+```
+
+The required entry `github.token` takes the password of `Internet/GitHub` in the personal store.
+`Export-VaultToStore` writes `{REF:P@I:<uuid>}` to the personal store instead of the token.
 
 `Get-Secret` from the **Microsoft.PowerShell.SecretManagement** module returns a **SecureString**,
 which this cmdlet takes from the pipeline.
@@ -467,6 +492,29 @@ DontShow: false
 AcceptedValues:
 - Hello
 - Dpapi
+HelpMessage: ''
+```
+
+### -Reference
+
+Specifies the entry of the personal store that holds the personal value: its group path and title,
+such as `Internet/GitHub`, or its title alone when only one entry has it. Entries under the
+`LocalVault` group are not searched.
+
+```yaml
+Type: System.String
+DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: Reference
+  Position: Named
+  IsRequired: true
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
 HelpMessage: ''
 ```
 

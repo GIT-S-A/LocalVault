@@ -15,6 +15,7 @@ public abstract class SshKeyCmdletBase : VaultCmdletBase
     public const string FileSource = "file";
     public const string AgentSource = "agent";
     public const string MissingSource = "missing";
+    public const string ReferenceSource = "reference";
 
     protected string RepositoryName
     {
@@ -26,15 +27,16 @@ public abstract class SshKeyCmdletBase : VaultCmdletBase
         }
     }
 
-    protected string? OriginUrl => RepositoryOrigin.Of(Location)?.Url;
-
     protected static SshTools Tools => SshTools.Find(new PcSettings(PcSettings.DefaultPath));
 
     internal static VaultSshKeyInfo Describe(VaultEntry entry)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var ssh = entry.Ssh;
-        var source = entry.IsMissing ? MissingSource : ssh is { Agent: true } ? AgentSource : FileSource;
+        var source = entry.IsMissing ? MissingSource
+            : ssh is { Agent: true } ? AgentSource
+            : entry.Reference is not null ? ReferenceSource
+            : FileSource;
         return new VaultSshKeyInfo(
             entry.Name.FullName,
             entry.IsRequired ? PersonalSharing : SharedSharing,
@@ -45,20 +47,6 @@ public abstract class SshKeyCmdletBase : VaultCmdletBase
             entry.HasPrevious,
             SshKeyFiles.TargetOf(entry),
             ssh?.PublicKey);
-    }
-
-    internal void WriteKeyFile(VaultEntry entry, bool overwrite)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        var plan = SshKeyFiles.Write(entry, Location.Path, OriginUrl, overwrite, Now);
-        if (plan.Refused)
-        {
-            WriteWarning(SshKeyFiles.Describe(plan, entry.Name));
-        }
-        else if (plan.State == SshKeyWriteState.Write)
-        {
-            Say(SshKeyFiles.Describe(plan, entry.Name));
-        }
     }
 
     protected static VaultEntry RequireSshKey(VaultBody body, EntryName name)

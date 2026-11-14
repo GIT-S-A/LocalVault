@@ -299,9 +299,14 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     private const string RequiredSet = "Required";
     private const string CredentialSet = "Credential";
     private const string ProtectionSet = "Protection";
+    private const string ReferenceSet = "Reference";
 
     [Parameter(Mandatory = true, Position = 0)]
     public string Name { get; set; } = string.Empty;
+
+    [Parameter(Mandatory = true, ParameterSetName = ReferenceSet)]
+    [ValidateNotNullOrEmpty]
+    public string Reference { get; set; } = string.Empty;
 
     [Parameter(Mandatory = true, ParameterSetName = ProtectionSet)]
     public VaultEntryProtection Protection { get; set; }
@@ -367,6 +372,12 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         }
 
         var name = EntryName.Parse(Name);
+        if (ParameterSetName == ReferenceSet)
+        {
+            SetReference(name);
+            return;
+        }
+
         if (ParameterSetName is not SharingSet and not ProtectionSet)
         {
             RefuseSshKey(name);
@@ -461,6 +472,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
                 }
 
                 sealedWrite = Hello || body.Find(name) is { IsHello: true } or { IsRequiredHello: true };
+                entry = KeepReference(body, entry);
                 body.Set(sealedWrite ? Seal(body, entry) : entry);
                 if (Local)
                 {
@@ -469,6 +481,65 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
             },
             WriteOptions()));
         Say(sealedWrite ? $"Stored {name}, sealed by Windows Hello" : $"Stored {name}");
+        WarnReferenceChanged(existing);
+    }
+
+    private static VaultEntry KeepReference(VaultBody body, VaultEntry entry) =>
+        body.Find(entry.Name) is { Reference: { } reference } && entry.Reference is null ? entry.WithReference(reference) : entry;
+
+    private void WarnReferenceChanged(VaultEntry? before)
+    {
+        if (before?.Reference is not { } reference)
+        {
+            return;
+        }
+
+        var store = new StoreRegistry(StoreRegistry.DefaultPath).Personal?.Name ?? "personal";
+        WriteWarning(string.Join(
+            Environment.NewLine,
+            $"{before.Name} changed on this PC only.",
+            VaultSync.ReferenceOrigin(reference, store),
+            VaultSync.ReferenceAdvice(before.Name, reference)));
+    }
+
+    private void SetReference(EntryName name)
+    {
+        var declaration = ReadVault().Body.Find(name);
+        if (declaration is not { IsRequired: true })
+        {
+            throw new VaultException(
+                $"'{name}' is not a personal value: only a required entry's personal value can come from a KeePass reference. Declare it with lv require {name} first. Nothing was changed.");
+        }
+
+        if (declaration is { IsSshKeyShape: true, IsMissing: false })
+        {
+            throw new VaultException($"'{name}' already holds a key. Run lv reset {name} first, then set the reference. Nothing was changed.");
+        }
+
+        using var access = new StoreAccess(this, null);
+        var personal = access.Registry.Personal
+            ?? throw new VaultException("No personal store is defined on this PC: name one with lv store set <name> --personal. Nothing was changed.");
+        var (keePass, store) = access.For(new StoreResolution(Location.Path, new StoreReference(personal.Name, personal.Id), personal, null));
+        using var item = keePass.ReadReferenceTarget(Reference, declaration);
+        var value = item.ToVaultEntry(Now);
+        if (!ShouldProcess($"{name} in {Location.Path}", $"Take the value from KeePass entry '{item.Reference!.Title}'"))
+        {
+            return;
+        }
+
+        Report(VaultFile.Update(
+            body =>
+            {
+                var current = body.Find(name) ?? throw new VaultException($"No entry '{name}' in {Location.Path}.");
+                body.SetPersonalValue(name, current.IsRequiredHello && value.IsSealable ? Seal(body, value) : value);
+            },
+            WriteOptions()));
+        if (declaration.IsSshKeyShape && ReadVault().Body.Find(name) is { } key)
+        {
+            WriteKeyFile(key, overwrite: false);
+        }
+
+        Say($"{name} comes from KeePass entry '{item.Reference.Title}' in personal store '{store.Name}'. lv save writes the reference there, never the value.");
     }
 
     private static VaultEntry? PlainCurrent(VaultEntry? current, VaultEntry? plain) =>
@@ -553,7 +624,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
                 {
                     var current = body.Find(reference.Name);
                     var existing = PlainCurrent(current, existingPlain) ?? VaultEntry.NewCredential(reference.Name, null, [], null, [], now);
-                    var updated = existing.WithPart(reference, text, bytes, now);
+                    var updated = KeepReference(body, existing.WithPart(reference, text, bytes, now));
                     body.Set(Hello || current is { IsHello: true } or { IsRequiredHello: true } ? Seal(body, updated) : updated);
                     if (Local)
                     {
@@ -568,6 +639,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         }
 
         Say(text.Length == 0 ? $"Removed {reference}" : $"Stored {reference}");
+        WarnReferenceChanged(before.Find(reference.Name));
     }
 
     private void RefuseSshKey(EntryName name)
