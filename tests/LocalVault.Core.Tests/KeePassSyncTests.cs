@@ -438,7 +438,7 @@ public sealed class KeePassSyncTests : IDisposable
 
         using (var keePass = KeePassVault.Open(other, null, Master))
         {
-            Assert.Equal(1, KeePassSync.Copy(body, keePass, Group));
+            Assert.Equal(1, KeePassSync.Copy(body, keePass, Group).Written);
             keePass.Save();
         }
 

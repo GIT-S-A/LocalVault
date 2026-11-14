@@ -59,6 +59,20 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     protected abstract void Run();
 
+    protected override void EndProcessing()
+    {
+        hello?.Dispose();
+        hello = null;
+        base.EndProcessing();
+    }
+
+    protected override void StopProcessing()
+    {
+        hello?.Dispose();
+        hello = null;
+        base.StopProcessing();
+    }
+
     protected VaultSnapshot ReadVault(bool ignoreLegacy = false)
     {
         var snapshot = VaultFile.Read(ignoreLegacy);
@@ -104,6 +118,12 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
     bool IVaultHost.AskYesNo(string question) => Confirm(question);
 
     void IVaultHost.ReportWrite(VaultWriteResult result) => Report(result);
+
+    HelloEntries IVaultHost.Hello => HelloEntries;
+
+    private HelloEntries? hello;
+
+    internal HelloEntries HelloEntries => hello ??= new HelloEntries(HelloKey) { BeforePrompt = RequireHelloConsole, Warn = WriteWarning };
 
     private bool autoLoaded;
     private bool askedMissing;
@@ -573,8 +593,6 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     internal static IHelloKey HelloKey => HelloKeys.Current;
 
-    private bool warnedSoftwareKey;
-
     internal static void RequireHelloConsole()
     {
         if (HelloKey.NeedsConsole && !IsInteractive)
@@ -594,21 +612,10 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
             return body;
         }
 
-        foreach (var entry in sealedEntries)
-        {
-            if (HelloSeal.MissingReason(body, entry, HelloKey) is { } reason)
-            {
-                throw new HelloException($"'{entry.Name}' can't be read on this PC: {reason}. lv load restores it from the store.");
-            }
-        }
-
-        RequireHelloConsole();
         var copy = body.Clone();
-        var listed = string.Join(", ", sealedEntries.Select(e => e.Name.FullName));
-        using var session = HelloSeal.Open(body, HelloKey, $"LocalVault: {action} {listed} ({Location.Path})");
-        foreach (var entry in sealedEntries)
+        foreach (var plain in HelloEntries.Unseal(body, sealedEntries, action, Location.Path).Values)
         {
-            copy.Set(session.Unseal(entry));
+            copy.Set(plain);
         }
 
         return copy;
@@ -618,19 +625,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(plain);
-        if (HelloKey.State == HelloState.None)
-        {
-            RequireHelloConsole();
-        }
-
-        var result = HelloSeal.Seal(body, plain, HelloKey, $"LocalVault: create the Windows Hello key for {Environment.UserName}");
-        if (!warnedSoftwareKey && !HelloKey.IsHardware)
-        {
-            warnedSoftwareKey = true;
-            WriteWarning($"Windows Hello key is software-only (no TPM): {HelloKey.ProviderName}.");
-        }
-
-        return result;
+        return HelloEntries.Seal(body, plain);
     }
 
     protected VaultEntry FindEntry(VaultBody body, EntryName name) =>

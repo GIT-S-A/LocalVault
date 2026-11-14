@@ -253,3 +253,98 @@ Describe 'Windows Hello entries' {
         Get-VaultHelloStatus -Path $vault 6>&1 5>&1 4>&1 3>&1 2>&1 | Out-String | Should -Not -Match 'leak-check-value'
     }
 }
+
+Describe 'Windows Hello entries in exports and stores' {
+    BeforeEach {
+        $script:folder = Initialize-TestFolder
+        $script:vault = Join-Path $script:folder 'secrets.local.lv'
+        $script:key = Use-TestHelloKey
+        $script:passphrase = ConvertTo-TestSecret 'a long passphrase 1'
+    }
+    AfterEach {
+        Clear-TestHelloKey
+        $script:key.Dispose()
+        Clear-TestFolder $script:folder
+    }
+
+    It 'exports a Hello entry with one prompt and imports it sealed again' {
+        Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret 'one') -Hello 6>$null
+        Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret 'two') -Hello 6>$null
+        Set-VaultEntry -Path $vault -Name 'plain' -Value (ConvertTo-TestSecret 'three') 6>$null
+        $export = Join-Path $folder 'out.export'
+        $before = $key.Prompts
+
+        Export-Vault -Path $vault -Destination $export -Passphrase $passphrase 6>$null
+        $key.Prompts | Should -Be ($before + 1)
+        $key.Messages[-1] | Should -BeLike 'LocalVault: export a, b (*'
+
+        $other = Join-Path $folder 'other/secrets.local.lv'
+        $before = $key.Prompts
+        Import-Vault -Path $other -Source $export -Passphrase $passphrase 6>$null | Out-Null
+        $key.Prompts | Should -Be $before -Because 'sealing never prompts once the key exists'
+
+        $listed = Get-VaultEntryList -Path $other -WarningAction SilentlyContinue
+        ($listed | Where-Object Name -EQ 'a').Hello | Should -Be 'Ready'
+        ($listed | Where-Object Name -EQ 'plain').Hello | Should -Be ''
+        Get-VaultEntry -Path $other -Name 'b' -AsPlainText | Should -Be 'two'
+    }
+
+    It 'exports a vault without Hello entries without a prompt' {
+        Set-VaultEntry -Path $vault -Name 'plain' -Value (ConvertTo-TestSecret 'three') 6>$null
+
+        Export-Vault -Path $vault -Destination (Join-Path $folder 'out.export') -Passphrase $passphrase 6>$null
+
+        $key.Prompts | Should -Be 0
+    }
+
+    It 'refuses an import of Hello entries when Windows Hello is unavailable and writes nothing' {
+        Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret 'one') -Hello 6>$null
+        $export = Join-Path $folder 'out.export'
+        Export-Vault -Path $vault -Destination $export -Passphrase $passphrase 6>$null
+        $key.UnavailableReason = 'this is a remote desktop session'
+        $other = Join-Path $folder 'other/secrets.local.lv'
+
+        { Import-Vault -Path $other -Source $export -Passphrase $passphrase 6>$null } | Should -Throw '*remote desktop*'
+
+        Test-Path -LiteralPath $other | Should -BeFalse
+    }
+
+    It 'saves a Hello entry to a store and a teammate loads it sealed' {
+        $savedLocalAppData = $env:LOCALAPPDATA
+        $env:LOCALAPPDATA = Join-Path $folder 'appdata'
+        try {
+            $database = Join-Path $folder 'team.kdbx'
+            Initialize-TestKeePass -Path $database -Master 'pester master 1'
+            Register-VaultStore -Name 'team' -Target $database | Out-Null
+            $mine = Join-Path $folder 'me/proj/secrets.local.lv'
+            $theirs = Join-Path $folder 'them/proj/secrets.local.lv'
+            $script = Join-Path $folder 'run.ps1'
+            Set-Content -LiteralPath $script -Value @"
+`$ErrorActionPreference = 'Stop'
+Import-Module '$(Join-Path $env:LOCALVAULT_MODULE_PATH 'LocalVault.psd1')'
+`$key = [LocalVault.Core.SoftwareHelloKey]::new()
+[LocalVault.Core.HelloKeys].GetProperty('Override', [Reflection.BindingFlags]'NonPublic, Static').SetValue(`$null, `$key)
+`$value = [securestring]::new(); 'kp-hello'.ToCharArray() | ForEach-Object { `$value.AppendChar(`$_) }
+Set-VaultEntry -Path '$mine' -Name 'db' -Value `$value -Hello 6>`$null
+`$before = `$key.Prompts
+Export-VaultToStore -Path '$mine' 6>`$null | Out-Null
+"save prompts: `$(`$key.Prompts - `$before)"
+Compare-VaultWithStore -Path '$mine' 6>`$null | Out-Null
+"compare prompts: `$(`$key.Prompts - `$before)"
+Import-VaultFromStore -Path '$theirs' 6>`$null | Out-Null
+"theirs hello: `$((Get-VaultEntryList -Path '$theirs' -WarningAction SilentlyContinue).Hello)"
+"theirs value: `$(Get-VaultEntry -Path '$theirs' -Name 'db' -AsPlainText)"
+"@
+            $output = "pester master 1`npester master 1`npester master 1" | pwsh -NoProfile -NonInteractive -File $script 2>&1 | Out-String
+
+            $LASTEXITCODE | Should -Be 0 -Because $output
+            $output | Should -Match 'save prompts: 1'
+            $output | Should -Match 'compare prompts: 1'
+            $output | Should -Match 'theirs hello: Ready'
+            $output | Should -Match 'theirs value: kp-hello'
+        }
+        finally {
+            $env:LOCALAPPDATA = $savedLocalAppData
+        }
+    }
+}

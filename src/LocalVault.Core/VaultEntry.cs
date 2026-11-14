@@ -95,6 +95,12 @@ public sealed class VaultEntry
 
     public bool IsHello => StoredKind == HelloKind;
 
+    public bool IsSyncable => IsKnownKind || (IsHello && HelloInnerKind is SecretKind or FileKind or CredentialKind);
+
+    public bool IsSealable => !IsHello && (IsSecret || IsFile || IsCredential) && Ssh is null;
+
+    public bool IsHelloMarked => !IsHello && Meta?[HelloField] is JsonObject { Count: 0 };
+
     private string StoredKind => ReadString(Node, KindField);
 
     public string? HelloInnerKind => (Meta?[HelloField] as JsonObject)?[KindField]?.GetValue<string>();
@@ -579,6 +585,8 @@ public sealed class VaultEntry
         }
     }
 
+    internal void MarkHello() => EnsureMeta()[HelloField] = new JsonObject();
+
     internal void SetLocal(bool local)
     {
         if (local)
@@ -802,6 +810,7 @@ public sealed class VaultEntry
         }
 
         if (fields[HelloField] is { } hello
+            && !(hello is JsonObject { Count: 0 } && StoredKind != HelloKind)
             && !(hello is JsonObject helloFields
                 && helloFields[KindField] is JsonValue innerKind && innerKind.TryGetValue<string>(out var innerText)
                 && innerText is SecretKind or FileKind or CredentialKind

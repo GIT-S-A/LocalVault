@@ -350,7 +350,7 @@ public sealed class VaultBody
         return copy;
     }
 
-    public VaultBody ForExport()
+    public VaultBody ForExport(IReadOnlyCollection<EntryName>? hello = null)
     {
         var copy = WithoutLocalSettings();
         copy.root.Remove(KeePassRemovedField);
@@ -358,6 +358,10 @@ public sealed class VaultBody
         {
             entry.RemoveKeePassBase();
             entry.DropPersonalValue();
+            if (hello is not null && entry.IsSealable && !entry.IsRequired && hello.Contains(entry.Name))
+            {
+                entry.MarkHello();
+            }
         }
 
         return copy;

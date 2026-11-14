@@ -20,6 +20,8 @@ internal interface IVaultHost
     bool AskYesNo(string question);
 
     void ReportWrite(VaultWriteResult result);
+
+    HelloEntries Hello { get; }
 }
 
 internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposable
@@ -397,7 +399,8 @@ internal static class VaultSync
 
         var group = KeePassGroupPath.For(location);
         using var content = target.Vault.Read(group);
-        var result = KeePassSync.SavePersonal(body, content, target.Vault, group, target.WithDeclaration, name => overwrite(location, name));
+        var result = KeePassSync.SavePersonal(
+            body, content, target.Vault, group, target.WithDeclaration, name => overwrite(location, name), new HelloContext(host.Hello, location.Path));
         var guidesChanged = KeePassSync.MaintainGuides(target.Vault, location, origin);
         done.Add(new SavedToStore(location, result, target.Vault, target.Store, Mirror: false, guidesChanged));
     }
@@ -430,7 +433,7 @@ internal static class VaultSync
         var group = KeePassGroupPath.For(location);
         using var content = target.Vault.Read(group);
         ReportSkipped(host, content);
-        var result = KeePassSync.Save(body, content, target.Vault, group, overwrite, mirror, excludeRequired);
+        var result = KeePassSync.Save(body, content, target.Vault, group, overwrite, mirror, excludeRequired, new HelloContext(host.Hello, location.Path));
         var guidesChanged = KeePassSync.MaintainGuides(target.Vault, location, origin);
         return new SavedToStore(location, result, target.Vault, target.Store, mirror, guidesChanged);
     }
@@ -456,6 +459,11 @@ internal static class VaultSync
         foreach (var name in result.Overwritten)
         {
             host.Warn($"{label}: '{name}' had been changed directly in mirror '{saved.Target.Name}'; the vault's value replaced it.");
+        }
+
+        foreach (var missing in result.HelloMissing)
+        {
+            host.Warn($"{label}: '{missing.Name}' not saved to '{saved.Target.Name}': {missing.Reason}. lv load restores it from the store.");
         }
 
         if (saved.Personal)
@@ -523,7 +531,8 @@ internal static class VaultSync
                     c.State is KeePassSyncState.OnlyInKeePass or KeePassSyncState.ChangedInKeePass or KeePassSyncState.Conflict or KeePassSyncState.RemovedInKeePass
                     || (c.State == KeePassSyncState.Saved && snapshot.Body.Find(c.Name)?.KeePassBaseFor(content.DatabaseId) != c.VaultHash))
                 || snapshot.Body.KeePassRemovalsFor(content.DatabaseId).Any(r => content.Find(r.Name) is null)
-                || (personalContent is not null && (KeePassSync.PersonalLoadChanges(snapshot.Body, personalContent)
+                || KeePassSync.HelloLoadChanges(snapshot.Body, content, host.Hello)
+                || (personalContent is not null && (KeePassSync.PersonalLoadChanges(snapshot.Body, personalContent, host.Hello)
                     || comparisons.Any(c => c.State == KeePassSyncState.OnlyInKeePass && c.Kind == VaultEntry.RequiredKind)));
             var result = new KeePassLoadResult(0, 0, 0, 0);
             var personalResult = new KeePassLoadResult(0, 0, 0, 0);
@@ -538,10 +547,10 @@ internal static class VaultSync
                 host.ReportWrite(store.Update(
                     body =>
                     {
-                        result = KeePassSync.Load(body, content, name => answers.TryGetValue(name, out var yes) && yes == true, remove.Contains, host.Clock);
+                        result = KeePassSync.Load(body, content, name => answers.TryGetValue(name, out var yes) && yes == true, remove.Contains, host.Clock, host.Hello);
                         if (personalContent is not null)
                         {
-                            personalResult = KeePassSync.LoadPersonal(body, personalContent, name => personalAnswers.TryGetValue(name, out var yes) && yes, host.Clock);
+                            personalResult = KeePassSync.LoadPersonal(body, personalContent, name => personalAnswers.TryGetValue(name, out var yes) && yes, host.Clock, host.Hello);
                         }
                     },
                     new VaultUpdateOptions { AllowCreate = true }));
@@ -557,6 +566,9 @@ internal static class VaultSync
             {
                 host.Tell($"{RepositoryVaults.Label(location)} <- personal store '{personalTarget.Store.Name}': {personalResult.Added} of your values filled in, {personalResult.Taken} updated, {personalResult.Kept} kept as they were.");
             }
+
+            ReportHello(host, location, result, needsWrite ? null : snapshot.Body);
+            ReportHello(host, location, personalResult, null);
         }
 
         ThrowIfNothingReached(reached, undefined);
@@ -583,6 +595,24 @@ internal static class VaultSync
         if (reached == 0 && undefined.Count > 0)
         {
             throw new StoreNotDefinedException(string.Join(" ", undefined.Select(ex => ex.Message).Distinct()));
+        }
+    }
+
+    private static void ReportHello(IVaultHost host, VaultLocation location, KeePassLoadResult result, VaultBody? unchanged)
+    {
+        var label = RepositoryVaults.Label(location);
+        foreach (var skipped in result.NotSealed)
+        {
+            host.Warn($"{label}: '{skipped.Name}' not loaded: {skipped.Reason}. It needs Windows Hello on this PC.");
+        }
+
+        var stillMissing = unchanged is null
+            ? result.StillMissing
+            : unchanged.Entries.Where(e => e.IsHello && host.Hello.MissingReason(unchanged, e) is not null)
+                .Select(e => new HelloSkip(e.Name, host.Hello.MissingReason(unchanged, e)!)).ToList();
+        foreach (var missing in stillMissing)
+        {
+            host.Warn($"{label}: '{missing.Name}' can't be read on this PC ({missing.Reason}) and the store has no copy of it.");
         }
     }
 

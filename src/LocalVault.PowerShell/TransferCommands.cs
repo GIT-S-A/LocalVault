@@ -32,7 +32,9 @@ public sealed class ExportVaultCommand : VaultCmdletBase
         var now = Now;
         try
         {
-            VaultTransfer.Export(body, destination, passphrase, Overwrite, now);
+            var hello = body.Entries.Where(e => e.IsHello && !e.IsRequired).Select(e => e.Name).ToList();
+            var plain = Unseal(body, hello, "export");
+            VaultTransfer.Export(plain, destination, passphrase, Overwrite, now, hello);
         }
         finally
         {
@@ -109,7 +111,8 @@ public sealed class ImportVaultCommand : VaultCmdletBase
                 {
                     foreach (var entry in selected)
                     {
-                        body.Set(entry);
+                        var keepsHello = entry.IsHelloMarked || (body.Find(entry.Name)?.IsHello == true && !entry.IsRequired);
+                        body.Set(keepsHello && entry.IsSealable ? Seal(body, entry) : entry);
                     }
                 },
                 WriteOptions(snapshot.Fingerprint, ignoreLegacy)));

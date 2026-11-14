@@ -120,6 +120,10 @@ public sealed class KeePassItem : IDisposable
 
     public KeePassItem? PersonalValue { get; }
 
+    public bool IsHello { get; internal set; }
+
+    public bool IsRequiredHello { get; internal set; }
+
     internal byte[] Value { get; }
 
     internal byte[]? Previous { get; }
@@ -134,7 +138,7 @@ public sealed class KeePassItem : IDisposable
     {
         VaultEntry.FileKind when Ssh is not null => VaultEntry.NewSshKey(Name, Value, StoredPath!, Ssh, Previous ?? [], created),
         VaultEntry.FileKind => VaultEntry.NewFile(Name, Value, StoredPath!, created),
-        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath, RequiredHosts),
+        VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath, RequiredHosts, IsRequiredHello),
         VaultEntry.CredentialKind => VaultEntry.NewCredential(Name, UserName, Value, Totp, Urls, created),
         _ => VaultEntry.NewSecret(Name, Value, created),
     };
@@ -203,6 +207,8 @@ public sealed partial class KeePassVault : IDisposable
     public const string SshAgentField = "LocalVault.SshAgent";
     public const string ReplacedAtField = "LocalVault.ReplacedAt";
     public const string PersonalField = "LocalVault.Personal";
+    public const string HelloField = "LocalVault.Hello";
+    public const string RequiredHelloField = "LocalVault.RequiredHello";
     public const string AutoOpenGroup = "AutoOpen";
     public const string OriginKind = "origin";
     public const string InstallKind = "install";
@@ -346,9 +352,20 @@ public sealed partial class KeePassVault : IDisposable
         return new KeePassGroupContent(items, skipped, DatabaseId);
     }
 
-    public void Put(IReadOnlyList<string> groupPath, VaultEntry entry) => Put(groupPath, entry, personal: false);
+    public void Put(IReadOnlyList<string> groupPath, VaultEntry entry, bool hello = false) => Put(groupPath, entry, personal: false, hello);
 
-    private void Put(IReadOnlyList<string> groupPath, VaultEntry entry, bool personal)
+    public void SetHelloFlags(IReadOnlyList<string> groupPath, EntryName name, bool hello, bool requiredHello)
+    {
+        var target = FindEntry(FindGroup(groupPath, create: false) ?? throw new VaultException($"No KeePass group {KeePassGroupPath.Display(groupPath)}."), name)
+            ?? throw new VaultException($"No KeePass entry '{name}'.");
+        target.CreateBackup(database);
+        SetOrRemove(target, HelloField, hello ? "true" : null);
+        SetOrRemove(target, RequiredHelloField, requiredHello ? "true" : null);
+        target.Touch(true, false);
+        target.MaintainBackups(database);
+    }
+
+    private void Put(IReadOnlyList<string> groupPath, VaultEntry entry, bool personal, bool hello)
     {
         ArgumentNullException.ThrowIfNull(entry);
         var group = FindGroup(groupPath, create: true)!;
@@ -363,7 +380,7 @@ public sealed partial class KeePassVault : IDisposable
             target.CreateBackup(database);
         }
 
-        var value = entry.GetValue();
+        var value = entry.IsRequired ? [] : entry.GetValue();
         try
         {
             var previousKind = target.Strings.ReadSafe(KindField);
@@ -375,6 +392,8 @@ public sealed partial class KeePassVault : IDisposable
             target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
             target.Strings.Set(KindField, new ProtectedString(false, entry.IsRequired ? VaultEntry.RequiredKind : entry.Kind));
             SetOrRemove(target, PersonalField, personal ? "true" : null);
+            SetOrRemove(target, HelloField, hello && !entry.IsRequired ? "true" : null);
+            SetOrRemove(target, RequiredHelloField, entry.IsRequired && entry.IsRequiredHello ? "true" : null);
             if (!entry.IsRequired)
             {
                 target.Strings.Remove(ShapeField);
@@ -422,12 +441,12 @@ public sealed partial class KeePassVault : IDisposable
         target.MaintainBackups(database);
     }
 
-    public void PutPersonalValue(IReadOnlyList<string> groupPath, VaultEntry entry, bool withDeclaration)
+    public void PutPersonalValue(IReadOnlyList<string> groupPath, VaultEntry entry, bool withDeclaration, bool hello = false)
     {
         ArgumentNullException.ThrowIfNull(entry);
         if (!withDeclaration)
         {
-            Put(groupPath, entry.AsPersonalValue(), personal: true);
+            Put(groupPath, entry.AsPersonalValue(), personal: true, hello);
             return;
         }
 
@@ -454,6 +473,8 @@ public sealed partial class KeePassVault : IDisposable
             target.Binaries.Clear();
             target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
             target.Strings.Set(KindField, new ProtectedString(false, VaultEntry.RequiredKind));
+            SetOrRemove(target, HelloField, hello ? "true" : null);
+            SetOrRemove(target, RequiredHelloField, entry.IsRequiredHello ? "true" : null);
             WriteDeclaration(target, entry);
             if (entry.IsCredential)
             {
@@ -903,6 +924,24 @@ public sealed partial class KeePassVault : IDisposable
         || entry.Strings.GetKeys().Any(key => key == XcOtpField || key.StartsWith(TotpFieldPrefix, StringComparison.Ordinal));
 
     private static KeePassItem? ReadItem(PwEntry entry, EntryName name)
+    {
+        var item = ReadContent(entry, name);
+        if (item is not null)
+        {
+            item.IsHello = item.Kind != VaultEntry.RequiredKind && IsSet(entry, HelloField);
+            item.IsRequiredHello = item.Kind == VaultEntry.RequiredKind && IsSet(entry, RequiredHelloField);
+            if (item.PersonalValue is { } personalValue)
+            {
+                personalValue.IsHello = IsSet(entry, HelloField);
+            }
+        }
+
+        return item;
+    }
+
+    private static bool IsSet(PwEntry entry, string field) => entry.Strings.ReadSafe(field) == "true";
+
+    private static KeePassItem? ReadContent(PwEntry entry, EntryName name)
     {
         var kind = entry.Strings.ReadSafe(KindField);
         if (kind == VaultEntry.CredentialKind || (kind.Length == 0 && LooksLikeCredential(entry)))

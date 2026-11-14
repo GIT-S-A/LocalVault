@@ -469,7 +469,13 @@ public sealed class CopyVaultToStoreCommand : StoreSyncCmdletBase
 
         using var access = NewAccess();
         var keePass = access.Explicit(target);
-        var written = KeePassSync.Copy(body, keePass, Group);
+        var copied = KeePassSync.Copy(body, keePass, Group, new HelloContext(HelloEntries, Location.Path));
+        var written = copied.Written;
+        foreach (var missing in copied.HelloMissing)
+        {
+            WriteWarning($"'{missing.Name}' not copied: {missing.Reason}. lv load restores it from the store.");
+        }
+
         var guidesChanged = KeePassSync.MaintainGuides(keePass, Location, RepositoryOrigin.Of(Location));
         if (written > 0 || guidesChanged)
         {

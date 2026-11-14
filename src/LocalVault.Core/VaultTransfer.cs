@@ -12,11 +12,17 @@ public enum ImportSourceKind
 
 public static class VaultTransfer
 {
-    public static void Export(VaultBody body, string destination, ReadOnlySpan<char> passphrase, bool overwrite, DateTimeOffset now)
+    public static void Export(
+        VaultBody body, string destination, ReadOnlySpan<char> passphrase, bool overwrite, DateTimeOffset now, IReadOnlyCollection<EntryName>? hello = null)
     {
         ArgumentNullException.ThrowIfNull(body);
         Envelope.RequireStrongPassphrase(passphrase);
-        var transfer = body.ForExport();
+        if (body.Entries.FirstOrDefault(e => e.IsHello && !e.IsRequired) is { } stillSealed)
+        {
+            throw new HelloException($"'{stillSealed.Name}' is sealed by Windows Hello; unseal it before export.");
+        }
+
+        var transfer = body.ForExport(hello);
         transfer.Exported = now;
         transfer.LastExported = null;
         var plain = transfer.ToUtf8();
