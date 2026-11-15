@@ -117,7 +117,7 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         var target = Target is null ? null : Rooted(Target);
         if (!Project)
         {
-            var store = Registry.Register(name, target!, KeyFile is null ? null : Rooted(KeyFile), Default, UnlockWith, Mirror, Personal);
+            var store = WithDatabaseId(Registry.Register(name, target!, KeyFile is null ? null : Rooted(KeyFile), Default, UnlockWith, Mirror, Personal));
             SayPersonal(store);
             WriteObject(Describe(store, store.IsDefault));
             return;
@@ -143,6 +143,11 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         }
 
         ProjectFile.AddStore(project, name, target, Default, Mirror);
+        if ((target is null ? Registry.FindByName(name)?.Id : KdbxHeader.ReadDatabaseId(Environment.ExpandEnvironmentVariables(target))) is { } id)
+        {
+            ProjectFile.RecordStoreId(project, name, id);
+        }
+
         Say($"{file} now {(target is null ? "refers to" : "defines")} store '{name}'{(Mirror ? " as a mirror: every save also goes there" : string.Empty)}. Commit it.");
         if (target is null && Registry.FindByName(name) is null)
         {
@@ -150,6 +155,32 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         }
 
         WriteObject(ProjectEntries(project).Single(info => string.Equals(info.Name, name, StringComparison.OrdinalIgnoreCase)));
+    }
+
+    private StoreDefinition WithDatabaseId(StoreDefinition store)
+    {
+        var id = KdbxHeader.ReadDatabaseId(store.ExpandedTarget);
+        if (id is null && IsInteractive)
+        {
+            Say($"Opening store '{store.Name}' once to record its database id: it tells this database apart from any other file, even after a move or a rename.");
+            try
+            {
+                using var access = new StoreAccess(this, null);
+                id = access.Explicit(store).DatabaseId;
+            }
+            catch (VaultException ex)
+            {
+                WriteWarning($"Store '{store.Name}' is added, but its database id isn't recorded yet ({ex.Message}). It is recorded the first time the store opens.");
+            }
+        }
+
+        if (id is null)
+        {
+            return store;
+        }
+
+        Registry.RecordId(store, id);
+        return Registry.FindByName(store.Name)!;
     }
 }
 
@@ -507,9 +538,10 @@ public sealed class SetVaultProjectStoreCommand : VaultCmdletBase
             return;
         }
 
-        string id;
-        using (var access = new StoreAccess(this, null))
+        var id = store.Id ?? KdbxHeader.ReadDatabaseId(store.ExpandedTarget);
+        if (id is null)
         {
+            using var access = new StoreAccess(this, null);
             id = access.Explicit(store).DatabaseId;
         }
 

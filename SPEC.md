@@ -553,7 +553,7 @@ T97|x|cmdlets & CLI: `-Hello`, `-Protection`, `--hello`, `lv mark hello|nohello`
 T98|x|stores & transfer: `LocalVault.Hello`, diff w/o prompt, save prompt rule, load reseal & Missing restore, export/import + Pester|V146,V148,V150
 T99|x|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)|V149
 T100|x|help pages, `about_LocalVault` (Hello kind, one prompt per command, PIN always offered, biometric-only ⊥ enforceable via Passport KSP), SKILL.md, reference.md; beta17|C11,I.Hello
-T101|.|database id in KDBX 4 header; `lv store add` records id; `lv store use` w/o opening when id known|I.KeePass,V155
+T101|x|database id in KDBX 4 header; `lv store add` records id; `lv store use` w/o opening when id known|I.KeePass,V155
 
 ## §B Bugs
 

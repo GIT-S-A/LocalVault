@@ -2965,6 +2965,15 @@ must exist. A path that contains an environment variable is stored as typed and 
 it's used. When this PC still has a `keepass.json` from an earlier version, its databases are carried
 over into `stores.json` the first time; `keepass.json` itself isn't changed.
 
+The cmdlet also records the database's internal id, which stays the same when the file moves or is
+renamed. `Export-VaultToStore` writes the id into the unencrypted header of the database on every
+save, so the cmdlet reads it there without a password. A database that LocalVault has never saved is
+opened once to read the id. Without a console, the store is added without it, and the id is recorded
+the first time the store opens.
+
+Every opening checks the id. A file that another database replaced is refused until the store is
+added again.
+
 With **Project**, the store belongs to the project: the cmdlet writes it into `localvault.json` at the
 root of the git repository, so every clone has it. A project entry is either a name and a target,
 which every clone uses, or, with **Name** and no **Target**, a name only: a reference to the store
@@ -4274,12 +4283,14 @@ Stores named for single vaults are dropped. With **Path**, only that vault uses 
 primary store, and the other vaults keep theirs; it is meant for the rare vault that belongs
 elsewhere, such as a personal one.
 
-The store is looked up among the project's stores, then among this PC's stores. The cmdlet opens it
-once to read its internal id, which is the same in every copy of a `.kdbx` file whatever its local
-name or path, so it asks for its master password, or for the password of the store that unlocks it
-(see `Register-VaultStore -UnlockWith`). The id goes into
-`localvault.json` beside the name: on another PC, LocalVault finds the store by that id even when it
-has another name there, and refuses a database with another id.
+The store is looked up among the project's stores, then among this PC's stores. The cmdlet writes
+the store's internal id into `localvault.json` beside the name. The id is the same in every copy of a
+`.kdbx` file, whatever its local name or path. On another PC, LocalVault finds the store by that id
+even when it has another name there, and refuses a database with another id.
+
+The id comes from this PC's record of the store, made by `Register-VaultStore`, or from the header of
+the file. When neither holds it, the cmdlet opens the store and asks for its master password, or for
+the password of the store that unlocks it, as `Register-VaultStore -UnlockWith` describes.
 
 Commit the file: everyone then saves into and loads from the same store. The file holds no secret.
 

@@ -43,6 +43,15 @@ must exist. A path that contains an environment variable is stored as typed and 
 it's used. When this PC still has a `keepass.json` from an earlier version, its databases are carried
 over into `stores.json` the first time; `keepass.json` itself isn't changed.
 
+The cmdlet also records the database's internal id, which stays the same when the file moves or is
+renamed. `Export-VaultToStore` writes the id into the unencrypted header of the database on every
+save, so the cmdlet reads it there without a password. A database that LocalVault has never saved is
+opened once to read the id. Without a console, the store is added without it, and the id is recorded
+the first time the store opens.
+
+Every opening checks the id. A file that another database replaced is refused until the store is
+added again.
+
 With **Project**, the store belongs to the project: the cmdlet writes it into `localvault.json` at the
 root of the git repository, so every clone has it. A project entry is either a name and a target,
 which every clone uses, or, with **Name** and no **Target**, a name only: a reference to the store

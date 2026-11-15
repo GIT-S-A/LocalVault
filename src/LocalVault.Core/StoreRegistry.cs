@@ -194,11 +194,7 @@ public sealed class StoreRegistry
             ((JsonArray)root[StoresField]!).Add(node);
         }
 
-        if (!string.Equals(node[TargetField]?.GetValue<string>(), target, StringComparison.OrdinalIgnoreCase))
-        {
-            node.Remove(IdField);
-        }
-
+        node.Remove(IdField);
         node[TypeField] = type;
         node[TargetField] = target;
         if (keyFile is null)

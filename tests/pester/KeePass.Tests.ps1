@@ -44,6 +44,40 @@ Describe 'Shared entries in KeePass' {
         { Get-VaultEntry -Path $theirs -Name 'mine' } | Should -Throw
     }
 
+    It 'records the database id at add, from the file LocalVault saved, without a password' {
+        $registry = Join-Path $env:LOCALAPPDATA 'LocalVault/stores.json'
+        (Get-Content -Raw $registry | ConvertFrom-Json).stores[0].PSObject.Properties.Name | Should -Not -Contain 'id'
+        (& $runInChild "Export-VaultToStore -Path '$mine'").ExitCode | Should -Be 0
+        $id = [LocalVault.Core.KdbxHeader]::ReadDatabaseId($database)
+        $id | Should -Match '^[0-9A-F]{32}$'
+
+        Unregister-VaultStore -Name 'team' | Out-Null
+        Register-VaultStore -Name 'team' -Target $database | Out-Null
+        (Get-Content -Raw $registry | ConvertFrom-Json).stores[0].id | Should -Be $id
+
+        $repository = Join-Path $folder 'repo'
+        git init --quiet $repository
+        $used = & $runInChild "Set-Location '$repository'; lv store use team" ''
+        $used.ExitCode | Should -Be 0 -Because $used.Output
+        $used.Output | Should -Not -Match 'Opening store'
+        (Get-Content -Raw (Join-Path $repository 'localvault.json') | ConvertFrom-Json).default.id | Should -Be $id
+    }
+
+    It 'refuses a store whose file another database replaced, until the store is added again' {
+        (& $runInChild "Export-VaultToStore -Path '$mine'").ExitCode | Should -Be 0
+        Remove-Item -LiteralPath $database
+        Initialize-TestKeePass -Path $database -Master $script:master
+
+        $refused = & $runInChild "lv save --path '$mine'"
+        $refused.ExitCode | Should -Not -Be 0
+        $refused.Output | Should -Match "isn't the KeePass database that store 'team' was added with"
+        $refused.Output | Should -Match 'lv store add team'
+
+        Register-VaultStore -Name 'team' -Target $database | Out-Null
+        $saved = & $runInChild "lv save --path '$mine'"
+        $saved.ExitCode | Should -Be 0 -Because $saved.Output
+    }
+
     It 'takes a teammate change without asking and refuses an unresolved conflict' {
         (& $runInChild "Export-VaultToStore -Path '$mine'").ExitCode | Should -Be 0
         (& $runInChild "Import-VaultFromStore -Path '$theirs'").ExitCode | Should -Be 0

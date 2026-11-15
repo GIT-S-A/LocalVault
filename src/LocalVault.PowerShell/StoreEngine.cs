@@ -81,6 +81,14 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
 
     private (KeePassVault Vault, StoreDefinition Store) Remember(KeePassVault vault, StoreDefinition store)
     {
+        if (store.Id is { } recorded && !string.Equals(recorded, vault.DatabaseId, StringComparison.OrdinalIgnoreCase))
+        {
+            vault.Dispose();
+            throw new VaultException(
+                $"'{store.ExpandedTarget}' isn't the KeePass database that store '{store.Name}' was added with: another database replaced it. " +
+                $"If that is intended, add the store again: lv store add {store.Name} \"{store.Target}\"{(store.Scope == StoreScope.Project ? " --project" : string.Empty)}");
+        }
+
         var pair = (vault, store);
         opened[vault.DatabaseId] = pair;
         opened[TargetKey(store)] = pair;

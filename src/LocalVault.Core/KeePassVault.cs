@@ -623,6 +623,7 @@ public sealed partial class KeePassVault : IDisposable
             }
         }
 
+        database.PublicCustomData.SetString(DatabaseIdField, DatabaseId);
         database.Save(null);
     }
 

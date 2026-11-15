@@ -37,12 +37,14 @@ Stores named for single vaults are dropped. With **Path**, only that vault uses 
 primary store, and the other vaults keep theirs; it is meant for the rare vault that belongs
 elsewhere, such as a personal one.
 
-The store is looked up among the project's stores, then among this PC's stores. The cmdlet opens it
-once to read its internal id, which is the same in every copy of a `.kdbx` file whatever its local
-name or path, so it asks for its master password, or for the password of the store that unlocks it
-(see `Register-VaultStore -UnlockWith`). The id goes into
-`localvault.json` beside the name: on another PC, LocalVault finds the store by that id even when it
-has another name there, and refuses a database with another id.
+The store is looked up among the project's stores, then among this PC's stores. The cmdlet writes
+the store's internal id into `localvault.json` beside the name. The id is the same in every copy of a
+`.kdbx` file, whatever its local name or path. On another PC, LocalVault finds the store by that id
+even when it has another name there, and refuses a database with another id.
+
+The id comes from this PC's record of the store, made by `Register-VaultStore`, or from the header of
+the file. When neither holds it, the cmdlet opens the store and asks for its master password, or for
+the password of the store that unlocks it, as `Register-VaultStore -UnlockWith` describes.
 
 Commit the file: everyone then saves into and loads from the same store. The file holds no secret.
 
