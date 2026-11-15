@@ -57,7 +57,7 @@ public static class KeePassSync
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(keePass);
         var result = new List<KeePassComparison>();
-        foreach (var entry in body.Entries.Where(entry => entry.IsSyncable && !(excludeRequired && entry.IsRequired)))
+        foreach (var entry in body.Entries.Where(entry => entry.IsSyncable && !(excludeRequired && entry.IsRequired) && !keePass.IsUnresolved(entry.Name, personal: false)))
         {
             var item = Shared(keePass.Find(entry.Name));
             if (entry.IsLocal && !entry.IsRequired)
@@ -90,7 +90,7 @@ public static class KeePassSync
         ArgumentNullException.ThrowIfNull(keePass);
         var key = PersonalKey(keePass.DatabaseId);
         var result = new List<KeePassComparison>();
-        foreach (var entry in body.Entries.Where(entry => entry.IsRequired))
+        foreach (var entry in body.Entries.Where(entry => entry.IsRequired && !keePass.IsUnresolved(entry.Name, personal: true)))
         {
             var stored = PersonalValueOf(keePass.Find(entry.Name));
             if (entry.IsMissing)
@@ -126,16 +126,12 @@ public static class KeePassSync
         _ => null,
     };
 
-    public static bool SameTarget(KeePassReference? a, KeePassReference? b) =>
-        a is null || b is null
-            ? a is null && b is null
-            : string.Equals(a.DatabaseId, b.DatabaseId, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(a.Uuid, b.Uuid, StringComparison.OrdinalIgnoreCase)
-                && string.Equals(a.Attachment, b.Attachment, StringComparison.Ordinal);
-
-    private static bool ReferenceMoved(VaultBody body, KeePassItem? stored) =>
-        stored?.Reference is { } reference && body.Find(stored.Name) is { } entry
-            && (!SameTarget(entry.Reference, reference) || entry.Reference!.Title != reference.Title);
+    public static bool ReferenceMoved(VaultBody body, KeePassItem? stored)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+        return stored?.Reference is { } reference && body.Find(stored.Name) is { } entry
+            && (!reference.SameTarget(entry.Reference) || entry.Reference!.Title != reference.Title);
+    }
 
     private static KeePassItem? Shared(KeePassItem? item) => item is { IsUnderHome: true } && item is not { Ssh: not null, IsPersonal: false } ? null : item;
 
@@ -184,8 +180,72 @@ public static class KeePassSync
         var bases = new List<(EntryName, string)>();
         var dropped = new List<EntryName>();
         var overwritten = new List<EntryName>();
+        var refused = new List<ReferenceRefusal>();
+        var missingReferences = new List<HelloSkip>();
+        var handled = new HashSet<EntryName>();
+        foreach (var entry in body.Entries.Where(e => e.IsSyncable && !e.IsRequired && !e.IsLocal))
+        {
+            var link = keePass.LinkFor(entry.Name, personal: false);
+            if (entry.Reference is null && link is null)
+            {
+                continue;
+            }
+
+            handled.Add(entry.Name);
+            var local = entry.SyncHash();
+            var comparison = new KeePassComparison(entry.Name, entry.Kind, KeePassSyncState.ChangedInKeePass, local, null);
+            if (entry.Reference is { } reference && reference.SameTarget(link?.Reference))
+            {
+                if (mirror || entry.KeePassBaseFor(keePass.DatabaseId) == local)
+                {
+                    bases.Add((entry.Name, local));
+                }
+                else
+                {
+                    refused.Add(new ReferenceRefusal(entry.Name, reference));
+                }
+            }
+            else if (entry.Reference is not null || mirror || replaceConflict(entry.Name))
+            {
+                var (plainValue, notReadable) = entry.Reference is null ? UnsealForStore(body, [entry], hello, "save to the store") : (new Dictionary<EntryName, VaultEntry>(), []);
+                if (notReadable.Count > 0)
+                {
+                    missingReferences.AddRange(notReadable);
+                    continue;
+                }
+
+                target.Put(groupPath, PlainOf(entry, plainValue), entry.IsHello);
+                bases.Add((entry.Name, local));
+                if (link is null && keePass.Find(entry.Name) is null)
+                {
+                    added++;
+                }
+                else
+                {
+                    updated++;
+                }
+
+                if (mirror && link is not null && entry.Reference?.SameTarget(link.Reference) != true)
+                {
+                    overwritten.Add(entry.Name);
+                }
+            }
+            else
+            {
+                skipped.Add(comparison);
+            }
+        }
+
+        foreach (var removal in body.KeePassRemovalsFor(keePass.DatabaseId).Where(r => body.Find(r.Name) is null && keePass.LinkFor(r.Name, personal: false) is not null))
+        {
+            handled.Add(removal.Name);
+            target.Delete(groupPath, removal.Name);
+            dropped.Add(removal.Name);
+            deleted++;
+        }
+
         var plan = new List<(KeePassComparison Comparison, SaveStep Step)>();
-        foreach (var comparison in Compare(body, keePass, excludeRequired))
+        foreach (var comparison in Compare(body, keePass, excludeRequired).Where(c => !handled.Contains(c.Name)))
         {
             var exists = body.Find(comparison.Name) is not null;
             var step = mirror && comparison.State is KeePassSyncState.Conflict or KeePassSyncState.ChangedInKeePass or KeePassSyncState.RemovedInKeePass
@@ -261,8 +321,15 @@ public static class KeePassSync
             }
         }
 
-        dropped.AddRange(body.KeePassRemovalsFor(keePass.DatabaseId).Where(r => keePass.Find(r.Name) is null).Select(r => r.Name));
-        return new KeePassSaveResult(keePass.DatabaseId, added, updated, deleted, skipped, bases, dropped) { Overwritten = overwritten, HelloMissing = missing };
+        dropped.AddRange(body.KeePassRemovalsFor(keePass.DatabaseId)
+            .Where(r => keePass.Find(r.Name) is null && keePass.LinkFor(r.Name, personal: false) is null)
+            .Select(r => r.Name));
+        return new KeePassSaveResult(keePass.DatabaseId, added, updated, deleted, skipped, bases, dropped)
+        {
+            Overwritten = overwritten,
+            HelloMissing = [.. missing, .. missingReferences],
+            ReferenceRefused = refused,
+        };
     }
 
     private enum SaveStep
@@ -324,8 +391,9 @@ public static class KeePassSync
         var refused = new List<ReferenceRefusal>();
         var comparisons = ComparePersonal(body, keePass)
             .Select(c => (Comparison: c, Write: body.Find(c.Name)?.Reference is null
-                && (c.State is KeePassSyncState.New or KeePassSyncState.Changed
-                    || (c.State == KeePassSyncState.Conflict && replaceConflict(c.Name)))))
+                && (keePass.LinkFor(c.Name, personal: true) is null
+                    ? c.State is KeePassSyncState.New or KeePassSyncState.Changed || (c.State == KeePassSyncState.Conflict && replaceConflict(c.Name))
+                    : body.Find(c.Name) is { IsMissing: false } && replaceConflict(c.Name))))
             .ToList();
         var (plain, missing) = UnsealForStore(
             body, comparisons.Where(c => c.Write).Select(c => body.Find(c.Comparison.Name)!), hello, "save your value of");
@@ -337,14 +405,14 @@ public static class KeePassSync
             }
 
             var entry = body.Find(comparison.Name);
+            var link = keePass.LinkFor(comparison.Name, personal: true);
             if (entry?.Reference is { } reference)
             {
-                var stored = PersonalValueOf(keePass.Find(comparison.Name));
-                if (!SameTarget(stored?.Reference, reference))
+                if (!reference.SameTarget(link?.Reference))
                 {
                     target.PutPersonalValue(groupPath, entry, withDeclaration, entry.IsHello);
                     bases.Add((comparison.Name, comparison.VaultHash!));
-                    if (stored is null)
+                    if (link is null && PersonalValueOf(keePass.Find(comparison.Name)) is null)
                     {
                         added++;
                     }
@@ -353,17 +421,29 @@ public static class KeePassSync
                         updated++;
                     }
                 }
-                else if (comparison.State == KeePassSyncState.Saved)
+                else if (entry.KeePassBaseFor(key) == comparison.VaultHash)
                 {
                     bases.Add((comparison.Name, comparison.VaultHash!));
                 }
-                else if (comparison.State is KeePassSyncState.Changed or KeePassSyncState.Conflict)
+                else
                 {
                     refused.Add(new ReferenceRefusal(comparison.Name, reference));
                 }
+
+                continue;
+            }
+
+            if (link is not null && entry is { IsMissing: false })
+            {
+                if (write)
+                {
+                    target.PutPersonalValue(groupPath, PlainOf(entry, plain), withDeclaration, entry.IsHello);
+                    bases.Add((comparison.Name, comparison.VaultHash!));
+                    updated++;
+                }
                 else
                 {
-                    skipped.Add(comparison);
+                    skipped.Add(comparison with { State = KeePassSyncState.ChangedInKeePass });
                 }
 
                 continue;
@@ -410,7 +490,20 @@ public static class KeePassSync
             }
         }
 
-        dropped.AddRange(PersonalRemovals(body, key).Where(r => PersonalValueOf(keePass.Find(r.Name)) is null).Select(r => r.Name));
+        foreach (var removal in PersonalRemovals(body, key).Where(r => body.Find(r.Name) is null && keePass.LinkFor(r.Name, personal: true) is not null).ToList())
+        {
+            if (!withDeclaration)
+            {
+                target.Delete(groupPath, removal.Name);
+                deleted++;
+            }
+
+            dropped.Add(removal.Name);
+        }
+
+        dropped.AddRange(PersonalRemovals(body, key)
+            .Where(r => PersonalValueOf(keePass.Find(r.Name)) is null && keePass.LinkFor(r.Name, personal: true) is null)
+            .Select(r => r.Name));
         return new KeePassSaveResult(key, added, updated, deleted, skipped, bases, dropped)
         {
             Personal = true,
@@ -521,7 +614,8 @@ public static class KeePassSync
                     }
 
                     break;
-                case KeePassSyncState.Conflict when takeConflict(comparison.Name):
+                case KeePassSyncState.Conflict when item?.Reference is not null || takeConflict(comparison.Name):
+                case KeePassSyncState.Saved when ReferenceMoved(body, item):
                     if (Take(body, item!, keePass.DatabaseId, now, hello, notSealed))
                     {
                         taken++;

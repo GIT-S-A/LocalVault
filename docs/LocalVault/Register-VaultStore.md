@@ -21,8 +21,8 @@ Defines a store on this PC or in the project.
 
 ```
 Register-VaultStore [[-Target] <string>] [-Name <string>] [-KeyFile <string>] [-Default]
- [-UnlockWith <string>] [-Mirror] [-Personal] [-Project] [-Path <string>] [-WhatIf] [-Confirm]
- [<CommonParameters>]
+ [-UnlockWith <string>] [-Mirror] [-Personal] [-Project] [-Source] [-Path <string>] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -77,6 +77,12 @@ value of a required entry set on this PC there, in the same group as the vault's
 store, and `Import-VaultFromStore` fills in the required values from it. A PC has at most one
 personal store; naming another one replaces it. A personal store that is also a mirror holds a copy
 of the shared entries as well. **Personal** isn't accepted with **Project**.
+
+With **Project** and **Source**, the store becomes a source of shared values: a shared entry may take
+its value from one of its entries with `Set-VaultEntry -Reference -ReferenceStore`. The project file
+records the store's database id, which LocalVault reads from the database header or by opening the
+store once. A shared value comes only from the vault's store or from a source store. The personal
+store and a store that unlocks other stores are never a source, even when marked.
 
 With **UnlockWith**, the store is opened with a password kept in another store of this PC, usually
 your personal KeePass database: LocalVault opens that other store first, asking for its password,
@@ -285,6 +291,28 @@ HelpMessage: ''
 ### -Project
 
 Indicates that the store is defined in the project's `localvault.json` instead of on this PC.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
+### -Source
+
+Indicates that shared entries of the project may take their values from this store. Accepted with
+**Project** only.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter

@@ -21,7 +21,7 @@ Changes one setting of a store without defining it again.
 
 ```
 Set-VaultStore [-Name] <string> [-Mirror] [-UnlockWith <string>] [-NoUnlock] [-Default] [-Personal]
- [-Project] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-Project] [-Source] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -39,7 +39,9 @@ makes it an ordinary store again. **UnlockWith** names the store that keeps its 
 **NoUnlock** removes it. **Default** makes it the default store of this PC, or, with **Project**,
 the project's primary store. **Personal** makes it this PC's personal store, which keeps your own
 values of required entries, in place of any other; `-Personal:$false` leaves this PC without one.
-**Personal** isn't accepted with **Project**.
+**Personal** isn't accepted with **Project**. **Source**, with **Project** only, lets shared entries
+take their values from the store, as `Register-VaultStore` describes. `-Source:$false` stops it, and
+`Import-VaultFromStore` then skips the entries that still point there.
 
 Without **Project**, the cmdlet changes a store of this PC in `stores.json`. With **Project**, it
 changes an entry of the project's `localvault.json`; an unlocking store is personal and isn't
@@ -199,6 +201,28 @@ HelpMessage: ''
 ### -Project
 
 Indicates that the store is an entry of the project's `localvault.json`.
+
+```yaml
+Type: System.Management.Automation.SwitchParameter
+DefaultValue: False
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: (All)
+  Position: Named
+  IsRequired: false
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
+### -Source
+
+Indicates whether shared entries of the project may take their values from this store. Accepted with
+**Project** only.
 
 ```yaml
 Type: System.Management.Automation.SwitchParameter

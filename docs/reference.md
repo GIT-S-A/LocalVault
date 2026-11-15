@@ -2947,8 +2947,8 @@ Defines a store on this PC or in the project.
 
 ```text
 Register-VaultStore [[-Target] <string>] [-Name <string>] [-KeyFile <string>] [-Default]
- [-UnlockWith <string>] [-Mirror] [-Personal] [-Project] [-Path <string>] [-WhatIf] [-Confirm]
- [<CommonParameters>]
+ [-UnlockWith <string>] [-Mirror] [-Personal] [-Project] [-Source] [-Path <string>] [-WhatIf]
+ [-Confirm] [<CommonParameters>]
 ```
 
 ### Description
@@ -2999,6 +2999,12 @@ value of a required entry set on this PC there, in the same group as the vault's
 store, and `Import-VaultFromStore` fills in the required values from it. A PC has at most one
 personal store; naming another one replaces it. A personal store that is also a mirror holds a copy
 of the shared entries as well. **Personal** isn't accepted with **Project**.
+
+With **Project** and **Source**, the store becomes a source of shared values: a shared entry may take
+its value from one of its entries with `Set-VaultEntry -Reference -ReferenceStore`. The project file
+records the store's database id, which LocalVault reads from the database header or by opening the
+store once. A shared value comes only from the vault's store or from a source store. The personal
+store and a store that unlocks other stores are never a source, even when marked.
 
 With **UnlockWith**, the store is opened with a password kept in another store of this PC, usually
 your personal KeePass database: LocalVault opens that other store first, asking for its password,
@@ -3179,6 +3185,21 @@ Indicates that the store is this PC's personal store: it keeps your own values o
 #### -Project
 
 Indicates that the store is defined in the project's `localvault.json` instead of on this PC.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Source
+
+Indicates that shared entries of the project may take their values from this store. Accepted with
+**Project** only.
 
 | Property | Value |
 | --- | --- |
@@ -3794,8 +3815,8 @@ Set-VaultEntry [-Name] <string> -Protection <VaultEntryProtection> [-Path <strin
 ```
 
 ```text
-Set-VaultEntry [-Name] <string> -Reference <string> [-Path <string>] [-WhatIf] [-Confirm]
- [<CommonParameters>]
+Set-VaultEntry [-Name] <string> -Reference <string> [-ReferenceStore <string>] [-Path <string>]
+ [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### Description
@@ -3845,14 +3866,22 @@ the profile. Only a required entry's own value can have a `~/` path.
 `Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
 defined, and `Import-VaultFromStore` fills it in on another machine.
 
-With the **Reference** parameter, a personal value comes from an entry of the personal store outside
-the `LocalVault` group, found by its group path and title, or by its title alone. The cmdlet opens
-the personal store, which asks for its password, and stores the value it reads. A secret takes the
-entry's password; a credential takes its user name, password, URL and TOTP; a file or SSH key takes
-its attachment. `Export-VaultToStore` then writes KeePass references to that entry, never the value,
-and `Import-VaultFromStore` takes a change made in KeePass without a question. A value changed on
-this machine stays on this machine, with a warning, and `Export-VaultToStore` refuses to save it.
-Shared entries can't be references.
+With the **Reference** parameter, the value comes from a KeePass entry outside the `LocalVault`
+group, found by its group path and title, or by its title alone. The store searched is
+**ReferenceStore**, else the personal store for a required entry, else the vault's store. The cmdlet
+opens that store, which asks for its password, and stores the value it reads. A secret takes the
+entry's password; a credential takes its user name, password, URLs and TOTP; a file or SSH key takes
+its attachment.
+
+`Export-VaultToStore` then writes where the value comes from, a store id and an entry id, never the
+value. `Import-VaultFromStore` opens that store, reads the value, and takes a change made there
+without a question. A value changed on this machine stays on this machine, with a warning, and
+`Export-VaultToStore` refuses to save it.
+
+A required entry's value may come from any store defined on this machine. A shared entry's value
+may come only from the vault's store, or from a project store marked with `Register-VaultStore
+-Project -Source`. The personal store and a store that unlocks other stores are refused for shared
+entries. A teammate whose machine doesn't define the store gets a warning, and the rest loads.
 
 With the **Hello** parameter, the entry is also sealed with Windows Hello. Reading its value then
 asks for Windows Hello: face, fingerprint or PIN. One command asks once, whatever the number of
@@ -3952,6 +3981,9 @@ Set-VaultEntry -Name registry.token -Protection Dpapi
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
 ```
 
+`Get-Secret` from the **Microsoft.PowerShell.SecretManagement** module returns a **SecureString**,
+which this cmdlet takes from the pipeline.
+
 #### Example 9 - Take a personal value from an entry of the personal store
 
 ```powershell
@@ -3959,10 +3991,18 @@ Set-VaultEntry -Name github.token -Reference Internet/GitHub
 ```
 
 The required entry `github.token` takes the password of `Internet/GitHub` in the personal store.
-`Export-VaultToStore` writes `{REF:P@I:<uuid>}` to the personal store instead of the token.
+`Export-VaultToStore` writes the location of that entry to the personal store, not the token.
 
-`Get-Secret` from the **Microsoft.PowerShell.SecretManagement** module returns a **SecureString**,
-which this cmdlet takes from the pipeline.
+#### Example 10 - Take a shared value from a team database
+
+```powershell
+Register-VaultStore -Name it -Project -Source
+Set-VaultEntry -Name ad.admin -Reference AD/svc-mgmt -ReferenceStore it
+```
+
+The project store `it` becomes a source of shared values. The shared entry `ad.admin` takes the
+password of `AD/svc-mgmt` in `it`. Each teammate whose machine defines `it` gets it on
+`Import-VaultFromStore`.
 
 ### Parameters
 
@@ -4117,9 +4157,9 @@ the creation time and the sharing of the entry don't change.
 
 #### -Reference
 
-Specifies the entry of the personal store that holds the personal value: its group path and title,
-such as `Internet/GitHub`, or its title alone when only one entry has it. Entries under the
-`LocalVault` group are not searched.
+Specifies the KeePass entry that holds the value: its group path and title, such as
+`Internet/GitHub`, or its title alone when only one entry has it. Entries under the `LocalVault`
+group are not searched.
 
 | Property | Value |
 | --- | --- |
@@ -4127,6 +4167,22 @@ such as `Internet/GitHub`, or its title alone when only one entry has it. Entrie
 | Parameter sets | Reference |
 | Position | Named |
 | Required | Reference |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -ReferenceStore
+
+Specifies the name of the store to search for the **Reference** entry: a store of the project or of
+this machine. Without it, a required entry searches the personal store, and a shared entry the
+vault's store.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | Reference |
+| Position | Named |
+| Required | False |
 | Pipeline input | False |
 | Default value | None |
 | Aliases | None |
@@ -4629,7 +4685,7 @@ Changes one setting of a store without defining it again.
 
 ```text
 Set-VaultStore [-Name] <string> [-Mirror] [-UnlockWith <string>] [-NoUnlock] [-Default] [-Personal]
- [-Project] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+ [-Project] [-Source] [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ### Description
@@ -4643,7 +4699,9 @@ makes it an ordinary store again. **UnlockWith** names the store that keeps its 
 **NoUnlock** removes it. **Default** makes it the default store of this PC, or, with **Project**,
 the project's primary store. **Personal** makes it this PC's personal store, which keeps your own
 values of required entries, in place of any other; `-Personal:$false` leaves this PC without one.
-**Personal** isn't accepted with **Project**.
+**Personal** isn't accepted with **Project**. **Source**, with **Project** only, lets shared entries
+take their values from the store, as `Register-VaultStore` describes. `-Source:$false` stops it, and
+`Import-VaultFromStore` then skips the entries that still point there.
 
 Without **Project**, the cmdlet changes a store of this PC in `stores.json`. With **Project**, it
 changes an entry of the project's `localvault.json`; an unlocking store is personal and isn't
@@ -4776,6 +4834,21 @@ parameter, the setting stays.
 #### -Project
 
 Indicates that the store is an entry of the project's `localvault.json`.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Source
+
+Indicates whether shared entries of the project may take their values from this store. Accepted with
+**Project** only.
 
 | Property | Value |
 | --- | --- |

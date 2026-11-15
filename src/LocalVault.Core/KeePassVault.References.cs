@@ -5,17 +5,51 @@ using KeePassLib.Utility;
 
 namespace LocalVault.Core;
 
-public sealed partial record KeePassReference(string DatabaseId, string Uuid, string? Attachment, string Title)
+public sealed partial record KeePassReference(string StoreId, string ItemId, string? Attachment, string Title)
 {
+    public string Link => Attachment is null ? $"{StoreId}/{ItemId}" : $"{StoreId}/{ItemId}/{Attachment}";
+
+    public bool SameTarget(KeePassReference? other) =>
+        other is not null
+        && string.Equals(StoreId, other.StoreId, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(ItemId, other.ItemId, StringComparison.OrdinalIgnoreCase)
+        && string.Equals(Attachment, other.Attachment, StringComparison.Ordinal);
+
+    public static KeePassReference ParseLink(string link)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        var parts = link.Split('/', 3);
+        if (parts.Length < 2 || !IsUuid(parts[0]) || !IsUuid(parts[1]) || (parts.Length == 3 && parts[2].Length == 0))
+        {
+            throw new VaultException($"'{KeePassVault.RefField}' must be <store id>/<entry id>[/<attachment>], not '{link}'");
+        }
+
+        return new KeePassReference(parts[0], parts[1], parts.Length == 3 ? parts[2] : null, string.Empty);
+    }
+
     public static bool IsUuid(string text) => text is not null && UuidPattern().IsMatch(text);
 
     [GeneratedRegex("^[0-9A-Fa-f]{32}$")]
     private static partial Regex UuidPattern();
 }
 
+public sealed record KeePassLink(EntryName Name, KeePassReference Reference, string Shape, bool IsPersonal);
+
+public sealed record UnresolvedReference(EntryName Name, string Reason, bool IsPersonal);
+
+public sealed record ReferenceStore(KeePassVault Vault, string Name);
+
+public interface IReferenceStores
+{
+    // Throws VaultException whose message completes "<name> not loaded: ".
+    ReferenceStore Open(KeePassReference reference, bool personal);
+}
+
 public sealed partial class KeePassVault
 {
     public const string RefField = "LocalVault.Ref";
+    public const string RefShapeField = "LocalVault.RefShape";
+    public const string ReferenceKind = "reference";
     public const int MaxReferenceChain = 8;
     private const string ReferenceMarker = "{REF:";
 
@@ -25,18 +59,135 @@ public sealed partial class KeePassVault
 
     private static readonly string[] ReferenceFields = [PwDefs.PasswordField, PwDefs.UserNameField, PwDefs.UrlField];
 
-    private static bool HasReference(PwEntry entry) =>
-        entry.Strings.ReadSafe(RefField).Length > 0
-        || ReferenceFields.Any(key => entry.Strings.ReadSafe(key).Contains(ReferenceMarker, StringComparison.OrdinalIgnoreCase));
+    private static readonly string[] ReferenceShapes = [VaultEntry.SecretKind, VaultEntry.CredentialKind, VaultEntry.FileKind, VaultEntry.SshKeyShape];
 
-    private static string Placeholder(char field, string uuid) => $"{{REF:{field}@I:{uuid}}}";
+    private sealed record ReadContext(IReferenceStores? Stores, List<string> Skipped, List<KeePassLink> Links, List<UnresolvedReference> Unresolved);
 
-    private (PwEntry Resolved, KeePassReference Reference) Resolve(PwEntry entry)
+    private static bool HasFieldReference(PwEntry entry) =>
+        ReferenceFields.Any(key => entry.Strings.ReadSafe(key).Contains(ReferenceMarker, StringComparison.OrdinalIgnoreCase));
+
+    private static string FieldReferenceRefusal(EntryName name) =>
+        $"its KeePass entry uses a {{REF:}} field. Use lv set {name} --ref \"<group/title>\" instead.";
+
+    private static KeePassLink ReadLink(PwEntry entry, EntryName name, bool personal)
+    {
+        var shape = entry.Strings.ReadSafe(RefShapeField);
+        if (!ReferenceShapes.Contains(shape, StringComparer.Ordinal))
+        {
+            throw new VaultException($"'{RefShapeField}' must be {string.Join(", ", ReferenceShapes)}, not '{shape}'");
+        }
+
+        return new KeePassLink(name, KeePassReference.ParseLink(entry.Strings.ReadSafe(RefField)), shape, personal);
+    }
+
+    private static KeePassItem? ResolveLink(PwEntry entry, KeePassLink link, ReadContext context)
+    {
+        context.Links.Add(link);
+        if (context.Stores is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var store = context.Stores.Open(link.Reference, link.IsPersonal);
+            var storedPath = entry.Strings.ReadSafe(PathField);
+            var item = store.Vault.ReadReferenced(link, storedPath.Length == 0 ? null : storedPath, link.IsPersonal ? [] : ReadHosts(entry), store.Name);
+            item.IsHello = IsSet(entry, HelloField);
+            return item;
+        }
+        catch (Exception ex) when (ex is VaultException or FormatException)
+        {
+            context.Unresolved.Add(new UnresolvedReference(link.Name, ex.Message, link.IsPersonal));
+            return null;
+        }
+    }
+
+    public KeePassItem ReadReferenced(KeePassLink link, string? storedPath, IReadOnlyList<string> hosts, string storeName)
+    {
+        ArgumentNullException.ThrowIfNull(link);
+        var target = FindByUuid(link.Reference.ItemId)
+            ?? throw new VaultException($"the KeePass entry it points to is no longer in store '{storeName}' (deleted or in the recycle bin).");
+        var item = ReadTargetContent(target, link.Name, link.Shape, link.Reference.Attachment, storedPath, hosts, link.IsPersonal, storeName);
+        item.Reference = link.Reference with { Title = PathOf(target) };
+        return item;
+    }
+
+    public KeePassItem ReadReferenceTarget(string search, EntryName name, string? shape, string? storedPath, IReadOnlyList<string> hosts, bool personal, string storeName)
+    {
+        ArgumentNullException.ThrowIfNull(search);
+        ArgumentNullException.ThrowIfNull(hosts);
+        var target = FindReferenceTarget(search);
+        shape ??= LooksLikeCredential(target) ? VaultEntry.CredentialKind : VaultEntry.SecretKind;
+        string? attachment = null;
+        if (shape is VaultEntry.FileKind or VaultEntry.SshKeyShape)
+        {
+            if (storedPath is null)
+            {
+                throw new VaultException($"'{name}' has no path to restore the file to; declare it with a path before referencing a file.");
+            }
+
+            attachment = ChooseAttachment(target, AttachmentName(storedPath), shape == VaultEntry.SshKeyShape);
+        }
+
+        var item = ReadTargetContent(target, name, shape, attachment, storedPath, hosts, personal, storeName);
+        item.Reference = new KeePassReference(DatabaseId, target.Uuid.ToHexString(), attachment, PathOf(target));
+        return item;
+    }
+
+    private KeePassItem ReadTargetContent(
+        PwEntry target, EntryName name, string shape, string? attachment, string? storedPath, IReadOnlyList<string> hosts, bool personal, string storeName)
+    {
+        var title = PathOf(target);
+        if (shape is VaultEntry.FileKind or VaultEntry.SshKeyShape)
+        {
+            var sshKey = shape == VaultEntry.SshKeyShape;
+            if (storedPath is null)
+            {
+                throw new VaultException($"its KeePass entry has no '{PathField}'.");
+            }
+
+            var binary = attachment is null ? null : target.Binaries.Get(attachment);
+            if (binary is null)
+            {
+                throw new VaultException($"'{title}' in store '{storeName}' has no {(sshKey ? "private key" : "file")} '{attachment}'.");
+            }
+
+            var content = binary.ReadData();
+            if (!sshKey)
+            {
+                return new KeePassItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), content);
+            }
+
+            string publicKey;
+            try
+            {
+                publicKey = OpenSshPrivateKey.PublicKeyOf(content);
+            }
+            catch (VaultException)
+            {
+                Array.Clear(content);
+                throw new VaultException($"'{title}' in store '{storeName}' doesn't hold an OpenSSH private key (expected '{OpenSshPrivateKey.Armor}').");
+            }
+
+            _ = SshKeyPath.Validate(storedPath);
+            return new KeePassItem(name, StoredPathRules.Normalize(storedPath), content, null, new SshKeyInfo(SshKeyInfo.TypeOf(publicKey), publicKey, hosts), personal);
+        }
+
+        var resolved = WithFieldReferencesResolved(target);
+        if (resolved.Strings.ReadSafe(PwDefs.PasswordField).Length == 0)
+        {
+            throw new VaultException($"'{title}' in store '{storeName}' has no password.");
+        }
+
+        return shape == VaultEntry.CredentialKind
+            ? ReadCredential(resolved, name)
+            : new KeePassItem(name, VaultEntry.SecretKind, null, resolved.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
+    }
+
+    private PwEntry WithFieldReferencesResolved(PwEntry entry)
     {
         var resolved = entry.CloneDeep();
-        PwEntry? direct = null;
-        PwEntry? passwordSource = null;
-        string? attachment = null;
         foreach (var key in ReferenceFields.Where(entry.Strings.Exists))
         {
             var text = entry.Strings.ReadSafe(key);
@@ -48,65 +199,22 @@ public sealed partial class KeePassVault
             var match = WholeReference().Match(text);
             if (!match.Success)
             {
-                throw new VaultException($"field '{key}' holds a reference LocalVault can't read: only a whole-field {{REF:<T|U|P|A|N>@I:<uuid>}}");
+                throw new VaultException($"'{PathOf(entry)}' holds a {{REF:}} LocalVault can't read: only a whole-field {{REF:<T|U|P|A|N>@I:<uuid>}}.");
             }
 
-            var first = FindByUuid(match.Groups[2].Value);
-            var (value, last) = FollowField(char.ToUpperInvariant(match.Groups[1].Value[0]), match.Groups[2].Value);
+            var value = FollowField(char.ToUpperInvariant(match.Groups[1].Value[0]), match.Groups[2].Value);
             resolved.Strings.Set(key, new ProtectedString(entry.Strings.Get(key).IsProtected, value));
-            if (key == PwDefs.PasswordField)
-            {
-                direct = first;
-                passwordSource = last;
-            }
-
-            direct ??= first;
         }
 
-        var fileReference = entry.Strings.ReadSafe(RefField);
-        if (fileReference.Length > 0)
-        {
-            var separator = fileReference.IndexOf('/', StringComparison.Ordinal);
-            if (separator != 32 || !KeePassReference.IsUuid(fileReference[..separator]) || separator == fileReference.Length - 1)
-            {
-                throw new VaultException($"'{RefField}' must be <uuid>/<attachment name>, not '{fileReference}'");
-            }
-
-            attachment = fileReference[(separator + 1)..];
-            direct = FindByUuid(fileReference[..separator]);
-            var content = FollowAttachment(fileReference[..separator], attachment);
-            var storedPath = entry.Strings.ReadSafe(PathField);
-            if (storedPath.Length == 0)
-            {
-                throw new VaultException($"a file reference needs '{PathField}'");
-            }
-
-            resolved.Binaries.Clear();
-            resolved.Binaries.Set(AttachmentName(storedPath), new ProtectedBinary(true, content));
-        }
-
-        var credential = entry.Strings.Exists(PwDefs.UserNameField) || entry.Strings.Exists(PwDefs.UrlField);
-        if (passwordSource is not null && credential && ReadTotp(resolved) is null)
-        {
-            foreach (var key in passwordSource.Strings.GetKeys().Where(key => key == XcOtpField || key.StartsWith(TotpFieldPrefix, StringComparison.Ordinal)))
-            {
-                resolved.Strings.Set(key, passwordSource.Strings.Get(key));
-            }
-        }
-
-        if (direct is null)
-        {
-            throw new VaultException("no reference found");
-        }
-
-        return (resolved, new KeePassReference(DatabaseId, direct.Uuid.ToHexString(), attachment, PathOf(direct)));
+        return resolved;
     }
 
-    private (string Value, PwEntry Source) FollowField(char field, string uuid)
+    private string FollowField(char field, string uuid)
     {
         for (var hop = 0; hop < MaxReferenceChain; hop++)
         {
-            var target = FindByUuid(uuid);
+            var target = FindByUuid(uuid)
+                ?? throw new VaultException($"a {{REF:}} field points to entry {uuid.ToUpperInvariant()}, which is no longer in this database.");
             var value = field switch
             {
                 'T' => target.Strings.ReadSafe(PwDefs.TitleField),
@@ -120,51 +228,23 @@ public sealed partial class KeePassVault
             {
                 if (value.Contains(ReferenceMarker, StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new VaultException($"'{PathOf(target)}' holds a reference LocalVault can't read");
+                    throw new VaultException($"'{PathOf(target)}' holds a {{REF:}} LocalVault can't read.");
                 }
 
-                return (value, target);
+                return value;
             }
 
             field = char.ToUpperInvariant(next.Groups[1].Value[0]);
             uuid = next.Groups[2].Value;
         }
 
-        throw new VaultException($"reference chain longer than {MaxReferenceChain} entries");
+        throw new VaultException($"its {{REF:}} fields form a chain longer than {MaxReferenceChain} entries.");
     }
 
-    private byte[] FollowAttachment(string uuid, string attachment)
-    {
-        for (var hop = 0; hop < MaxReferenceChain; hop++)
-        {
-            var target = FindByUuid(uuid);
-            if (target.Binaries.Get(attachment) is { } binary)
-            {
-                return binary.ReadData();
-            }
-
-            var next = target.Strings.ReadSafe(RefField);
-            if (next.Length <= 33 || !KeePassReference.IsUuid(next[..32]) || next[32] != '/')
-            {
-                throw new VaultException($"'{PathOf(target)}' has no attachment '{attachment}'");
-            }
-
-            uuid = next[..32];
-            attachment = next[33..];
-        }
-
-        throw new VaultException($"reference chain longer than {MaxReferenceChain} entries");
-    }
-
-    private PwEntry FindByUuid(string uuid)
+    private PwEntry? FindByUuid(string uuid)
     {
         var entry = database.RootGroup.FindEntry(new PwUuid(MemUtil.HexStringToByteArray(uuid)), true);
-        if (entry is null || IsInRecycleBin(entry))
-        {
-            throw new VaultException($"reference to {uuid.ToUpperInvariant()} points to no entry in this database");
-        }
-
-        return entry;
+        return entry is null || IsInRecycleBin(entry) ? null : entry;
     }
 
     private bool IsInRecycleBin(PwEntry entry) =>
@@ -179,75 +259,44 @@ public sealed partial class KeePassVault
         return group.Length == 0 ? title : $"{group}/{title}";
     }
 
-    private void WriteReference(PwEntry target, VaultEntry entry, KeePassReference reference)
+    private static string ShapeOf(VaultEntry entry) =>
+        entry.Ssh is not null ? VaultEntry.SshKeyShape
+        : entry.IsFile ? VaultEntry.FileKind
+        : entry.IsCredential ? VaultEntry.CredentialKind
+        : VaultEntry.SecretKind;
+
+    private static void WriteReference(PwEntry target, VaultEntry entry, KeePassReference reference, bool writeHosts)
     {
-        foreach (var key in target.Strings.GetKeys().Where(IsCredentialString).ToList())
+        RemoveCredentialStrings(target);
+        target.Strings.Remove(PwDefs.PasswordField);
+        target.Binaries.Clear();
+        foreach (var field in new[] { SshTypeField, SshPublicKeyField, SshAgentField, ReplacedAtField })
         {
-            target.Strings.Remove(key);
+            target.Strings.Remove(field);
         }
 
-        target.Strings.Remove(RefField);
-        if (entry.IsFile)
+        target.Strings.Set(RefField, new ProtectedString(false, reference.Link));
+        target.Strings.Set(RefShapeField, new ProtectedString(false, ShapeOf(entry)));
+        SetOrRemove(target, PathField, entry.IsFile ? entry.StoredPath : null);
+        if (entry.Ssh is { } ssh)
         {
-            target.Strings.Remove(PwDefs.PasswordField);
-            target.Strings.Set(PathField, new ProtectedString(false, entry.StoredPath!));
-            target.Binaries.Clear();
-            target.Strings.Set(RefField, new ProtectedString(false, $"{reference.Uuid}/{reference.Attachment}"));
-            if (entry.Ssh is { } ssh)
+            target.Strings.Set(SshTypeField, new ProtectedString(false, ssh.Type));
+            target.Strings.Set(SshPublicKeyField, new ProtectedString(false, ssh.PublicKey));
+            if (writeHosts)
             {
-                target.Strings.Set(SshTypeField, new ProtectedString(false, ssh.Type));
-                target.Strings.Set(SshPublicKeyField, new ProtectedString(false, ssh.PublicKey));
+                SetOrRemove(target, SshHostsField, ssh.Hosts.Count > 0 ? string.Join('\n', ssh.Hosts) : null);
             }
-
-            return;
         }
-
-        target.Strings.Remove(PathField);
-        target.Strings.Set(PwDefs.PasswordField, new ProtectedString(true, Placeholder('P', reference.Uuid)));
-        if (entry.IsCredential)
+        else if (writeHosts)
         {
-            target.Strings.Set(PwDefs.UserNameField, new ProtectedString(database.MemoryProtection.ProtectUserName, Placeholder('U', reference.Uuid)));
-            target.Strings.Set(PwDefs.UrlField, new ProtectedString(database.MemoryProtection.ProtectUrl, Placeholder('A', reference.Uuid)));
+            target.Strings.Remove(SshHostsField);
         }
     }
 
-    public KeePassItem ReadReferenceTarget(string search, VaultEntry declaration)
+    private static void RemoveReferenceStrings(PwEntry target)
     {
-        ArgumentNullException.ThrowIfNull(search);
-        ArgumentNullException.ThrowIfNull(declaration);
-        var target = FindReferenceTarget(search);
-        var uuid = target.Uuid.ToHexString();
-        var probe = new PwEntry(false, false);
-        probe.Strings.Set(PwDefs.TitleField, new ProtectedString(false, declaration.Name.FullName));
-        if (declaration.IsFileShape || declaration.IsSshKeyShape)
-        {
-            var storedPath = declaration.RequiredPath
-                ?? throw new VaultException($"'{declaration.Name}' declares no path; declare it with a path before referencing a file.");
-            var attachment = ChooseAttachment(target, AttachmentName(storedPath), declaration.IsSshKeyShape);
-            probe.Strings.Set(PathField, new ProtectedString(false, storedPath));
-            probe.Strings.Set(RefField, new ProtectedString(false, $"{uuid}/{attachment}"));
-            if (declaration.IsSshKeyShape)
-            {
-                var publicKey = OpenSshPrivateKey.PublicKeyOf(target.Binaries.Get(attachment)!.ReadData());
-                probe.Strings.Set(SshTypeField, new ProtectedString(false, SshKeyInfo.TypeOf(publicKey)));
-                probe.Strings.Set(SshPublicKeyField, new ProtectedString(false, publicKey));
-            }
-        }
-        else
-        {
-            probe.Strings.Set(PwDefs.PasswordField, new ProtectedString(true, Placeholder('P', uuid)));
-            if (declaration.IsCredentialShape)
-            {
-                probe.Strings.Set(PwDefs.UserNameField, new ProtectedString(false, Placeholder('U', uuid)));
-                probe.Strings.Set(PwDefs.UrlField, new ProtectedString(false, Placeholder('A', uuid)));
-            }
-        }
-
-        var (resolved, reference) = Resolve(probe);
-        var item = ReadPersonalContent(resolved, declaration.Name)
-            ?? throw new VaultException($"KeePass entry '{PathOf(target)}' holds no value for '{declaration.Name}'.");
-        item.Reference = reference;
-        return item;
+        target.Strings.Remove(RefField);
+        target.Strings.Remove(RefShapeField);
     }
 
     private PwEntry FindReferenceTarget(string search)

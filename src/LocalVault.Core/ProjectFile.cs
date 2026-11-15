@@ -5,7 +5,7 @@ namespace LocalVault.Core;
 
 public sealed record ProjectVault(string Path, StoreReference? Store);
 
-public sealed record ProjectStoreEntry(string Name, string? Target, string? Id, bool IsMirror);
+public sealed record ProjectStoreEntry(string Name, string? Target, string? Id, bool IsMirror, bool IsSource = false);
 
 public sealed record ProjectTemplate(string Path, string Template, string Vault, string Display);
 
@@ -24,6 +24,7 @@ public static class ProjectFile
     private const string PathField = "path";
     private const string StoreField = "store";
     private const string MirrorField = "mirror";
+    private const string SourceField = "source";
     private const string TemplatesField = "templates";
     private const string TemplateField = "template";
     private const string VaultField = "vault";
@@ -46,7 +47,8 @@ public static class ProjectFile
                 node[NameField]!.GetValue<string>(),
                 node[TargetField]?.GetValue<string>(),
                 node[IdField]?.GetValue<string>(),
-                node[MirrorField]?.GetValue<bool>() == true)).ToList()
+                node[MirrorField]?.GetValue<bool>() == true,
+                node[SourceField]?.GetValue<bool>() == true)).ToList()
             : [];
 
     public static StoreReference? ReadDefault(VaultLocation location) =>
@@ -139,7 +141,7 @@ public static class ProjectFile
         return true;
     }
 
-    public static string AddStore(VaultLocation location, string name, string? target, bool makeDefault, bool mirror = false)
+    public static string AddStore(VaultLocation location, string name, string? target, bool makeDefault, bool mirror = false, bool source = false)
     {
         StoreTypes.RequireValidName(name);
         var type = target is null ? null : StoreTypes.Of(target);
@@ -177,6 +179,7 @@ public static class ProjectFile
             node.Remove(MirrorField);
         }
 
+        SetFlag(node, SourceField, source);
         if (makeDefault)
         {
             root[DefaultField] = new JsonObject { [StoreField] = node[NameField]!.GetValue<string>() };
@@ -186,7 +189,7 @@ public static class ProjectFile
         return path;
     }
 
-    public static void ChangeStore(VaultLocation location, string name, bool? mirror, bool makeDefault)
+    public static void ChangeStore(VaultLocation location, string name, bool? mirror, bool makeDefault, bool? source = null)
     {
         var path = RequirePath(location);
         var root = Read(location) ?? throw new VaultException($"No store named '{name}' in {FileName}.");
@@ -200,12 +203,29 @@ public static class ProjectFile
             node.Remove(MirrorField);
         }
 
+        if (source is { } isSource)
+        {
+            SetFlag(node, SourceField, isSource);
+        }
+
         if (makeDefault)
         {
             root[DefaultField] = new JsonObject { [StoreField] = node[NameField]!.GetValue<string>() };
         }
 
         Write(path, root);
+    }
+
+    private static void SetFlag(JsonObject node, string field, bool value)
+    {
+        if (value)
+        {
+            node[field] = true;
+        }
+        else
+        {
+            node.Remove(field);
+        }
     }
 
     public static bool RemoveStore(VaultLocation location, string name)

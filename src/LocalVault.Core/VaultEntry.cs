@@ -45,8 +45,8 @@ public sealed class VaultEntry
     private const string HelloField = "hello";
     private const string VaultKeyField = "vaultKey";
     private const string RefField = "ref";
-    private const string RefDatabaseField = "db";
-    private const string RefUuidField = "uuid";
+    private const string RefStoreField = "store";
+    private const string RefItemField = "item";
     private const string RefAttachmentField = "attachment";
     private const string RefTitleField = "title";
 
@@ -165,8 +165,8 @@ public sealed class VaultEntry
     public KeePassReference? Reference =>
         Meta?[RefField] is JsonObject reference
             ? new KeePassReference(
-                reference[RefDatabaseField]!.GetValue<string>(),
-                reference[RefUuidField]!.GetValue<string>(),
+                reference[RefStoreField]!.GetValue<string>(),
+                reference[RefItemField]!.GetValue<string>(),
                 reference[RefAttachmentField]?.GetValue<string>(),
                 reference[RefTitleField]!.GetValue<string>())
             : null;
@@ -188,8 +188,8 @@ public sealed class VaultEntry
 
         var node = new JsonObject
         {
-            [RefDatabaseField] = reference.DatabaseId,
-            [RefUuidField] = reference.Uuid,
+            [RefStoreField] = reference.StoreId,
+            [RefItemField] = reference.ItemId,
             [RefTitleField] = reference.Title,
         };
         if (reference.Attachment is not null)
@@ -871,8 +871,8 @@ public sealed class VaultEntry
 
         if (fields[RefField] is { } reference
             && !(reference is JsonObject refFields
-                && refFields[RefDatabaseField] is JsonValue database && database.TryGetValue<string>(out _)
-                && refFields[RefUuidField] is JsonValue uuid && uuid.TryGetValue<string>(out var uuidText) && KeePassReference.IsUuid(uuidText)
+                && refFields[RefStoreField] is JsonValue store && store.TryGetValue<string>(out var storeText) && KeePassReference.IsUuid(storeText)
+                && refFields[RefItemField] is JsonValue item && item.TryGetValue<string>(out var itemText) && KeePassReference.IsUuid(itemText)
                 && refFields[RefTitleField] is JsonValue title && title.TryGetValue<string>(out _)
                 && IsOptionalString(refFields[RefAttachmentField])))
         {

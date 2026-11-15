@@ -34,6 +34,13 @@ BeforeAll {
         finally { $database.Close() }
     }
 
+    function Get-TestDatabaseId {
+        param([Parameter(Mandatory)][string]$Path)
+        $database = Open-TestKeePass $Path
+        try { $database.RootGroup.Uuid.ToHexString() }
+        finally { $database.Close() }
+    }
+
     function Get-TestKeePassField {
         param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Title, [Parameter(Mandatory)][string]$Field)
         $database = Open-TestKeePass $Path
@@ -77,13 +84,20 @@ Describe 'Personal values taken from KeePass references' {
     It 'takes the value from the personal store and saves only a reference to it' {
         $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set os --ref Internet/GitHub"
         $set.ExitCode | Should -Be 0 -Because $set.Output
-        $set.Output | Should -Match "os comes from KeePass entry 'Internet/GitHub' in personal store 'mine'"
+        $set.Output | Should -Match "os comes from KeePass entry 'Internet/GitHub' in store 'mine'. lv save writes the reference to your personal store"
         Get-VaultEntry -Path $script:vault -Name 'os' -AsPlainText | Should -Be 'token-1'
 
         $saved = & $script:runInChild "Set-Location '$($script:repository)'; lv save" "$($script:master)`n$($script:master)"
         $saved.ExitCode | Should -Be 0 -Because $saved.Output
         $saved.Output | Should -Not -Match 'token-1'
-        Get-TestKeePassField -Path $script:personalDb -Title 'os' -Field 'Password' | Should -Be "{REF:P@I:$($script:uuid)}"
+        $link = "$(Get-TestDatabaseId $script:personalDb)/$($script:uuid)"
+        Get-TestKeePassField -Path $script:personalDb -Title 'os' -Field 'LocalVault.Ref' | Should -Be $link
+        Get-TestKeePassField -Path $script:personalDb -Title 'os' -Field 'Password' | Should -BeNullOrEmpty
+
+        Remove-Item -LiteralPath $script:vault
+        $loaded = & $script:runInChild "Set-Location '$($script:repository)'; lv load" "$($script:master)`n$($script:master)"
+        $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
+        Get-VaultEntry -Path $script:vault -Name 'os' -AsPlainText | Should -Be 'token-1'
     }
 
     It 'keeps a local change on this PC and refuses to save it' {
@@ -99,10 +113,45 @@ Describe 'Personal values taken from KeePass references' {
         $saved = & $script:runInChild "Set-Location '$($script:repository)'; lv save" "$($script:master)`n$($script:master)"
         $saved.ExitCode | Should -Be 0 -Because $saved.Output
         $saved.Output | Should -Match "your value of 'os' not saved: it changed on this PC only"
-        Get-TestKeePassField -Path $script:personalDb -Title 'os' -Field 'Password' | Should -Be "{REF:P@I:$($script:uuid)}"
+        Get-TestKeePassField -Path $script:personalDb -Title 'os' -Field 'LocalVault.Ref' | Should -Be "$(Get-TestDatabaseId $script:personalDb)/$($script:uuid)"
     }
 
-    It 'refuses a reference for a shared entry' {
-        { Set-VaultEntry -Path $script:vault -Name 'shared' -Reference 'GitHub' } | Should -Throw '*not a personal value*'
+    It 'refuses a shared value from a store that is not one of the project''s' {
+        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set shared --ref GitHub --ref-store mine" "$($script:master)`n$($script:master)"
+        $set.ExitCode | Should -Not -Be 0
+        $set.Output | Should -Match "store 'mine' isn't one of them"
+        Get-VaultEntry -Path $script:vault -Name 'shared' -AsPlainText | Should -Be 's-1'
+    }
+
+    It 'takes a shared value from a source store of the project, and a teammate loads it' {
+        $it = Join-Path $script:folder 'it.kdbx'
+        Initialize-TestKeePass -Path $it -Master $script:master
+        Add-TestKeePassEntry -Path $it -Group 'AD' -Title 'svc-mgmt' -Value 'ad-1' | Out-Null
+        $answers = (1..4 | ForEach-Object { $script:master }) -join "`n"
+        $setup = & $script:runInChild "Set-Location '$($script:repository)'; lv store add it '$it'; lv store add it --project --source; lv set adm --ref AD/svc-mgmt --ref-store it; lv save" $answers
+        $setup.ExitCode | Should -Be 0 -Because $setup.Output
+        Get-TestKeePassField -Path $script:projectDb -Title 'adm' -Field 'LocalVault.Kind' | Should -Be 'reference'
+        Get-TestKeePassField -Path $script:projectDb -Title 'adm' -Field 'Password' | Should -BeNullOrEmpty
+
+        Remove-Item -LiteralPath $script:vault
+        $loaded = & $script:runInChild "Set-Location '$($script:repository)'; lv load" $answers
+        $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
+        $loaded.Output | Should -Match "adm: value taken from 'AD/svc-mgmt' in store 'it'"
+        Get-VaultEntry -Path $script:vault -Name 'adm' -AsPlainText | Should -Be 'ad-1'
+    }
+
+    It 'skips a shared value whose store this PC does not define, and loads the rest' {
+        $it = Join-Path $script:folder 'it.kdbx'
+        Initialize-TestKeePass -Path $it -Master $script:master
+        Add-TestKeePassEntry -Path $it -Group 'AD' -Title 'svc-mgmt' -Value 'ad-1' | Out-Null
+        $answers = (1..4 | ForEach-Object { $script:master }) -join "`n"
+        (& $script:runInChild "Set-Location '$($script:repository)'; lv store add it '$it'; lv store add it --project --source; lv set adm --ref AD/svc-mgmt --ref-store it; lv save" $answers).ExitCode | Should -Be 0
+
+        Unregister-VaultStore -Name 'it' | Out-Null
+        Remove-Item -LiteralPath $script:vault
+        $loaded = & $script:runInChild "Set-Location '$($script:repository)'; lv load" $answers
+        $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
+        $loaded.Output | Should -Match "adm not loaded: its value is in store 'it', which isn't defined on this PC"
+        Get-VaultEntry -Path $script:vault -Name 'shared' -AsPlainText | Should -Be 's-1'
     }
 }

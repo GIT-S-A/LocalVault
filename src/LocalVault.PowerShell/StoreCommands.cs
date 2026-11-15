@@ -65,6 +65,22 @@ public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
         }
     }
 
+    internal const string SourceInProjectOnly =
+        "-Source marks a project store whose entries shared values may point to: give it with -Project (lv store add|set <name> --project --source).";
+
+    internal string OpenForId(StoreDefinition store)
+    {
+        ArgumentNullException.ThrowIfNull(store);
+        Say($"Opening store '{store.Name}' once to record its database id.");
+        using var access = new StoreAccess(this, null);
+        return access.Explicit(store).DatabaseId;
+    }
+
+    internal void SaySource(string name, bool source) =>
+        Say(source
+            ? $"Shared entries of this project may take their values from store '{name}': lv set <name> --ref \"<group/title>\" --ref-store {name}."
+            : $"Shared entries of this project no longer take values from store '{name}'; lv load skips the ones that still point there.");
+
     internal string Rooted(string path) =>
         path.Contains('%', StringComparison.Ordinal) ? path : GetUnresolvedProviderPathFromPSPath(path);
 }
@@ -101,8 +117,16 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
     [Parameter]
     public SwitchParameter Project { get; set; }
 
+    [Parameter]
+    public SwitchParameter Source { get; set; }
+
     protected override void Run()
     {
+        if (Source && !Project)
+        {
+            throw new VaultException(SourceInProjectOnly);
+        }
+
         if (Target is null && (!Project || Name is null))
         {
             throw new VaultException("Give a target, e.g. a .kdbx file. In a project, -Name alone refers to the store of that name defined on each PC.");
@@ -142,13 +166,25 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
             return;
         }
 
-        ProjectFile.AddStore(project, name, target, Default, Mirror);
-        if ((target is null ? Registry.FindByName(name)?.Id : KdbxHeader.ReadDatabaseId(Environment.ExpandEnvironmentVariables(target))) is { } id)
+        var id = target is null ? Registry.FindByName(name)?.Id : KdbxHeader.ReadDatabaseId(Environment.ExpandEnvironmentVariables(target));
+        if (Source)
+        {
+            id ??= OpenForId(target is null
+                ? Registry.FindByName(name) ?? throw new VaultException($"No store named '{name}' on this PC: add it with lv store add {name} <path to .kdbx> first, so that its database id is known. Nothing was changed.")
+                : new StoreDefinition(name, StoreTypes.KeePass, target, null, StoreScope.Project));
+        }
+
+        ProjectFile.AddStore(project, name, target, Default, Mirror, Source);
+        if (id is not null)
         {
             ProjectFile.RecordStoreId(project, name, id);
         }
 
         Say($"{file} now {(target is null ? "refers to" : "defines")} store '{name}'{(Mirror ? " as a mirror: every save also goes there" : string.Empty)}. Commit it.");
+        if (Source)
+        {
+            SaySource(name, source: true);
+        }
         if (target is null && Registry.FindByName(name) is null)
         {
             WriteWarning($"No store named '{name}' on this PC yet. Add it with lv store add {name} <target>.");
@@ -211,10 +247,19 @@ public sealed class SetVaultStoreCommand : StoreDefinitionCmdletBase
     [Parameter]
     public SwitchParameter Project { get; set; }
 
+    [Parameter]
+    public SwitchParameter Source { get; set; }
+
     protected override void Run()
     {
         bool? mirror = MyInvocation.BoundParameters.ContainsKey(nameof(Mirror)) ? Mirror.IsPresent : null;
         bool? personal = MyInvocation.BoundParameters.ContainsKey(nameof(Personal)) ? Personal.IsPresent : null;
+        bool? source = MyInvocation.BoundParameters.ContainsKey(nameof(Source)) ? Source.IsPresent : null;
+        if (source is not null && !Project)
+        {
+            throw new VaultException(SourceInProjectOnly);
+        }
+
         if (UnlockWith is not null && NoUnlock)
         {
             throw new VaultException("Give -UnlockWith or -NoUnlock, not both.");
@@ -248,8 +293,19 @@ public sealed class SetVaultStoreCommand : StoreDefinitionCmdletBase
             return;
         }
 
-        ProjectFile.ChangeStore(project, Name, mirror, Default);
+        if (source == true && ProjectFile.ReadEntries(project).FirstOrDefault(entry => string.Equals(entry.Name, Name, StringComparison.OrdinalIgnoreCase)) is { Id: null } entry)
+        {
+            var definition = StoreResolver.Find(Name, project, Registry)
+                ?? throw new VaultException($"No store named '{Name}' on this PC: add it with lv store add {Name} <path to .kdbx> first, so that its database id is known. Nothing was changed.");
+            ProjectFile.RecordStoreId(project, entry.Name, definition.Id ?? OpenForId(definition));
+        }
+
+        ProjectFile.ChangeStore(project, Name, mirror, Default, source);
         Say($"{ProjectFile.PathFor(project)} changed. Commit it.");
+        if (source is { } isSource)
+        {
+            SaySource(Name, isSource);
+        }
         WriteObject(ProjectEntries(project).Single(info => string.Equals(info.Name, Name, StringComparison.OrdinalIgnoreCase)));
     }
 }
@@ -413,7 +469,12 @@ public sealed class CompareVaultWithStoreCommand : StoreSyncCmdletBase
         var body = ReadVault().Body;
         using var access = NewAccess();
         var (keePass, _) = access.For(Location);
-        using var content = keePass.Read(Group);
+        using var content = keePass.Read(Group, new ReferenceStores(access, Location, keePass.DatabaseId));
+        foreach (var unresolved in content.Unresolved)
+        {
+            WriteWarning($"{unresolved.Name} not compared: {unresolved.Reason}");
+        }
+
         foreach (var title in content.Skipped)
         {
             WriteWarning($"KeePass entry left out: {title}");

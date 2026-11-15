@@ -176,20 +176,35 @@ public sealed class AutoOpenTarget(string title, string path, string? keyFile, c
 
 public sealed class KeePassGroupContent : IDisposable
 {
-    internal KeePassGroupContent(IReadOnlyList<KeePassItem> items, IReadOnlyList<string> skipped, string databaseId)
+    internal KeePassGroupContent(
+        IReadOnlyList<KeePassItem> items,
+        IReadOnlyList<string> skipped,
+        string databaseId,
+        IReadOnlyList<KeePassLink>? links = null,
+        IReadOnlyList<UnresolvedReference>? unresolved = null)
     {
         DatabaseId = databaseId;
         Items = items;
         Skipped = skipped;
+        Links = links ?? [];
+        Unresolved = unresolved ?? [];
     }
 
     public IReadOnlyList<KeePassItem> Items { get; }
 
     public IReadOnlyList<string> Skipped { get; }
 
+    public IReadOnlyList<KeePassLink> Links { get; }
+
+    public IReadOnlyList<UnresolvedReference> Unresolved { get; }
+
     public string DatabaseId { get; }
 
     public KeePassItem? Find(EntryName name) => Items.FirstOrDefault(item => item.Name.Equals(name));
+
+    public KeePassLink? LinkFor(EntryName name, bool personal) => Links.FirstOrDefault(link => link.Name.Equals(name) && link.IsPersonal == personal);
+
+    public bool IsUnresolved(EntryName name, bool personal) => Unresolved.Any(u => u.Name.Equals(name) && u.IsPersonal == personal);
 
     public void Dispose()
     {
@@ -304,7 +319,7 @@ public sealed partial class KeePassVault : IDisposable
 
     public string DatabaseId => database.RootGroup.Uuid.ToHexString();
 
-    public KeePassGroupContent Read(IReadOnlyList<string> groupPath)
+    public KeePassGroupContent Read(IReadOnlyList<string> groupPath, IReferenceStores? stores = null)
     {
         var group = FindGroup(groupPath, create: false);
         if (group is null)
@@ -314,6 +329,7 @@ public sealed partial class KeePassVault : IDisposable
 
         var items = new List<KeePassItem>();
         var skipped = new List<string>();
+        var context = new ReadContext(stores, skipped, [], []);
         var duplicates = group.Entries
             .GroupBy(entry => entry.Strings.ReadSafe(PwDefs.TitleField), EntryName.Comparer)
             .Where(sameTitle => sameTitle.Count() > 1)
@@ -337,7 +353,17 @@ public sealed partial class KeePassVault : IDisposable
             KeePassItem? item;
             try
             {
-                item = ReadItem(entry, name, skipped);
+                if (entry.Strings.ReadSafe(KindField) == ReferenceKind)
+                {
+                    if (ResolveLink(entry, ReadLink(entry, name, IsSet(entry, PersonalField)), context) is { } resolved)
+                    {
+                        items.Add(resolved);
+                    }
+
+                    continue;
+                }
+
+                item = ReadItem(entry, name, context);
             }
             catch (Exception ex) when (ex is VaultException or FormatException)
             {
@@ -355,7 +381,7 @@ public sealed partial class KeePassVault : IDisposable
             }
         }
 
-        return new KeePassGroupContent(items, skipped, DatabaseId);
+        return new KeePassGroupContent(items, skipped, DatabaseId, context.Links, context.Unresolved);
     }
 
     public void Put(IReadOnlyList<string> groupPath, VaultEntry entry, bool hello = false) => Put(groupPath, entry, personal: false, hello);
@@ -386,19 +412,19 @@ public sealed partial class KeePassVault : IDisposable
             target.CreateBackup(database);
         }
 
-        var reference = personal ? entry.Reference : null;
+        var reference = entry.IsRequired ? null : entry.Reference;
         var value = entry.IsRequired || reference is not null ? [] : entry.GetValue();
         try
         {
             var previousKind = target.Strings.ReadSafe(KindField);
-            if (previousKind == VaultEntry.CredentialKind)
+            if (previousKind is VaultEntry.CredentialKind or ReferenceKind)
             {
                 RemoveCredentialStrings(target);
             }
 
-            target.Strings.Remove(RefField);
+            RemoveReferenceStrings(target);
             target.Strings.Set(PwDefs.TitleField, new ProtectedString(database.MemoryProtection.ProtectTitle, entry.Name.FullName));
-            target.Strings.Set(KindField, new ProtectedString(false, entry.IsRequired ? VaultEntry.RequiredKind : entry.Kind));
+            target.Strings.Set(KindField, new ProtectedString(false, entry.IsRequired ? VaultEntry.RequiredKind : reference is not null ? ReferenceKind : entry.Kind));
             SetOrRemove(target, PersonalField, personal ? "true" : null);
             SetOrRemove(target, HelloField, hello && !entry.IsRequired ? "true" : null);
             SetOrRemove(target, RequiredHelloField, entry.IsRequired && entry.IsRequiredHello ? "true" : null);
@@ -411,7 +437,7 @@ public sealed partial class KeePassVault : IDisposable
 
             if (reference is not null)
             {
-                WriteReference(target, entry, reference);
+                WriteReference(target, entry, reference, writeHosts: !personal);
             }
             else if (entry.IsCredential && !entry.IsRequired)
             {
@@ -480,7 +506,7 @@ public sealed partial class KeePassVault : IDisposable
         {
             RemoveCredentialStrings(target);
             RemoveSshStrings(target);
-            target.Strings.Remove(RefField);
+            RemoveReferenceStrings(target);
             target.Strings.Remove(PersonalField);
             target.Strings.Remove(PathField);
             target.Strings.Remove(PwDefs.PasswordField);
@@ -492,7 +518,7 @@ public sealed partial class KeePassVault : IDisposable
             WriteDeclaration(target, entry);
             if (reference is not null)
             {
-                WriteReference(target, entry, reference);
+                WriteReference(target, entry, reference, writeHosts: false);
             }
             else if (entry.IsCredential)
             {
@@ -942,24 +968,16 @@ public sealed partial class KeePassVault : IDisposable
         || entry.Strings.ReadSafe(PwDefs.UrlField).Length > 0
         || entry.Strings.GetKeys().Any(key => key == XcOtpField || key.StartsWith(TotpFieldPrefix, StringComparison.Ordinal));
 
-    private KeePassItem? ReadItem(PwEntry entry, EntryName name, List<string> skipped)
+    private static KeePassItem? ReadItem(PwEntry entry, EntryName name, ReadContext context)
     {
-        var source = entry;
-        KeePassReference? reference = null;
-        if (entry.Strings.ReadSafe(KindField) != VaultEntry.RequiredKind && HasReference(entry))
+        if (entry.Strings.ReadSafe(KindField) != VaultEntry.RequiredKind && HasFieldReference(entry))
         {
-            if (!IsSet(entry, PersonalField))
-            {
-                throw new VaultException("references are for personal values only");
-            }
-
-            (source, reference) = Resolve(entry);
+            throw new VaultException(FieldReferenceRefusal(name));
         }
 
-        var item = ReadContent(source, name, skipped);
+        var item = ReadContent(entry, name, context);
         if (item is not null)
         {
-            item.Reference = reference;
             item.IsHello = item.Kind != VaultEntry.RequiredKind && IsSet(entry, HelloField);
             item.IsRequiredHello = item.Kind == VaultEntry.RequiredKind && IsSet(entry, RequiredHelloField);
             if (item.PersonalValue is { } personalValue)
@@ -973,7 +991,7 @@ public sealed partial class KeePassVault : IDisposable
 
     private static bool IsSet(PwEntry entry, string field) => entry.Strings.ReadSafe(field) == "true";
 
-    private KeePassItem? ReadContent(PwEntry entry, EntryName name, List<string> skipped)
+    private static KeePassItem? ReadContent(PwEntry entry, EntryName name, ReadContext context)
     {
         var kind = entry.Strings.ReadSafe(KindField);
         if (kind == VaultEntry.CredentialKind || (kind.Length == 0 && LooksLikeCredential(entry)))
@@ -991,7 +1009,7 @@ public sealed partial class KeePassVault : IDisposable
                 shape.Length == 0 ? null : shape,
                 requiredPath.Length == 0 ? null : StoredPathRules.Normalize(requiredPath),
                 ReadHosts(entry),
-                ReadPersonalValue(entry, name, skipped));
+                ReadPersonalValue(entry, name, context));
         }
 
         if (kind == VaultEntry.FileKind)
@@ -1011,29 +1029,28 @@ public sealed partial class KeePassVault : IDisposable
         return new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
     }
 
-    private KeePassItem? ReadPersonalValue(PwEntry entry, EntryName name, List<string> skipped)
+    private static KeePassItem? ReadPersonalValue(PwEntry entry, EntryName name, ReadContext context)
     {
-        if (!HasReference(entry))
+        if (entry.Strings.ReadSafe(RefField).Length > 0)
         {
-            return ReadPersonalContent(entry, name);
-        }
-
-        try
-        {
-            var (resolved, reference) = Resolve(entry);
-            var item = ReadPersonalContent(resolved, name);
-            if (item is not null)
+            try
             {
-                item.Reference = reference;
+                return ResolveLink(entry, ReadLink(entry, name, personal: true), context);
             }
-
-            return item;
+            catch (VaultException ex)
+            {
+                context.Skipped.Add($"{name.FullName}: your value not loaded ({ex.Message})");
+                return null;
+            }
         }
-        catch (Exception ex) when (ex is VaultException or FormatException)
+
+        if (HasFieldReference(entry))
         {
-            skipped.Add($"{name.FullName}: your value not loaded ({ex.Message})");
+            context.Skipped.Add($"{name.FullName}: your value not loaded ({FieldReferenceRefusal(name)})");
             return null;
         }
+
+        return ReadPersonalContent(entry, name);
     }
 
     private static KeePassItem? ReadPersonalContent(PwEntry entry, EntryName name)

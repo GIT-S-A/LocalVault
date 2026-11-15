@@ -237,6 +237,63 @@ internal sealed class PersonalStore(IVaultHost host, StoreAccess access)
             && string.Equals(Path.GetFullPath(definition.ExpandedTarget), Path.GetFullPath(store.ExpandedTarget), StringComparison.OrdinalIgnoreCase));
 }
 
+internal sealed class ReferenceStores(StoreAccess access, VaultLocation location, string? vaultStoreId) : IReferenceStores
+{
+    private readonly Dictionary<string, string> failures = new(StringComparer.OrdinalIgnoreCase);
+
+    public ReferenceStore Open(KeePassReference reference, bool personal)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        var id = reference.StoreId;
+        var (definition, name) = Find(id);
+        if (definition is null)
+        {
+            throw new VaultException(name is null
+                ? $"its value is in a KeePass database this PC doesn't know (id {id})."
+                : $"its value is in store '{name}', which isn't defined on this PC. Add it with lv store add {name} <path to .kdbx>.");
+        }
+
+        if (!personal && !MayHoldSharedValues(id))
+        {
+            throw new VaultException($"shared values can only come from the project's own stores, and store '{definition.Name}' isn't one of them.");
+        }
+
+        if (failures.TryGetValue(id, out var failure))
+        {
+            throw new VaultException(failure);
+        }
+
+        try
+        {
+            var (vault, store) = access.For(new StoreResolution(RepositoryVaults.Label(location), new StoreReference(definition.Name, id), definition, null));
+            return new ReferenceStore(vault, store.Name);
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            failures[id] = $"store '{definition.Name}' couldn't be opened: {ex.Message}";
+            throw new VaultException(failures[id], ex);
+        }
+    }
+
+    public bool MayHoldSharedValues(string id)
+    {
+        var registry = access.Registry;
+        var forbidden = registry.Load()
+            .Where(store => store.IsPersonal || registry.Load().Any(other => string.Equals(other.UnlockWith, store.Name, StringComparison.OrdinalIgnoreCase)))
+            .Any(store => string.Equals(store.Id, id, StringComparison.OrdinalIgnoreCase));
+        var allowed = string.Equals(id, vaultStoreId, StringComparison.OrdinalIgnoreCase)
+            || ProjectFile.ReadEntries(location).Any(entry => entry.IsSource && string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase));
+        return allowed && !forbidden;
+    }
+
+    public (StoreDefinition? Definition, string? Name) Find(string id)
+    {
+        var project = ProjectFile.ReadEntries(location).FirstOrDefault(entry => string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase));
+        var definition = StoreResolver.Find(new StoreReference(project?.Name, id), location, access.Registry);
+        return (definition, definition?.Name ?? project?.Name);
+    }
+}
+
 internal static class RepositoryVaults
 {
     public static IReadOnlyList<VaultLocation> Of(VaultLocation current, bool onlyCurrent)
@@ -476,7 +533,7 @@ internal static class VaultSync
 
         foreach (var refused in result.ReferenceRefused)
         {
-            host.Warn($"{label}: your value of '{refused.Name}' not saved: it changed on this PC only. {ReferenceOrigin(refused.Reference, saved.Target.Name)} {ReferenceAdvice(refused.Name, refused.Reference)}");
+            host.Warn($"{label}: {(saved.Personal ? "your value of " : string.Empty)}'{refused.Name}' not saved: it changed on this PC only. {ReferenceOrigin(refused.Reference, StoreNameOf(saved.Location, refused.Reference.StoreId))} {ReferenceAdvice(refused.Name, refused.Reference, saved.Personal)}");
         }
 
         if (saved.Personal)
@@ -518,11 +575,19 @@ internal static class VaultSync
             var store = RepositoryVaults.StoreFor(location);
             var snapshot = store.Read();
             var group = KeePassGroupPath.For(location);
-            using var content = keePass.Read(group);
+            var references = new ReferenceStores(access, location, keePass.DatabaseId);
+            using var content = keePass.Read(group, references);
             ReportSkipped(host, content);
+            ReportUnresolved(host, location, content);
             var comparisons = KeePassSync.Compare(snapshot.Body, content);
-            var answers = comparisons.Where(c => c.State == KeePassSyncState.Conflict)
+            var answers = comparisons.Where(c => c.State == KeePassSyncState.Conflict && content.Find(c.Name)?.Reference is null)
                 .ToDictionary(c => c.Name, c => take(location, c.Name));
+            var fromOtherStores = comparisons
+                .Where(c => c.State is KeePassSyncState.OnlyInKeePass or KeePassSyncState.ChangedInKeePass or KeePassSyncState.Conflict
+                    || (c.State == KeePassSyncState.Saved && KeePassSync.ReferenceMoved(snapshot.Body, content.Find(c.Name))))
+                .Select(c => (c.Name, Reference: content.Find(c.Name)?.Reference))
+                .Where(r => r.Reference is not null && !string.Equals(r.Reference.StoreId, content.DatabaseId, StringComparison.OrdinalIgnoreCase))
+                .ToList();
             var open = answers.Where(a => a.Value is null).Select(a => a.Key.FullName).ToList();
             if (open.Count > 0)
             {
@@ -532,10 +597,11 @@ internal static class VaultSync
 
             var mayHaveRequired = snapshot.Body.Entries.Any(e => e.IsRequired) || content.Items.Any(i => i.Kind == VaultEntry.RequiredKind);
             var personalTarget = mayHaveRequired ? personal.Open(primary, keePass.DatabaseId) : null;
-            using var personalContent = personalTarget?.Vault.Read(group);
+            using var personalContent = personalTarget?.Vault.Read(group, references);
             if (personalContent is not null && !personalTarget!.WithDeclaration)
             {
                 ReportSkipped(host, personalContent);
+                ReportUnresolved(host, location, personalContent);
             }
 
             var personalAnswers = personalContent is null
@@ -551,6 +617,7 @@ internal static class VaultSync
                     || (c.State == KeePassSyncState.Saved && snapshot.Body.Find(c.Name)?.KeePassBaseFor(content.DatabaseId) != c.VaultHash))
                 || snapshot.Body.KeePassRemovalsFor(content.DatabaseId).Any(r => content.Find(r.Name) is null)
                 || KeePassSync.HelloLoadChanges(snapshot.Body, content, host.Hello)
+                || comparisons.Any(c => c.State == KeePassSyncState.Saved && KeePassSync.ReferenceMoved(snapshot.Body, content.Find(c.Name)))
                 || (personalContent is not null && (KeePassSync.PersonalLoadChanges(snapshot.Body, personalContent, host.Hello)
                     || comparisons.Any(c => c.State == KeePassSyncState.OnlyInKeePass && c.Kind == VaultEntry.RequiredKind)));
             var result = new KeePassLoadResult(0, 0, 0, 0);
@@ -573,6 +640,14 @@ internal static class VaultSync
                         }
                     },
                     new VaultUpdateOptions { AllowCreate = true }));
+            }
+
+            if (needsWrite)
+            {
+                foreach (var (name, reference) in fromOtherStores)
+                {
+                    host.Tell($"{RepositoryVaults.Label(location)}: {name}: value taken from '{reference!.Title}' in store '{references.Find(reference.StoreId).Name}'.");
+                }
             }
 
             count++;
@@ -635,11 +710,27 @@ internal static class VaultSync
         }
     }
 
+    public static string StoreNameOf(VaultLocation location, string id)
+    {
+        var project = ProjectFile.ReadEntries(location).FirstOrDefault(entry => string.Equals(entry.Id, id, StringComparison.OrdinalIgnoreCase));
+        return StoreResolver.Find(new StoreReference(project?.Name, id), location, new StoreRegistry(StoreRegistry.DefaultPath))?.Name
+            ?? project?.Name
+            ?? $"id {id}";
+    }
+
     public static string ReferenceOrigin(KeePassReference reference, string store) =>
         $"Its value comes from KeePass entry '{reference.Title}' (store '{store}'); lv save won't change that entry.";
 
-    public static string ReferenceAdvice(EntryName name, KeePassReference reference) =>
-        $"To change it for every project, edit '{reference.Title}' in KeePass. To use another source here: lv reset {name}";
+    public static string ReferenceAdvice(EntryName name, KeePassReference reference, bool personal) =>
+        $"To change it for every project, edit '{reference.Title}' in KeePass. To use another source here: {(personal ? $"lv reset {name}" : $"lv set {name} --ref \"<group/title>\"")}";
+
+    private static void ReportUnresolved(IVaultHost host, VaultLocation location, KeePassGroupContent content)
+    {
+        foreach (var unresolved in content.Unresolved)
+        {
+            host.Warn($"{RepositoryVaults.Label(location)}: {unresolved.Name} not loaded: {unresolved.Reason}{(unresolved.IsPersonal ? $" To pick another source: lv reset {unresolved.Name}" : string.Empty)}");
+        }
+    }
 
     private static void ReportSkipped(IVaultHost host, KeePassGroupContent content)
     {

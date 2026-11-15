@@ -5,7 +5,7 @@ namespace LocalVault.Core;
 
 public static class OpenSshPrivateKey
 {
-    private const string Begin = "-----BEGIN OPENSSH PRIVATE KEY-----";
+    public const string Armor = "-----BEGIN OPENSSH PRIVATE KEY-----";
     private const string End = "-----END OPENSSH PRIVATE KEY-----";
     private static readonly byte[] Magic = "openssh-key-v1\0"u8.ToArray();
 
@@ -14,7 +14,7 @@ public static class OpenSshPrivateKey
     public static string PublicKeyOf(ReadOnlySpan<byte> file)
     {
         var text = Encoding.ASCII.GetString(file).ReplaceLineEndings("\n").Trim();
-        var begin = text.IndexOf(Begin, StringComparison.Ordinal);
+        var begin = text.IndexOf(Armor, StringComparison.Ordinal);
         var end = text.IndexOf(End, StringComparison.Ordinal);
         if (begin < 0 || end < begin)
         {
@@ -24,7 +24,7 @@ public static class OpenSshPrivateKey
         byte[] body;
         try
         {
-            body = Convert.FromBase64String(text[(begin + Begin.Length)..end].Replace("\n", string.Empty, StringComparison.Ordinal).Trim());
+            body = Convert.FromBase64String(text[(begin + Armor.Length)..end].Replace("\n", string.Empty, StringComparison.Ordinal).Trim());
         }
         catch (FormatException ex)
         {

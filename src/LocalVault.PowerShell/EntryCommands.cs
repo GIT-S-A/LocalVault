@@ -308,6 +308,10 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
     [ValidateNotNullOrEmpty]
     public string Reference { get; set; } = string.Empty;
 
+    [Parameter(ParameterSetName = ReferenceSet)]
+    [ValidateNotNullOrEmpty]
+    public string? ReferenceStore { get; set; }
+
     [Parameter(Mandatory = true, ParameterSetName = ProtectionSet)]
     public VaultEntryProtection Protection { get; set; }
 
@@ -494,33 +498,45 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
             return;
         }
 
-        var store = new StoreRegistry(StoreRegistry.DefaultPath).Personal?.Name ?? "personal";
         WriteWarning(string.Join(
             Environment.NewLine,
             $"{before.Name} changed on this PC only.",
-            VaultSync.ReferenceOrigin(reference, store),
-            VaultSync.ReferenceAdvice(before.Name, reference)));
+            VaultSync.ReferenceOrigin(reference, VaultSync.StoreNameOf(Location, reference.StoreId)),
+            VaultSync.ReferenceAdvice(before.Name, reference, before.IsRequired)));
     }
 
     private void SetReference(EntryName name)
     {
-        var declaration = ReadVault().Body.Find(name);
-        if (declaration is not { IsRequired: true })
+        var existing = ReadVault().Body.Find(name);
+        var personal = existing is { IsRequired: true };
+        if (existing is { IsSshKey: true, IsMissing: false })
         {
-            throw new VaultException(
-                $"'{name}' is not a personal value: only a required entry's personal value can come from a KeePass reference. Declare it with lv require {name} first. Nothing was changed.");
+            throw new VaultException(personal
+                ? $"'{name}' already holds a key. Run lv reset {name} first, then set the reference. Nothing was changed."
+                : $"'{name}' already holds a key, and a reference would replace it for every teammate. Remove it with lv rm {name} first. Nothing was changed.");
         }
 
-        if (declaration is { IsSshKeyShape: true, IsMissing: false })
-        {
-            throw new VaultException($"'{name}' already holds a key. Run lv reset {name} first, then set the reference. Nothing was changed.");
-        }
+        var shape = personal
+            ? existing!.RequiredShape ?? VaultEntry.SecretKind
+            : existing is null ? null : existing.Ssh is not null ? VaultEntry.SshKeyShape : existing.Kind;
+        var storedPath = personal ? existing!.RequiredPath : existing?.StoredPath;
+        IReadOnlyList<string> hosts = personal ? [] : existing?.Ssh?.Hosts ?? [];
 
         using var access = new StoreAccess(this, null);
-        var personal = access.Registry.Personal
-            ?? throw new VaultException("No personal store is defined on this PC: name one with lv store set <name> --personal. Nothing was changed.");
-        var (keePass, store) = access.For(new StoreResolution(Location.Path, new StoreReference(personal.Name, personal.Id), personal, null));
-        using var item = keePass.ReadReferenceTarget(Reference, declaration);
+        var definition = ReferenceStoreDefinition(access, personal);
+        var (keePass, store) = access.For(new StoreResolution(Location.Path, new StoreReference(definition.Name, definition.Id), definition, null));
+        if (!personal)
+        {
+            var primary = access.Resolve(Location);
+            var vaultStoreId = primary.DatabaseId ?? (primary.Definition is not null ? access.For(primary).Vault.DatabaseId : null);
+            if (!new ReferenceStores(access, Location, vaultStoreId).MayHoldSharedValues(keePass.DatabaseId))
+            {
+                throw new VaultException(
+                    $"Shared values can only come from the project's own stores, and store '{store.Name}' isn't one of them. Mark it as a source with lv store set {store.Name} --project --source, or use lv require {name} for a personal value. Nothing was changed.");
+            }
+        }
+
+        using var item = keePass.ReadReferenceTarget(Reference, name, shape, storedPath, hosts, personal, store.Name);
         var value = item.ToVaultEntry(Now);
         if (!ShouldProcess($"{name} in {Location.Path}", $"Take the value from KeePass entry '{item.Reference!.Title}'"))
         {
@@ -530,16 +546,44 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         Report(VaultFile.Update(
             body =>
             {
-                var current = body.Find(name) ?? throw new VaultException($"No entry '{name}' in {Location.Path}.");
-                body.SetPersonalValue(name, current.IsRequiredHello && value.IsSealable ? Seal(body, value) : value);
+                var current = body.Find(name);
+                if (personal)
+                {
+                    body.SetPersonalValue(name, current!.IsRequiredHello && value.IsSealable ? Seal(body, value) : value);
+                    return;
+                }
+
+                body.Set(current is { IsHello: true } && value.IsSealable ? Seal(body, value) : value);
+                if (current is { IsLocal: true })
+                {
+                    body.SetSharing(name, local: true);
+                }
             },
             WriteOptions()));
-        if (declaration.IsSshKeyShape && ReadVault().Body.Find(name) is { } key)
+        if (value.Ssh is not null && ReadVault().Body.Find(name) is { } key)
         {
             WriteKeyFile(key, overwrite: false);
         }
 
-        Say($"{name} comes from KeePass entry '{item.Reference.Title}' in personal store '{store.Name}'. lv save writes the reference there, never the value.");
+        Say($"{name} comes from KeePass entry '{item.Reference.Title}' in store '{store.Name}'. lv save writes the reference to {(personal ? "your personal store" : "the project's store")}, never the value.");
+    }
+
+    private StoreDefinition ReferenceStoreDefinition(StoreAccess access, bool personal)
+    {
+        if (ReferenceStore is not null)
+        {
+            return StoreResolver.Find(ReferenceStore, Location, access.Registry)
+                ?? throw new VaultException($"No store named '{ReferenceStore}' in {ProjectFile.FileName} or on this PC. Nothing was changed.");
+        }
+
+        if (personal)
+        {
+            return access.Registry.Personal
+                ?? throw new VaultException("No personal store is defined on this PC: name one with lv store set <name> --personal, or give the store holding the entry with --ref-store <store>. Nothing was changed.");
+        }
+
+        var primary = access.Resolve(Location);
+        return primary.Definition ?? throw new VaultException($"{primary.Problem} Nothing was changed.");
     }
 
     private static VaultEntry? PlainCurrent(VaultEntry? current, VaultEntry? plain) =>

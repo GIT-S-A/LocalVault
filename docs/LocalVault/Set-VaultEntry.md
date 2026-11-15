@@ -63,8 +63,8 @@ Set-VaultEntry [-Name] <string> -Protection <VaultEntryProtection> [-Path <strin
 ### Reference
 
 ```
-Set-VaultEntry [-Name] <string> -Reference <string> [-Path <string>] [-WhatIf] [-Confirm]
- [<CommonParameters>]
+Set-VaultEntry [-Name] <string> -Reference <string> [-ReferenceStore <string>] [-Path <string>]
+ [-WhatIf] [-Confirm] [<CommonParameters>]
 ```
 
 ## ALIASES
@@ -118,14 +118,22 @@ the profile. Only a required entry's own value can have a `~/` path.
 `Export-VaultToStore` also writes each value set here to the machine's personal store, when one is
 defined, and `Import-VaultFromStore` fills it in on another machine.
 
-With the **Reference** parameter, a personal value comes from an entry of the personal store outside
-the `LocalVault` group, found by its group path and title, or by its title alone. The cmdlet opens
-the personal store, which asks for its password, and stores the value it reads. A secret takes the
-entry's password; a credential takes its user name, password, URL and TOTP; a file or SSH key takes
-its attachment. `Export-VaultToStore` then writes KeePass references to that entry, never the value,
-and `Import-VaultFromStore` takes a change made in KeePass without a question. A value changed on
-this machine stays on this machine, with a warning, and `Export-VaultToStore` refuses to save it.
-Shared entries can't be references.
+With the **Reference** parameter, the value comes from a KeePass entry outside the `LocalVault`
+group, found by its group path and title, or by its title alone. The store searched is
+**ReferenceStore**, else the personal store for a required entry, else the vault's store. The cmdlet
+opens that store, which asks for its password, and stores the value it reads. A secret takes the
+entry's password; a credential takes its user name, password, URLs and TOTP; a file or SSH key takes
+its attachment.
+
+`Export-VaultToStore` then writes where the value comes from, a store id and an entry id, never the
+value. `Import-VaultFromStore` opens that store, reads the value, and takes a change made there
+without a question. A value changed on this machine stays on this machine, with a warning, and
+`Export-VaultToStore` refuses to save it.
+
+A required entry's value may come from any store defined on this machine. A shared entry's value
+may come only from the vault's store, or from a project store marked with `Register-VaultStore
+-Project -Source`. The personal store and a store that unlocks other stores are refused for shared
+entries. A teammate whose machine doesn't define the store gets a warning, and the rest loads.
 
 With the **Hello** parameter, the entry is also sealed with Windows Hello. Reading its value then
 asks for Windows Hello: face, fingerprint or PIN. One command asks once, whatever the number of
@@ -225,6 +233,9 @@ Set-VaultEntry -Name registry.token -Protection Dpapi
 Get-Secret -Name CiToken -Vault SecretStore | Set-VaultEntry -Name ci.token
 ```
 
+`Get-Secret` from the **Microsoft.PowerShell.SecretManagement** module returns a **SecureString**,
+which this cmdlet takes from the pipeline.
+
 ### Example 9 - Take a personal value from an entry of the personal store
 
 ```powershell
@@ -232,10 +243,18 @@ Set-VaultEntry -Name github.token -Reference Internet/GitHub
 ```
 
 The required entry `github.token` takes the password of `Internet/GitHub` in the personal store.
-`Export-VaultToStore` writes `{REF:P@I:<uuid>}` to the personal store instead of the token.
+`Export-VaultToStore` writes the location of that entry to the personal store, not the token.
 
-`Get-Secret` from the **Microsoft.PowerShell.SecretManagement** module returns a **SecureString**,
-which this cmdlet takes from the pipeline.
+### Example 10 - Take a shared value from a team database
+
+```powershell
+Register-VaultStore -Name it -Project -Source
+Set-VaultEntry -Name ad.admin -Reference AD/svc-mgmt -ReferenceStore it
+```
+
+The project store `it` becomes a source of shared values. The shared entry `ad.admin` takes the
+password of `AD/svc-mgmt` in `it`. Each teammate whose machine defines `it` gets it on
+`Import-VaultFromStore`.
 
 ## PARAMETERS
 
@@ -497,9 +516,9 @@ HelpMessage: ''
 
 ### -Reference
 
-Specifies the entry of the personal store that holds the personal value: its group path and title,
-such as `Internet/GitHub`, or its title alone when only one entry has it. Entries under the
-`LocalVault` group are not searched.
+Specifies the KeePass entry that holds the value: its group path and title, such as
+`Internet/GitHub`, or its title alone when only one entry has it. Entries under the `LocalVault`
+group are not searched.
 
 ```yaml
 Type: System.String
@@ -510,6 +529,29 @@ ParameterSets:
 - Name: Reference
   Position: Named
   IsRequired: true
+  ValueFromPipeline: false
+  ValueFromPipelineByPropertyName: false
+  ValueFromRemainingArguments: false
+DontShow: false
+AcceptedValues: []
+HelpMessage: ''
+```
+
+### -ReferenceStore
+
+Specifies the name of the store to search for the **Reference** entry: a store of the project or of
+this machine. Without it, a required entry searches the personal store, and a shared entry the
+vault's store.
+
+```yaml
+Type: System.String
+DefaultValue: None
+SupportsWildcards: false
+Aliases: []
+ParameterSets:
+- Name: Reference
+  Position: Named
+  IsRequired: false
   ValueFromPipeline: false
   ValueFromPipelineByPropertyName: false
   ValueFromRemainingArguments: false
