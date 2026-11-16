@@ -25,11 +25,13 @@ One machine-local secret store per project: PS module (contract) + thin CLI + Cl
 ```
 LocalVault.sln  Directory.Build.props        warnings=errors, nullable, analyzers
 src/LocalVault.Core/                         C# class lib, no PS reference
+  Vault/ Files/ Transfer/ Stores/ Hello/ Ssh/ Processes/   folder per area; namespace stays LocalVault.Core
 src/LocalVault.KeePass/                      KeePass store: IStore over KeePassLib
 src/KeePassLib/                               builds vendor/KeePassLib + Compat.cs
 vendor/KeePassLib/                            KeePassLib upstream, unmodified; License.txt, UPSTREAM.txt
-src/LocalVault.PowerShell/                   C# binary cmdlets + LocalVault.psd1
-tests/LocalVault.Core.Tests/                 xUnit
+src/LocalVault.PowerShell/                   C# binary cmdlets; LocalVault.psd1 + LocalVault.Cli.psm1 at root
+  Cmdlets/ Stores/ Support/                   cmdlet classes | store engine, 1 class per file | helpers; namespace stays LocalVault.PowerShell
+tests/LocalVault.Core.Tests/                 xUnit, folders mirror LocalVault.Core
 tests/LocalVault.KeePass.Tests/              xUnit w/ temp kdbx
 tests/pester/*.Tests.ps1  tests/fixtures/    end-to-end, v1 fixtures, multi-process
 install.ps1                                  release download | unpacked release | checkout build → Modules\LocalVault\<ver>\ + skill
@@ -559,6 +561,7 @@ T100|x|help pages, `about_LocalVault` (Hello kind, one prompt per command, PIN a
 T101|x|database id in KDBX 4 header; `lv store add` records id; `lv store use` w/o opening when id known|I.KeePass,V155
 T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass*→Store* (sync, item, content, reference, link, removal, group path), `VaultStore`→`VaultFile`; KeePass xUnit → `LocalVault.KeePass.Tests`, in-memory `IStore` for sync tests; install.ps1 DLL list; beta18 (ships T91, T101 too)|C3,C10,V81,V156
 T103|x|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
+T104|.|source folders per area in Core, PowerShell, Core.Tests; StoreEngine.cs split 1 class per file; namespaces unchanged|§I layout
 
 ## §B Bugs
 
