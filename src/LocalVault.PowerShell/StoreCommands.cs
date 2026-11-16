@@ -166,12 +166,12 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
             return;
         }
 
-        var id = target is null ? Registry.FindByName(name)?.Id : KdbxHeader.ReadDatabaseId(Environment.ExpandEnvironmentVariables(target));
+        var id = target is null ? Registry.FindByName(name)?.Id : StoreProviders.ReadDatabaseId(StoreTypes.Of(target), Environment.ExpandEnvironmentVariables(target));
         if (Source)
         {
             id ??= OpenForId(target is null
                 ? Registry.FindByName(name) ?? throw new VaultException($"No store named '{name}' on this PC: add it with lv store add {name} <path to .kdbx> first, so that its database id is known. Nothing was changed.")
-                : new StoreDefinition(name, StoreTypes.KeePass, target, null, StoreScope.Project));
+                : new StoreDefinition(name, StoreTypes.Of(target), target, null, StoreScope.Project));
         }
 
         ProjectFile.AddStore(project, name, target, Default, Mirror, Source);
@@ -195,7 +195,7 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
 
     private StoreDefinition WithDatabaseId(StoreDefinition store)
     {
-        var id = KdbxHeader.ReadDatabaseId(store.ExpandedTarget);
+        var id = StoreProviders.ReadDatabaseId(store.Type, store.ExpandedTarget);
         if (id is null && IsInteractive)
         {
             Say($"Opening store '{store.Name}' once to record its database id: it tells this database apart from any other file, even after a move or a rename.");
@@ -369,7 +369,7 @@ public sealed record StoreSaveSummary(int Added, int Updated, int Removed, int S
 
 public sealed record StoreLoadSummary(int Added, int Updated, int Kept, int Removed);
 
-public sealed record StoreEntryState(string Name, string Kind, KeePassSyncState State);
+public sealed record StoreEntryState(string Name, string Kind, StoreSyncState State);
 
 public sealed record VaultStoreStatus(
     string Vault,
@@ -397,7 +397,7 @@ public abstract class StoreSyncCmdletBase : VaultCmdletBase
     [ValidateNotNullOrEmpty]
     public string? Store { get; set; }
 
-    protected IReadOnlyList<string> Group => KeePassGroupPath.For(Location);
+    protected IReadOnlyList<string> Group => StoreGroupPath.For(Location);
 
     internal StoreAccess NewAccess() => new(this, Store);
 }
@@ -480,7 +480,7 @@ public sealed class CompareVaultWithStoreCommand : StoreSyncCmdletBase
             WriteWarning($"KeePass entry left out: {title}");
         }
 
-        foreach (var comparison in KeePassSync.Compare(body, content))
+        foreach (var comparison in StoreSync.Compare(body, content))
         {
             WriteObject(new StoreEntryState(comparison.Name.FullName, comparison.Kind, comparison.State));
         }
@@ -499,21 +499,21 @@ public sealed class GetVaultStoreStatusCommand : StoreSyncCmdletBase
             var resolution = StoreResolver.For(location, Store, registry);
             var store = RepositoryVaults.StoreFor(location);
             var snapshot = store.Read();
-            var states = snapshot.Exists ? KeePassSync.ComparePending(snapshot.Body, resolution.DatabaseId) : [];
+            var states = snapshot.Exists ? StoreSync.ComparePending(snapshot.Body, resolution.DatabaseId) : [];
             WriteObject(new VaultStoreStatus(
                 resolution.Vault,
-                KeePassGroupPath.Display(KeePassGroupPath.For(location)),
+                StoreGroupPath.Display(StoreGroupPath.For(location)),
                 resolution.Definition?.Name ?? (resolution.Reference is null ? null : resolution.Label),
                 resolution.Definition?.Scope.ToString(),
                 resolution.Definition?.Target,
                 resolution.Problem,
                 resolution.Definition?.UnlockWith,
                 Store is null ? MirrorNames(StoreResolver.MirrorsFor(location, resolution, registry)) : null,
-                states.Count(s => s.State is not KeePassSyncState.Local and not KeePassSyncState.RemovalPending),
-                states.Count(s => s.State == KeePassSyncState.Saved),
-                states.Count(s => s.State is KeePassSyncState.New or KeePassSyncState.Changed),
-                states.Count(s => s.State == KeePassSyncState.Local),
-                states.Count(s => s.State == KeePassSyncState.RemovalPending)));
+                states.Count(s => s.State is not StoreSyncState.Local and not StoreSyncState.RemovalPending),
+                states.Count(s => s.State == StoreSyncState.Saved),
+                states.Count(s => s.State is StoreSyncState.New or StoreSyncState.Changed),
+                states.Count(s => s.State == StoreSyncState.Local),
+                states.Count(s => s.State == StoreSyncState.RemovalPending)));
         }
     }
 }
@@ -561,21 +561,21 @@ public sealed class CopyVaultToStoreCommand : StoreSyncCmdletBase
 
         using var access = NewAccess();
         var keePass = access.Explicit(target);
-        var copied = KeePassSync.Copy(body, keePass, Group, new HelloContext(HelloEntries, Location.Path));
+        var copied = StoreSync.Copy(body, keePass, Group, new HelloContext(HelloEntries, Location.Path));
         var written = copied.Written;
         foreach (var missing in copied.HelloMissing)
         {
             WriteWarning($"'{missing.Name}' not copied: {missing.Reason}. lv load restores it from the store.");
         }
 
-        var guidesChanged = KeePassSync.MaintainGuides(keePass, Location, RepositoryOrigin.Of(Location));
+        var guidesChanged = StoreSync.MaintainGuides(keePass, Location, RepositoryOrigin.Of(Location));
         if (written > 0 || guidesChanged)
         {
             keePass.Save();
         }
 
-        Say($"Copied {written} shared entries to {target.ExpandedTarget}, group {KeePassGroupPath.Display(Group)}. The vault records nothing about this copy.");
-        WriteObject(new StoreCopySummary(target.ExpandedTarget, KeePassGroupPath.Display(Group), written));
+        Say($"Copied {written} shared entries to {target.ExpandedTarget}, group {StoreGroupPath.Display(Group)}. The vault records nothing about this copy.");
+        WriteObject(new StoreCopySummary(target.ExpandedTarget, StoreGroupPath.Display(Group), written));
     }
 }
 
@@ -599,7 +599,7 @@ public sealed class SetVaultProjectStoreCommand : VaultCmdletBase
             return;
         }
 
-        var id = store.Id ?? KdbxHeader.ReadDatabaseId(store.ExpandedTarget);
+        var id = store.Id ?? StoreProviders.ReadDatabaseId(store.Type, store.ExpandedTarget);
         if (id is null)
         {
             using var access = new StoreAccess(this, null);

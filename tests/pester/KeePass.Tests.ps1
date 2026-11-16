@@ -48,7 +48,7 @@ Describe 'Shared entries in KeePass' {
         $registry = Join-Path $env:LOCALAPPDATA 'LocalVault/stores.json'
         (Get-Content -Raw $registry | ConvertFrom-Json).stores[0].PSObject.Properties.Name | Should -Not -Contain 'id'
         (& $runInChild "Export-VaultToStore -Path '$mine'").ExitCode | Should -Be 0
-        $id = [LocalVault.Core.KdbxHeader]::ReadDatabaseId($database)
+        $id = [LocalVault.KeePass.KdbxHeader]::ReadDatabaseId($database)
         $id | Should -Match '^[0-9A-F]{32}$'
 
         Unregister-VaultStore -Name 'team' | Out-Null
@@ -201,7 +201,7 @@ Describe 'Shared entries in KeePass' {
         $saved.ExitCode | Should -Be 0 -Because $saved.Output
         $saved.Output | Should -Match "'ring' doesn't hold its password yet"
 
-        $keyring = [LocalVault.Core.KeePassVault]::Open($ring, $null, 'ring master 1')
+        $keyring = [LocalVault.KeePass.KeePassStore]::Open($ring, $null, 'ring master 1')
         try {
             $keyring.RememberAutoOpen('team', $database, $null, $master, $project.default.id)
             $keyring.Save()
@@ -231,9 +231,9 @@ Describe 'Shared entries in KeePass' {
         Register-VaultStore -Target $ring -UnlockWith personal | Out-Null
         Register-VaultStore -Name 'team' -Target $database -UnlockWith ring | Out-Null
         foreach ($pair in @(@($personal, 'personal master 1', $ring, 'ring master 1'), @($ring, 'ring master 1', $database, $master))) {
-            $holder = [LocalVault.Core.KeePassVault]::Open($pair[0], $null, $pair[1])
+            $holder = [LocalVault.KeePass.KeePassStore]::Open($pair[0], $null, $pair[1])
             try {
-                $target = [LocalVault.Core.KeePassVault]::Open($pair[2], $null, $pair[3])
+                $target = [LocalVault.KeePass.KeePassStore]::Open($pair[2], $null, $pair[3])
                 try { $id = $target.DatabaseId } finally { $target.Dispose() }
                 $holder.RememberAutoOpen((Split-Path -LeafBase $pair[2]), $pair[2], $null, $pair[3], $id)
                 $holder.Save()

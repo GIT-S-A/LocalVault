@@ -6,216 +6,11 @@ using KeePassLib;
 using KeePassLib.Keys;
 using KeePassLib.Security;
 using KeePassLib.Serialization;
+using LocalVault.Core;
 
-namespace LocalVault.Core;
+namespace LocalVault.KeePass;
 
-public static class KeePassGroupPath
-{
-    public const string Root = "LocalVault";
-
-    public static IReadOnlyList<string> For(VaultLocation location)
-    {
-        ArgumentNullException.ThrowIfNull(location);
-        var segments = new List<string> { Root };
-        if (location.GitRoot is { } gitRoot)
-        {
-            segments.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(gitRoot)));
-            var relative = Path.GetRelativePath(gitRoot, location.Directory);
-            if (relative != ".")
-            {
-                segments.AddRange(relative.Split(
-                    [Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries));
-            }
-        }
-        else
-        {
-            segments.Add(Path.GetFileName(Path.TrimEndingDirectorySeparator(location.Directory)));
-        }
-
-        var fileName = Path.GetFileName(location.Path);
-        if (!string.Equals(fileName, VaultLocation.DefaultFileName, StringComparison.OrdinalIgnoreCase))
-        {
-            segments.Add(fileName);
-        }
-
-        return segments;
-    }
-
-    public static IReadOnlyList<string>? ProjectOf(VaultLocation location)
-    {
-        ArgumentNullException.ThrowIfNull(location);
-        return location.GitRoot is { } gitRoot
-            ? [Root, Path.GetFileName(Path.TrimEndingDirectorySeparator(gitRoot))]
-            : null;
-    }
-
-    public static string Display(IReadOnlyList<string> segments) => string.Join('/', segments);
-}
-
-public sealed class KeePassItem : IDisposable
-{
-    internal KeePassItem(EntryName name, string kind, string? storedPath, byte[] value)
-    {
-        Name = name;
-        Kind = kind;
-        StoredPath = storedPath;
-        Value = value;
-        Hash = VaultEntry.ComputeContentHash(kind, storedPath, value);
-    }
-
-    internal KeePassItem(EntryName name, string storedPath, byte[] value, byte[]? previous, SshKeyInfo ssh, bool isPersonal)
-    {
-        Name = name;
-        Kind = VaultEntry.FileKind;
-        StoredPath = storedPath;
-        Value = value;
-        Previous = previous;
-        Ssh = ssh;
-        IsPersonal = isPersonal;
-        Hash = VaultEntry.ComputeSshKeyHash(storedPath, value, previous ?? [], ssh.Hosts);
-    }
-
-    internal KeePassItem(EntryName name, string note, string? shape, string? requiredPath, IReadOnlyList<string> requiredHosts, KeePassItem? personalValue)
-    {
-        Name = name;
-        Kind = VaultEntry.RequiredKind;
-        Value = System.Text.Encoding.UTF8.GetBytes(note);
-        Shape = shape;
-        RequiredPath = requiredPath;
-        RequiredHosts = requiredHosts;
-        PersonalValue = personalValue;
-        Hash = VaultEntry.ComputeDeclarationHash(note, shape, requiredPath, requiredHosts);
-    }
-
-    internal KeePassItem(EntryName name, string? userName, byte[] password, TotpSecret? totp, IReadOnlyList<string> urls)
-    {
-        Name = name;
-        Kind = VaultEntry.CredentialKind;
-        Value = password;
-        UserName = userName;
-        Totp = totp;
-        Urls = urls;
-        Hash = VaultEntry.ComputeCredentialHash(userName, password, totp, urls);
-    }
-
-    public EntryName Name { get; }
-
-    public string Kind { get; }
-
-    public string? StoredPath { get; }
-
-    public string Hash { get; }
-
-    public string? Shape { get; }
-
-    public string? RequiredPath { get; }
-
-    public bool IsUnderHome => StoredPath is { } path && StoredPathRules.IsUnderHome(path);
-
-    public IReadOnlyList<string> RequiredHosts { get; } = [];
-
-    public SshKeyInfo? Ssh { get; }
-
-    public bool IsPersonal { get; }
-
-    public KeePassItem? PersonalValue { get; }
-
-    public bool IsHello { get; internal set; }
-
-    public bool IsRequiredHello { get; internal set; }
-
-    public KeePassReference? Reference { get; internal set; }
-
-    internal byte[] Value { get; }
-
-    internal byte[]? Previous { get; }
-
-    internal string? UserName { get; }
-
-    internal TotpSecret? Totp { get; }
-
-    internal IReadOnlyList<string> Urls { get; } = [];
-
-    public VaultEntry ToVaultEntry(DateTimeOffset created)
-    {
-        var entry = Kind switch
-        {
-            VaultEntry.FileKind when Ssh is not null => VaultEntry.NewSshKey(Name, Value, StoredPath!, Ssh, Previous ?? [], created),
-            VaultEntry.FileKind => VaultEntry.NewFile(Name, Value, StoredPath!, created),
-            VaultEntry.RequiredKind => VaultEntry.NewRequired(Name, System.Text.Encoding.UTF8.GetString(Value), created, Shape, RequiredPath, RequiredHosts, IsRequiredHello),
-            VaultEntry.CredentialKind => VaultEntry.NewCredential(Name, UserName, Value, Totp, Urls, created),
-            _ => VaultEntry.NewSecret(Name, Value, created),
-        };
-        return Reference is null ? entry : entry.WithReference(Reference);
-    }
-
-    public void Dispose()
-    {
-        CryptographicOperations.ZeroMemory(Value);
-        if (Previous is not null)
-        {
-            CryptographicOperations.ZeroMemory(Previous);
-        }
-
-        PersonalValue?.Dispose();
-    }
-}
-
-public sealed class AutoOpenTarget(string title, string path, string? keyFile, char[] password) : IDisposable
-{
-    public string Title => title;
-
-    public string Path => path;
-
-    public string? KeyFile => keyFile;
-
-    public ReadOnlySpan<char> Password => password;
-
-    public void Dispose() => Array.Clear(password);
-}
-
-public sealed class KeePassGroupContent : IDisposable
-{
-    internal KeePassGroupContent(
-        IReadOnlyList<KeePassItem> items,
-        IReadOnlyList<string> skipped,
-        string databaseId,
-        IReadOnlyList<KeePassLink>? links = null,
-        IReadOnlyList<UnresolvedReference>? unresolved = null)
-    {
-        DatabaseId = databaseId;
-        Items = items;
-        Skipped = skipped;
-        Links = links ?? [];
-        Unresolved = unresolved ?? [];
-    }
-
-    public IReadOnlyList<KeePassItem> Items { get; }
-
-    public IReadOnlyList<string> Skipped { get; }
-
-    public IReadOnlyList<KeePassLink> Links { get; }
-
-    public IReadOnlyList<UnresolvedReference> Unresolved { get; }
-
-    public string DatabaseId { get; }
-
-    public KeePassItem? Find(EntryName name) => Items.FirstOrDefault(item => item.Name.Equals(name));
-
-    public KeePassLink? LinkFor(EntryName name, bool personal) => Links.FirstOrDefault(link => link.Name.Equals(name) && link.IsPersonal == personal);
-
-    public bool IsUnresolved(EntryName name, bool personal) => Unresolved.Any(u => u.Name.Equals(name) && u.IsPersonal == personal);
-
-    public void Dispose()
-    {
-        foreach (var item in Items)
-        {
-            item.Dispose();
-        }
-    }
-}
-
-public sealed partial class KeePassVault : IDisposable
+public sealed partial class KeePassStore : IUnlockingStore
 {
     public const string KindField = "LocalVault.Kind";
     public const string PathField = "LocalVault.Path";
@@ -256,7 +51,7 @@ public sealed partial class KeePassVault : IDisposable
     private readonly CompositeKey key;
     private readonly byte[] openedHash;
 
-    private KeePassVault(PwDatabase database, IOConnectionInfo connection, CompositeKey key, byte[] openedHash)
+    private KeePassStore(PwDatabase database, IOConnectionInfo connection, CompositeKey key, byte[] openedHash)
     {
         this.database = database;
         this.connection = connection;
@@ -264,7 +59,7 @@ public sealed partial class KeePassVault : IDisposable
         this.openedHash = openedHash;
     }
 
-    public static KeePassVault Open(string path, string? keyFile, ReadOnlySpan<char> password)
+    public static KeePassStore Open(string path, string? keyFile, ReadOnlySpan<char> password)
     {
         if (!File.Exists(path))
         {
@@ -312,22 +107,22 @@ public sealed partial class KeePassVault : IDisposable
             throw new VaultException($"KeePass: '{path}' could not be opened: {ex.Message}", ex);
         }
 
-        return new KeePassVault(database, connection, key, openedHash);
+        return new KeePassStore(database, connection, key, openedHash);
     }
 
     public string Path => connection.Path;
 
     public string DatabaseId => database.RootGroup.Uuid.ToHexString();
 
-    public KeePassGroupContent Read(IReadOnlyList<string> groupPath, IReferenceStores? stores = null)
+    public StoreContent Read(IReadOnlyList<string> groupPath, IReferenceStores? stores = null)
     {
         var group = FindGroup(groupPath, create: false);
         if (group is null)
         {
-            return new KeePassGroupContent([], [], DatabaseId);
+            return new StoreContent([], [], DatabaseId);
         }
 
-        var items = new List<KeePassItem>();
+        var items = new List<StoreItem>();
         var skipped = new List<string>();
         var context = new ReadContext(stores, skipped, [], []);
         var duplicates = group.Entries
@@ -350,7 +145,7 @@ public sealed partial class KeePassVault : IDisposable
                 continue;
             }
 
-            KeePassItem? item;
+            StoreItem? item;
             try
             {
                 if (entry.Strings.ReadSafe(KindField) == ReferenceKind)
@@ -381,14 +176,14 @@ public sealed partial class KeePassVault : IDisposable
             }
         }
 
-        return new KeePassGroupContent(items, skipped, DatabaseId, context.Links, context.Unresolved);
+        return new StoreContent(items, skipped, DatabaseId, context.Links, context.Unresolved);
     }
 
     public void Put(IReadOnlyList<string> groupPath, VaultEntry entry, bool hello = false) => Put(groupPath, entry, personal: false, hello);
 
     public void SetHelloFlags(IReadOnlyList<string> groupPath, EntryName name, bool hello, bool requiredHello)
     {
-        var target = FindEntry(FindGroup(groupPath, create: false) ?? throw new VaultException($"No KeePass group {KeePassGroupPath.Display(groupPath)}."), name)
+        var target = FindEntry(FindGroup(groupPath, create: false) ?? throw new VaultException($"No KeePass group {StoreGroupPath.Display(groupPath)}."), name)
             ?? throw new VaultException($"No KeePass entry '{name}'.");
         target.CreateBackup(database);
         SetOrRemove(target, HelloField, hello ? "true" : null);
@@ -568,7 +363,7 @@ public sealed partial class KeePassVault : IDisposable
 
     public bool EnsureInstallInstructions()
     {
-        var group = database.RootGroup.FindCreateGroup(KeePassGroupPath.Root, true);
+        var group = database.RootGroup.FindCreateGroup(StoreGroupPath.Root, true);
         var existing = group.Entries.FirstOrDefault(entry => entry.Strings.ReadSafe(KindField) == InstallKind
             || string.Equals(entry.Strings.ReadSafe(PwDefs.TitleField), InstallTitle, StringComparison.OrdinalIgnoreCase));
         if (existing is not null)
@@ -604,7 +399,7 @@ public sealed partial class KeePassVault : IDisposable
             $"git clone {origin.Url} {origin.Folder}",
             $"cd {origin.Folder}",
             "lv load",
-            $"LocalVault not installed: see '{InstallTitle}' in the {KeePassGroupPath.Root} group.");
+            $"LocalVault not installed: see '{InstallTitle}' in the {StoreGroupPath.Root} group.");
         var entry = group.Entries.FirstOrDefault(e => e.Strings.ReadSafe(KindField) == OriginKind);
         if (entry is not null
             && entry.Strings.ReadSafe(PwDefs.TitleField) == OriginTitle
@@ -653,7 +448,7 @@ public sealed partial class KeePassVault : IDisposable
         database.Save(null);
     }
 
-    public AutoOpenTarget? FindAutoOpen(string? databaseId, IEnumerable<string> knownPaths, string machineName)
+    public UnlockTarget? FindAutoOpen(string? databaseId, IEnumerable<string> knownPaths, string machineName)
     {
         ArgumentNullException.ThrowIfNull(knownPaths);
         if (database.RootGroup.FindCreateGroup(AutoOpenGroup, false) is not { } group)
@@ -671,7 +466,7 @@ public sealed partial class KeePassVault : IDisposable
             if (matches)
             {
                 var keyFile = entry.Strings.ReadSafe(PwDefs.UserNameField);
-                return new AutoOpenTarget(
+                return new UnlockTarget(
                     entry.Strings.ReadSafe(PwDefs.TitleField),
                     path,
                     keyFile.Length == 0 ? null : ResolveRelative(keyFile),
@@ -822,7 +617,7 @@ public sealed partial class KeePassVault : IDisposable
         entry.Strings.ReadSafe(SshHostsField).Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
             .Select(SshKeyInfo.NormalizeHost).ToArray();
 
-    private static KeePassItem? ReadSshKey(PwEntry entry, EntryName name, string storedPath, byte[] value, bool withHosts)
+    private static StoreItem? ReadSshKey(PwEntry entry, EntryName name, string storedPath, byte[] value, bool withHosts)
     {
         var type = entry.Strings.ReadSafe(SshTypeField);
         if (type.Length == 0)
@@ -839,7 +634,7 @@ public sealed partial class KeePassVault : IDisposable
             entry.Strings.ReadSafe(SshAgentField) == "true",
             replacedAt.Length == 0 ? null : DateTimeOffset.Parse(replacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
         var previous = entry.Binaries.Get(AttachmentName(storedPath) + VaultEntry.OldKeySuffix)?.ReadData();
-        return new KeePassItem(name, StoredPathRules.Normalize(storedPath), value, previous, ssh, entry.Strings.ReadSafe(PersonalField) == "true");
+        return new StoreItem(name, StoredPathRules.Normalize(storedPath), value, previous, ssh, entry.Strings.ReadSafe(PersonalField) == "true");
     }
 
     private static void SetOrRemove(PwEntry target, string field, string? value)
@@ -900,7 +695,7 @@ public sealed partial class KeePassVault : IDisposable
         || key.StartsWith(ExtraUrlPrefix, StringComparison.Ordinal)
         || key.StartsWith(TotpFieldPrefix, StringComparison.Ordinal);
 
-    private static KeePassItem ReadCredential(PwEntry entry, EntryName name)
+    private static StoreItem ReadCredential(PwEntry entry, EntryName name)
     {
         var urls = new List<string> { entry.Strings.ReadSafe(PwDefs.UrlField) };
         urls.AddRange(entry.Strings.GetKeys()
@@ -909,7 +704,7 @@ public sealed partial class KeePassVault : IDisposable
             .OrderBy(item => item.Number)
             .Select(item => entry.Strings.ReadSafe(item.Key)));
         var userName = entry.Strings.ReadSafe(PwDefs.UserNameField);
-        return new KeePassItem(
+        return new StoreItem(
             name,
             userName.Length == 0 ? null : userName,
             entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8(),
@@ -968,7 +763,7 @@ public sealed partial class KeePassVault : IDisposable
         || entry.Strings.ReadSafe(PwDefs.UrlField).Length > 0
         || entry.Strings.GetKeys().Any(key => key == XcOtpField || key.StartsWith(TotpFieldPrefix, StringComparison.Ordinal));
 
-    private static KeePassItem? ReadItem(PwEntry entry, EntryName name, ReadContext context)
+    private static StoreItem? ReadItem(PwEntry entry, EntryName name, ReadContext context)
     {
         if (entry.Strings.ReadSafe(KindField) != VaultEntry.RequiredKind && HasFieldReference(entry))
         {
@@ -991,7 +786,7 @@ public sealed partial class KeePassVault : IDisposable
 
     private static bool IsSet(PwEntry entry, string field) => entry.Strings.ReadSafe(field) == "true";
 
-    private static KeePassItem? ReadContent(PwEntry entry, EntryName name, ReadContext context)
+    private static StoreItem? ReadContent(PwEntry entry, EntryName name, ReadContext context)
     {
         var kind = entry.Strings.ReadSafe(KindField);
         if (kind == VaultEntry.CredentialKind || (kind.Length == 0 && LooksLikeCredential(entry)))
@@ -1003,7 +798,7 @@ public sealed partial class KeePassVault : IDisposable
         {
             var shape = entry.Strings.ReadSafe(ShapeField);
             var requiredPath = entry.Strings.ReadSafe(RequiredPathField);
-            return new KeePassItem(
+            return new StoreItem(
                 name,
                 entry.Strings.ReadSafe(PwDefs.NotesField),
                 shape.Length == 0 ? null : shape,
@@ -1023,13 +818,13 @@ public sealed partial class KeePassVault : IDisposable
 
             var content = attachment.ReadData();
             return ReadSshKey(entry, name, storedPath, content, withHosts: true)
-                ?? new KeePassItem(name, VaultEntry.FileKind, storedPath, content);
+                ?? new StoreItem(name, VaultEntry.FileKind, storedPath, content);
         }
 
-        return new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
+        return new StoreItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
     }
 
-    private static KeePassItem? ReadPersonalValue(PwEntry entry, EntryName name, ReadContext context)
+    private static StoreItem? ReadPersonalValue(PwEntry entry, EntryName name, ReadContext context)
     {
         if (entry.Strings.ReadSafe(RefField).Length > 0)
         {
@@ -1053,14 +848,14 @@ public sealed partial class KeePassVault : IDisposable
         return ReadPersonalContent(entry, name);
     }
 
-    private static KeePassItem? ReadPersonalContent(PwEntry entry, EntryName name)
+    private static StoreItem? ReadPersonalContent(PwEntry entry, EntryName name)
     {
         var storedPath = entry.Strings.ReadSafe(PathField);
         if (storedPath.Length > 0 && entry.Binaries.Get(AttachmentName(storedPath)) is { } attachment)
         {
             var content = attachment.ReadData();
             return ReadSshKey(entry, name, storedPath, content, withHosts: false)
-                ?? new KeePassItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), content);
+                ?? new StoreItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), content);
         }
 
         if (LooksLikeCredential(entry))
@@ -1069,7 +864,7 @@ public sealed partial class KeePassVault : IDisposable
         }
 
         return entry.Strings.ReadSafe(PwDefs.PasswordField).Length > 0
-            ? new KeePassItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8())
+            ? new StoreItem(name, VaultEntry.SecretKind, null, entry.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8())
             : null;
     }
 

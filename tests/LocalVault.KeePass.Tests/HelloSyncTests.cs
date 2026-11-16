@@ -4,7 +4,7 @@ using KeePassLib.Cryptography.KeyDerivation;
 using KeePassLib.Keys;
 using KeePassLib.Serialization;
 
-namespace LocalVault.Core.Tests;
+namespace LocalVault.KeePass.Tests;
 
 public sealed class HelloSyncTests : IDisposable
 {
@@ -55,7 +55,7 @@ public sealed class HelloSyncTests : IDisposable
         Assert.Equal(("one", "true"), Raw("a"));
         Assert.Equal(("two", "true"), Raw("b"));
         Assert.Equal(("three", string.Empty), Raw("plain"));
-        Assert.All(Compare(body), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(body), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
 
     [Fact]
@@ -66,7 +66,7 @@ public sealed class HelloSyncTests : IDisposable
         Save(body);
         var before = key.Prompts;
 
-        Assert.Equal(KeePassSyncState.Saved, Assert.Single(Compare(body)).State);
+        Assert.Equal(StoreSyncState.Saved, Assert.Single(Compare(body)).State);
         var result = Save(body);
 
         Assert.Equal(0, result.Added + result.Updated);
@@ -137,10 +137,10 @@ public sealed class HelloSyncTests : IDisposable
         key.Delete();
         Assert.Equal(HelloSeal.MissingKey, hello.MissingReason(body, body.Find(EntryName.Parse("shared"))!));
 
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         using (var content = keePass.Read(Group))
         {
-            Assert.True(KeePassSync.HelloLoadChanges(body, content, hello));
+            Assert.True(StoreSync.HelloLoadChanges(body, content, hello));
         }
 
         var result = Load(body);
@@ -197,7 +197,7 @@ public sealed class HelloSyncTests : IDisposable
 
         Assert.True(theirs.Find(EntryName.Parse("token"))!.IsRequiredHello);
         using var raw = new RawDatabase(database);
-        Assert.Equal("true", raw.Entry("token").Strings.ReadSafe(KeePassVault.RequiredHelloField));
+        Assert.Equal("true", raw.Entry("token").Strings.ReadSafe(KeePassStore.RequiredHelloField));
     }
 
     [Fact]
@@ -206,10 +206,10 @@ public sealed class HelloSyncTests : IDisposable
         var mine = VaultBody.CreateEmpty();
         mine.Set(VaultEntry.NewRequired(EntryName.Parse("token"), null, Now, hello: true));
         mine.SetPersonalValue(EntryName.Parse("token"), hello.Seal(mine, Secret("token", "personal-1")));
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
             using var content = keePass.Read(Group);
-            var saved = KeePassSync.SavePersonal(mine, content, keePass, Group, withDeclaration: false, _ => false, new HelloContext(hello, Vault));
+            var saved = StoreSync.SavePersonal(mine, content, keePass, Group, withDeclaration: false, _ => false, new HelloContext(hello, Vault));
             Assert.Equal(1, saved.Added);
             keePass.Save();
         }
@@ -217,10 +217,10 @@ public sealed class HelloSyncTests : IDisposable
         Assert.Equal(("personal-1", "true"), Raw("token"));
         var theirs = VaultBody.CreateEmpty();
         theirs.Set(VaultEntry.NewRequired(EntryName.Parse("token"), null, Now, hello: true));
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
             using var content = keePass.Read(Group);
-            Assert.Equal(1, KeePassSync.LoadPersonal(theirs, content, _ => false, Now, hello).Added);
+            Assert.Equal(1, StoreSync.LoadPersonal(theirs, content, _ => false, Now, hello).Added);
         }
 
         Assert.True(theirs.Find(EntryName.Parse("token"))!.IsHello);
@@ -260,35 +260,35 @@ public sealed class HelloSyncTests : IDisposable
         return Encoding.UTF8.GetString(session.Unseal(body.Find(EntryName.Parse(name))!).GetValue());
     }
 
-    private KeePassSaveResult Save(VaultBody body)
+    private StoreSaveResult Save(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        var result = KeePassSync.Save(body, content, keePass, Group, _ => false, hello: new HelloContext(hello, Vault));
+        var result = StoreSync.Save(body, content, keePass, Group, _ => false, hello: new HelloContext(hello, Vault));
         keePass.Save();
-        KeePassSync.RecordSaved(body, result, Now);
+        StoreSync.RecordSaved(body, result, Now);
         return result;
     }
 
-    private KeePassLoadResult Load(VaultBody body)
+    private StoreLoadResult Load(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.Load(body, content, _ => false, _ => false, Now, hello);
+        return StoreSync.Load(body, content, _ => false, _ => false, Now, hello);
     }
 
-    private IReadOnlyList<KeePassComparison> Compare(VaultBody body)
+    private IReadOnlyList<StoreComparison> Compare(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.Compare(body, content);
+        return StoreSync.Compare(body, content);
     }
 
     private (string Password, string Hello) Raw(string title)
     {
         using var raw = new RawDatabase(database);
         var entry = raw.Entry(title);
-        return (entry.Strings.ReadSafe(PwDefs.PasswordField), entry.Strings.ReadSafe(KeePassVault.HelloField));
+        return (entry.Strings.ReadSafe(PwDefs.PasswordField), entry.Strings.ReadSafe(KeePassStore.HelloField));
     }
 
     private void EditRaw(string title, string password, bool hello)
@@ -298,7 +298,7 @@ public sealed class HelloSyncTests : IDisposable
         entry.Strings.Set(PwDefs.PasswordField, new KeePassLib.Security.ProtectedString(true, password));
         if (!hello)
         {
-            entry.Strings.Remove(KeePassVault.HelloField);
+            entry.Strings.Remove(KeePassStore.HelloField);
         }
 
         raw.Save();

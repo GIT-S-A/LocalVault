@@ -6,7 +6,7 @@ using KeePassLib.Keys;
 using KeePassLib.Security;
 using KeePassLib.Serialization;
 
-namespace LocalVault.Core.Tests;
+namespace LocalVault.KeePass.Tests;
 
 public sealed class KeePassReferenceTests : IDisposable
 {
@@ -39,12 +39,12 @@ public sealed class KeePassReferenceTests : IDisposable
 
         var value = Reference(mine, "Internet/GitHub");
         Assert.Equal("token-1", Encoding.UTF8.GetString(value.GetValue()));
-        Assert.Equal(new KeePassReference(DatabaseId(personal), uuid, null, "Internet/GitHub"), value.Reference);
+        Assert.Equal(new ItemReference(DatabaseId(personal), uuid, null, "Internet/GitHub"), value.Reference);
 
         Assert.Equal(1, SavePersonal(mine).Added);
-        Assert.Equal(KeePassVault.ReferenceKind, RawField(personal, "os", KeePassVault.KindField));
-        Assert.Equal($"{DatabaseId(personal)}/{uuid}", RawField(personal, "os", KeePassVault.RefField));
-        Assert.Equal(VaultEntry.SecretKind, RawField(personal, "os", KeePassVault.RefShapeField));
+        Assert.Equal(KeePassStore.ReferenceKind, RawField(personal, "os", KeePassStore.KindField));
+        Assert.Equal($"{DatabaseId(personal)}/{uuid}", RawField(personal, "os", KeePassStore.RefField));
+        Assert.Equal(VaultEntry.SecretKind, RawField(personal, "os", KeePassStore.RefShapeField));
         Assert.Equal(string.Empty, RawField(personal, "os", PwDefs.PasswordField));
 
         var otherPc = Declared();
@@ -62,7 +62,7 @@ public sealed class KeePassReferenceTests : IDisposable
         Reference(mine, "Infra/AD admin", team);
         SavePersonal(mine);
 
-        using var keePass = KeePassVault.Open(personal, null, Master);
+        using var keePass = KeePassStore.Open(personal, null, Master);
         using var content = keePass.Read(Group);
 
         Assert.Empty(content.Items);
@@ -102,7 +102,7 @@ public sealed class KeePassReferenceTests : IDisposable
         Assert.Equal(["https://login.example.com"], value.Urls);
         Assert.NotNull(value.Totp);
         SavePersonal(mine);
-        Assert.Equal(VaultEntry.CredentialKind, RawField(personal, "os", KeePassVault.RefShapeField));
+        Assert.Equal(VaultEntry.CredentialKind, RawField(personal, "os", KeePassStore.RefShapeField));
         Assert.Equal(string.Empty, RawField(personal, "os", PwDefs.UserNameField));
         Assert.Equal(string.Empty, RawField(personal, "os", "TimeOtp-Secret-Base32"));
     }
@@ -128,28 +128,28 @@ public sealed class KeePassReferenceTests : IDisposable
         var mine = Declared();
         Reference(mine, "GitHub");
         SavePersonal(mine);
-        var savedBase = mine.Find(Os)!.KeePassBaseFor(KeePassSync.PersonalKey(DatabaseId(personal)));
+        var savedBase = mine.Find(Os)!.KeePassBaseFor(StoreSync.PersonalKey(DatabaseId(personal)));
         DeleteEntry(personal, uuid);
 
         using var stores = new Stores((personal, "mine"));
-        using var keePass = KeePassVault.Open(personal, null, Master);
+        using var keePass = KeePassStore.Open(personal, null, Master);
         using var content = keePass.Read(Group, stores);
-        var result = KeePassSync.LoadPersonal(mine, content, _ => false, Now);
+        var result = StoreSync.LoadPersonal(mine, content, _ => false, Now);
 
         var unresolved = Assert.Single(content.Unresolved);
         Assert.Contains("no longer in store 'mine'", unresolved.Reason, StringComparison.Ordinal);
-        Assert.Equal(new KeePassLoadResult(0, 0, 0, 0), result with { NotSealed = [], StillMissing = [] });
+        Assert.Equal(new StoreLoadResult(0, 0, 0, 0), result with { NotSealed = [], StillMissing = [] });
         Assert.Equal("token-1", Encoding.UTF8.GetString(mine.Find(Os)!.GetValue()));
-        Assert.Equal(savedBase, mine.Find(Os)!.KeePassBaseFor(KeePassSync.PersonalKey(DatabaseId(personal))));
+        Assert.Equal(savedBase, mine.Find(Os)!.KeePassBaseFor(StoreSync.PersonalKey(DatabaseId(personal))));
     }
 
     [Fact]
     public void RefFieldTypedInTheVaultGroupIsLeftOut()
     {
         var uuid = AddEntry(team, ["Internet"], "GitHub", password: "token-1");
-        AddEntry(team, ["LocalVault", "proj"], "api", password: $"{{REF:P@I:{uuid}}}", extra: new() { [KeePassVault.KindField] = VaultEntry.SecretKind });
+        AddEntry(team, ["LocalVault", "proj"], "api", password: $"{{REF:P@I:{uuid}}}", extra: new() { [KeePassStore.KindField] = VaultEntry.SecretKind });
 
-        using var keePass = KeePassVault.Open(team, null, Master);
+        using var keePass = KeePassStore.Open(team, null, Master);
         using var content = keePass.Read(Group);
 
         Assert.Empty(content.Items);
@@ -161,31 +161,31 @@ public sealed class KeePassReferenceTests : IDisposable
     {
         AddEntry(team, ["Infra"], "AD admin", password: "ad-1");
         var mine = VaultBody.CreateEmpty();
-        using (var keePass = KeePassVault.Open(team, null, Master))
+        using (var keePass = KeePassStore.Open(team, null, Master))
         using (var item = keePass.ReadReferenceTarget("AD admin", Api, null, null, [], personal: false, "team"))
         {
             mine.Set(item.ToVaultEntry(Now));
         }
 
-        using (var keePass = KeePassVault.Open(team, null, Master))
+        using (var keePass = KeePassStore.Open(team, null, Master))
         {
             using var content = keePass.Read(Group);
-            var result = KeePassSync.Save(mine, content, keePass, Group, _ => false);
+            var result = StoreSync.Save(mine, content, keePass, Group, _ => false);
             keePass.Save();
-            KeePassSync.RecordSaved(mine, result, Now);
+            StoreSync.RecordSaved(mine, result, Now);
             Assert.Equal(1, result.Added);
         }
 
-        Assert.Equal(KeePassVault.ReferenceKind, RawField(team, "api", KeePassVault.KindField));
-        Assert.Equal(string.Empty, RawField(team, "api", KeePassVault.PersonalField));
+        Assert.Equal(KeePassStore.ReferenceKind, RawField(team, "api", KeePassStore.KindField));
+        Assert.Equal(string.Empty, RawField(team, "api", KeePassStore.PersonalField));
         Assert.Equal(string.Empty, RawField(team, "api", PwDefs.PasswordField));
 
         var teammate = VaultBody.CreateEmpty();
         using (var stores = new Stores((team, "team")))
-        using (var keePass = KeePassVault.Open(team, null, Master))
+        using (var keePass = KeePassStore.Open(team, null, Master))
         using (var content = keePass.Read(Group, stores))
         {
-            Assert.Equal(1, KeePassSync.Load(teammate, content, _ => false, _ => false, Now).Added);
+            Assert.Equal(1, StoreSync.Load(teammate, content, _ => false, _ => false, Now).Added);
         }
 
         Assert.Equal("ad-1", Encoding.UTF8.GetString(teammate.Find(Api)!.GetValue()));
@@ -223,7 +223,7 @@ public sealed class KeePassReferenceTests : IDisposable
         var refused = Assert.Single(result.ReferenceRefused);
         Assert.Equal(Os, refused.Name);
         Assert.Equal("Internet/GitHub", refused.Reference.Title);
-        Assert.Equal($"{DatabaseId(personal)}/{uuid}", RawField(personal, "os", KeePassVault.RefField));
+        Assert.Equal($"{DatabaseId(personal)}/{uuid}", RawField(personal, "os", KeePassStore.RefField));
     }
 
     [Fact]
@@ -240,8 +240,8 @@ public sealed class KeePassReferenceTests : IDisposable
         Assert.Equal("id_ed25519", value.Reference!.Attachment);
         Assert.Equal(key, value.GetValue());
         SavePersonal(mine);
-        Assert.Equal($"{DatabaseId(personal)}/{uuid}/id_ed25519", RawField(personal, "os", KeePassVault.RefField));
-        Assert.Equal(VaultEntry.SshKeyShape, RawField(personal, "os", KeePassVault.RefShapeField));
+        Assert.Equal($"{DatabaseId(personal)}/{uuid}/id_ed25519", RawField(personal, "os", KeePassStore.RefField));
+        Assert.Equal(VaultEntry.SshKeyShape, RawField(personal, "os", KeePassStore.RefShapeField));
         Assert.Equal(0u, BinaryCount(personal, "os"));
 
         var otherPc = VaultBody.CreateEmpty();
@@ -292,29 +292,29 @@ public sealed class KeePassReferenceTests : IDisposable
     private VaultEntry Reference(VaultBody body, string search, string? store = null)
     {
         var declaration = body.Find(Os)!;
-        using var keePass = KeePassVault.Open(store ?? personal, null, Master);
+        using var keePass = KeePassStore.Open(store ?? personal, null, Master);
         using var item = keePass.ReadReferenceTarget(
             search, Os, declaration.RequiredShape ?? VaultEntry.SecretKind, declaration.RequiredPath, [], personal: true, store is null ? "mine" : "team");
         body.SetPersonalValue(Os, item.ToVaultEntry(Now));
         return body.Find(Os)!;
     }
 
-    private KeePassSaveResult SavePersonal(VaultBody body)
+    private StoreSaveResult SavePersonal(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(personal, null, Master);
+        using var keePass = KeePassStore.Open(personal, null, Master);
         using var content = keePass.Read(Group);
-        var result = KeePassSync.SavePersonal(body, content, keePass, Group, withDeclaration: false, _ => false);
+        var result = StoreSync.SavePersonal(body, content, keePass, Group, withDeclaration: false, _ => false);
         keePass.Save();
-        KeePassSync.RecordSaved(body, result, Now);
+        StoreSync.RecordSaved(body, result, Now);
         return result;
     }
 
-    private KeePassLoadResult LoadPersonal(VaultBody body, Func<EntryName, bool>? takeConflict = null)
+    private StoreLoadResult LoadPersonal(VaultBody body, Func<EntryName, bool>? takeConflict = null)
     {
         using var stores = new Stores((personal, "mine"), (team, "team"));
-        using var keePass = KeePassVault.Open(personal, null, Master);
+        using var keePass = KeePassStore.Open(personal, null, Master);
         using var content = keePass.Read(Group, stores);
-        return KeePassSync.LoadPersonal(body, content, takeConflict ?? (_ => false), Now);
+        return StoreSync.LoadPersonal(body, content, takeConflict ?? (_ => false), Now);
     }
 
     private sealed class Stores : IReferenceStores, IDisposable
@@ -322,18 +322,18 @@ public sealed class KeePassReferenceTests : IDisposable
         private readonly List<ReferenceStore> opened;
 
         public Stores(params (string Path, string Name)[] stores) =>
-            opened = stores.Select(store => new ReferenceStore(KeePassVault.Open(store.Path, null, Master), store.Name)).ToList();
+            opened = stores.Select(store => new ReferenceStore(KeePassStore.Open(store.Path, null, Master), store.Name)).ToList();
 
-        public ReferenceStore Open(KeePassReference reference, bool personal) =>
-            opened.FirstOrDefault(store => string.Equals(store.Vault.DatabaseId, reference.StoreId, StringComparison.OrdinalIgnoreCase))
+        public ReferenceStore Open(ItemReference reference, bool personal) =>
+            opened.FirstOrDefault(store => string.Equals(store.Store.DatabaseId, reference.StoreId, StringComparison.OrdinalIgnoreCase))
                 ?? throw new VaultException("its value is in a store this test doesn't know.");
 
-        public void Dispose() => opened.ForEach(store => store.Vault.Dispose());
+        public void Dispose() => opened.ForEach(store => store.Store.Dispose());
     }
 
     private static string DatabaseId(string path)
     {
-        using var keePass = KeePassVault.Open(path, null, Master);
+        using var keePass = KeePassStore.Open(path, null, Master);
         return keePass.DatabaseId;
     }
 

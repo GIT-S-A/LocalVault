@@ -22,7 +22,7 @@
     AliasesToExport      = @('lv')
     PrivateData          = @{
         PSData = @{
-            Prerelease = 'beta17'
+            Prerelease = 'beta18'
             Tags       = @('Secrets', 'DPAPI', 'Vault', 'Windows')
             ProjectUri = 'https://github.com/GIT-S-A/LocalVault'
             LicenseUri = 'https://github.com/GIT-S-A/LocalVault/blob/main/LICENSE'

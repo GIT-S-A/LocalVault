@@ -9,7 +9,7 @@ namespace LocalVault.PowerShell;
 public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 {
     private VaultLocation? location;
-    private VaultStore? store;
+    private VaultFile? store;
 
     [Parameter]
     [ValidateNotNullOrEmpty]
@@ -22,7 +22,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     internal VaultLocation VaultLocation => Location;
 
-    protected VaultStore VaultFile => store ??= new(Location, new ClixmlLegacyReader());
+    protected VaultFile VaultFile => store ??= new(Location, new ClixmlLegacyReader());
 
     protected static bool IsInteractive =>
         Environment.UserInteractive

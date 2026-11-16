@@ -4,7 +4,7 @@ using KeePassLib.Cryptography.KeyDerivation;
 using KeePassLib.Keys;
 using KeePassLib.Serialization;
 
-namespace LocalVault.Core.Tests;
+namespace LocalVault.KeePass.Tests;
 
 public sealed class PersonalStoreTests : IDisposable
 {
@@ -38,7 +38,7 @@ public sealed class PersonalStoreTests : IDisposable
 
         Assert.Equal(string.Empty, RawField(team, "os", PwDefs.PasswordField));
         Assert.Equal("my-password", RawField(personal, "os", PwDefs.PasswordField));
-        Assert.Equal(VaultEntry.SecretKind, RawField(personal, "os", KeePassVault.KindField));
+        Assert.Equal(VaultEntry.SecretKind, RawField(personal, "os", KeePassStore.KindField));
 
         var other = VaultBody.CreateEmpty();
         LoadTeam(other);
@@ -50,8 +50,8 @@ public sealed class PersonalStoreTests : IDisposable
         Assert.False(filled.IsMissing);
         Assert.Equal("your own account", filled.RequiredNote);
         Assert.Equal("my-password", Encoding.UTF8.GetString(filled.GetValue()));
-        Assert.All(ComparePersonal(personal, other), c => Assert.Equal(KeePassSyncState.Saved, c.State));
-        Assert.All(CompareTeam(other), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(ComparePersonal(personal, other), c => Assert.Equal(StoreSyncState.Saved, c.State));
+        Assert.All(CompareTeam(other), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
 
     [Fact]
@@ -65,7 +65,7 @@ public sealed class PersonalStoreTests : IDisposable
         SaveTeam(mine);
         SavePersonal(personal, mine);
 
-        Assert.Equal(VaultEntry.CredentialShape, RawField(team, "os", KeePassVault.ShapeField));
+        Assert.Equal(VaultEntry.CredentialShape, RawField(team, "os", KeePassStore.ShapeField));
         Assert.Equal("jdoe", RawField(personal, "os", PwDefs.UserNameField));
 
         var other = VaultBody.CreateEmpty();
@@ -98,7 +98,7 @@ public sealed class PersonalStoreTests : IDisposable
         SaveTeam(mine);
         SavePersonal(team, mine, withDeclaration: true);
 
-        Assert.Equal(VaultEntry.RequiredKind, RawField(team, "os", KeePassVault.KindField));
+        Assert.Equal(VaultEntry.RequiredKind, RawField(team, "os", KeePassStore.KindField));
         Assert.Equal("your own account", RawField(team, "os", PwDefs.NotesField));
         Assert.Equal("my-password", RawField(team, "os", PwDefs.PasswordField));
         Assert.Equal(0, SaveTeam(mine).Updated);
@@ -165,12 +165,12 @@ public sealed class PersonalStoreTests : IDisposable
 
         SetValue(mine, "v1-local");
         var blocked = SavePersonal(personal, mine);
-        Assert.Equal(KeePassSyncState.Conflict, Assert.Single(blocked.Skipped).State);
+        Assert.Equal(StoreSyncState.Conflict, Assert.Single(blocked.Skipped).State);
         Assert.Equal("v2", RawField(personal, "os", PwDefs.PasswordField));
 
         var fresh = Declared(null);
         SetValue(fresh, "v1");
-        fresh.RecordKeePassBase(Os, KeePassSync.PersonalKey(DatabaseId(personal)), fresh.Find(Os)!.ContentHash(), Now);
+        fresh.RecordKeePassBase(Os, StoreSync.PersonalKey(DatabaseId(personal)), fresh.Find(Os)!.ContentHash(), Now);
         Assert.Equal(1, LoadPersonal(personal, fresh).Taken);
         Assert.Equal("v2", Encoding.UTF8.GetString(fresh.Find(Os)!.GetValue()));
     }
@@ -187,7 +187,7 @@ public sealed class PersonalStoreTests : IDisposable
 
         Assert.Equal(1, result.Deleted);
         Assert.Empty(mine.KeePassRemovals);
-        using var keePass = KeePassVault.Open(personal, null, Master);
+        using var keePass = KeePassStore.Open(personal, null, Master);
         using var content = keePass.Read(Group);
         Assert.Empty(content.Items);
     }
@@ -240,10 +240,10 @@ public sealed class PersonalStoreTests : IDisposable
         SaveTeam(mine);
         SavePersonal(personal, mine);
 
-        Assert.Equal("~/.ssh/id_ed25519", RawField(team, "os", KeePassVault.RequiredPathField));
-        Assert.Equal(VaultEntry.FileShape, RawField(team, "os", KeePassVault.ShapeField));
-        Assert.Equal(string.Empty, RawField(team, "os", KeePassVault.PathField));
-        Assert.Equal("~/.ssh/id_ed25519", RawField(personal, "os", KeePassVault.PathField));
+        Assert.Equal("~/.ssh/id_ed25519", RawField(team, "os", KeePassStore.RequiredPathField));
+        Assert.Equal(VaultEntry.FileShape, RawField(team, "os", KeePassStore.ShapeField));
+        Assert.Equal(string.Empty, RawField(team, "os", KeePassStore.PathField));
+        Assert.Equal("~/.ssh/id_ed25519", RawField(personal, "os", KeePassStore.PathField));
 
         var other = VaultBody.CreateEmpty();
         LoadTeam(other);
@@ -319,61 +319,61 @@ public sealed class PersonalStoreTests : IDisposable
     private static void SetValue(VaultBody body, string value) =>
         body.Set(VaultEntry.NewSecret(Os, Encoding.UTF8.GetBytes(value), Now));
 
-    private KeePassSaveResult SaveTeam(VaultBody body, bool replace = false) => SaveShared(team, body, replace, mirror: false);
+    private StoreSaveResult SaveTeam(VaultBody body, bool replace = false) => SaveShared(team, body, replace, mirror: false);
 
-    private static KeePassSaveResult SaveMirror(string path, VaultBody body) => SaveShared(path, body, replace: false, mirror: true);
+    private static StoreSaveResult SaveMirror(string path, VaultBody body) => SaveShared(path, body, replace: false, mirror: true);
 
-    private static KeePassSaveResult SaveShared(string path, VaultBody body, bool replace, bool mirror)
+    private static StoreSaveResult SaveShared(string path, VaultBody body, bool replace, bool mirror)
     {
-        using var keePass = KeePassVault.Open(path, null, Master);
+        using var keePass = KeePassStore.Open(path, null, Master);
         using var content = keePass.Read(Group);
-        var result = KeePassSync.Save(body, content, keePass, Group, _ => replace, mirror, excludeRequired: mirror);
+        var result = StoreSync.Save(body, content, keePass, Group, _ => replace, mirror, excludeRequired: mirror);
         keePass.Save();
-        KeePassSync.RecordSaved(body, result, Now);
+        StoreSync.RecordSaved(body, result, Now);
         return result;
     }
 
-    private static KeePassSaveResult SavePersonal(string path, VaultBody body, bool withDeclaration = false)
+    private static StoreSaveResult SavePersonal(string path, VaultBody body, bool withDeclaration = false)
     {
-        using var keePass = KeePassVault.Open(path, null, Master);
+        using var keePass = KeePassStore.Open(path, null, Master);
         using var content = keePass.Read(Group);
-        var result = KeePassSync.SavePersonal(body, content, keePass, Group, withDeclaration, _ => false);
+        var result = StoreSync.SavePersonal(body, content, keePass, Group, withDeclaration, _ => false);
         keePass.Save();
-        KeePassSync.RecordSaved(body, result, Now);
+        StoreSync.RecordSaved(body, result, Now);
         return result;
     }
 
-    private KeePassLoadResult LoadTeam(VaultBody body)
+    private StoreLoadResult LoadTeam(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(team, null, Master);
+        using var keePass = KeePassStore.Open(team, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.Load(body, content, _ => false, _ => false, Now);
+        return StoreSync.Load(body, content, _ => false, _ => false, Now);
     }
 
-    private static KeePassLoadResult LoadPersonal(string path, VaultBody body)
+    private static StoreLoadResult LoadPersonal(string path, VaultBody body)
     {
-        using var keePass = KeePassVault.Open(path, null, Master);
+        using var keePass = KeePassStore.Open(path, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.LoadPersonal(body, content, _ => false, Now);
+        return StoreSync.LoadPersonal(body, content, _ => false, Now);
     }
 
-    private static IReadOnlyList<KeePassComparison> ComparePersonal(string path, VaultBody body)
+    private static IReadOnlyList<StoreComparison> ComparePersonal(string path, VaultBody body)
     {
-        using var keePass = KeePassVault.Open(path, null, Master);
+        using var keePass = KeePassStore.Open(path, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.ComparePersonal(body, content);
+        return StoreSync.ComparePersonal(body, content);
     }
 
-    private IReadOnlyList<KeePassComparison> CompareTeam(VaultBody body)
+    private IReadOnlyList<StoreComparison> CompareTeam(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(team, null, Master);
+        using var keePass = KeePassStore.Open(team, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.Compare(body, content);
+        return StoreSync.Compare(body, content);
     }
 
     private static string DatabaseId(string path)
     {
-        using var keePass = KeePassVault.Open(path, null, Master);
+        using var keePass = KeePassStore.Open(path, null, Master);
         return keePass.DatabaseId;
     }
 

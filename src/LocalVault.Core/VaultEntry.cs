@@ -162,23 +162,23 @@ public sealed class VaultEntry
         }
     }
 
-    public KeePassReference? Reference =>
+    public ItemReference? Reference =>
         Meta?[RefField] is JsonObject reference
-            ? new KeePassReference(
+            ? new ItemReference(
                 reference[RefStoreField]!.GetValue<string>(),
                 reference[RefItemField]!.GetValue<string>(),
                 reference[RefAttachmentField]?.GetValue<string>(),
                 reference[RefTitleField]!.GetValue<string>())
             : null;
 
-    public VaultEntry WithReference(KeePassReference? reference)
+    public VaultEntry WithReference(ItemReference? reference)
     {
         var copy = Clone();
         copy.SetReference(reference);
         return copy;
     }
 
-    private void SetReference(KeePassReference? reference)
+    private void SetReference(ItemReference? reference)
     {
         if (reference is null)
         {
@@ -871,8 +871,8 @@ public sealed class VaultEntry
 
         if (fields[RefField] is { } reference
             && !(reference is JsonObject refFields
-                && refFields[RefStoreField] is JsonValue store && store.TryGetValue<string>(out var storeText) && KeePassReference.IsUuid(storeText)
-                && refFields[RefItemField] is JsonValue item && item.TryGetValue<string>(out var itemText) && KeePassReference.IsUuid(itemText)
+                && refFields[RefStoreField] is JsonValue store && store.TryGetValue<string>(out var storeText) && ItemReference.IsUuid(storeText)
+                && refFields[RefItemField] is JsonValue item && item.TryGetValue<string>(out var itemText) && ItemReference.IsUuid(itemText)
                 && refFields[RefTitleField] is JsonValue title && title.TryGetValue<string>(out _)
                 && IsOptionalString(refFields[RefAttachmentField])))
         {

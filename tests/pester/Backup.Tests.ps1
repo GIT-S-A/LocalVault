@@ -18,7 +18,7 @@ Describe 'Leftover backups' {
             param([string]$Destination)
             $keyFile = [IO.File]::ReadAllBytes((Join-Path $fixtures 'localvault-2-beta1.lvkey'))
             $settings = [LocalVault.Core.BackupSettings]::Create('0123456789abcdef', $Destination, 'fixture passphrase 2', $keyFile)
-            $store = [LocalVault.Core.VaultStore]::new($location, $null)
+            $store = [LocalVault.Core.VaultFile]::new($location, $null)
             $store.Update([Action[LocalVault.Core.VaultBody]] { param($body) $body.Backup = $settings }, $null) | Out-Null
         }
         $script:addBackup = {

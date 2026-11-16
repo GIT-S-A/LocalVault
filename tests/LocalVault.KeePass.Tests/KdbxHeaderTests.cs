@@ -4,7 +4,7 @@ using KeePassLib.Cryptography.KeyDerivation;
 using KeePassLib.Keys;
 using KeePassLib.Serialization;
 
-namespace LocalVault.Core.Tests;
+namespace LocalVault.KeePass.Tests;
 
 public sealed class KdbxHeaderTests : IDisposable
 {
@@ -22,7 +22,7 @@ public sealed class KdbxHeaderTests : IDisposable
         Assert.Null(KdbxHeader.ReadDatabaseId(path));
 
         string id;
-        using (var vault = KeePassVault.Open(path, null, Master))
+        using (var vault = KeePassStore.Open(path, null, Master))
         {
             id = vault.DatabaseId;
             vault.Save();

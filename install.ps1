@@ -244,7 +244,7 @@ elseif (-not $ModulePath) {
     $ModulePath = & (Join-Path $PSScriptRoot 'tools/build.ps1') | Select-Object -Last 1
 }
 
-$required = 'LocalVault.psd1', 'LocalVault.PowerShell.dll', 'LocalVault.Core.dll', 'KeePassLib.dll'
+$required = 'LocalVault.psd1', 'LocalVault.PowerShell.dll', 'LocalVault.Core.dll', 'LocalVault.KeePass.dll', 'KeePassLib.dll'
 $absent = @($required | Where-Object { -not $ModulePath -or -not (Test-Path -LiteralPath (Join-Path $ModulePath $_)) })
 if ($absent.Count -gt 0) {
     throw "The build did not produce $($absent -join ', ') in '$ModulePath'. Nothing was installed."

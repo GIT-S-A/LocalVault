@@ -6,7 +6,7 @@ using KeePassLib.Keys;
 using KeePassLib.Security;
 using KeePassLib.Serialization;
 
-namespace LocalVault.Core.Tests;
+namespace LocalVault.KeePass.Tests;
 
 public sealed class KeePassSyncTests : IDisposable
 {
@@ -29,16 +29,16 @@ public sealed class KeePassSyncTests : IDisposable
     public void GroupFollowsRepositoryFolderAndFileName()
     {
         var root = directory.CreateDirectory("repo");
-        Assert.Equal(["LocalVault", "repo"], KeePassGroupPath.For(new VaultLocation(Path.Combine(root, "secrets.local.lv"), VaultPathSource.GitRoot, root)));
+        Assert.Equal(["LocalVault", "repo"], StoreGroupPath.For(new VaultLocation(Path.Combine(root, "secrets.local.lv"), VaultPathSource.GitRoot, root)));
         Assert.Equal(
             ["LocalVault", "repo", "infra", "deep"],
-            KeePassGroupPath.For(new VaultLocation(Path.Combine(root, "infra", "deep", "secrets.local.lv"), VaultPathSource.Explicit, root)));
+            StoreGroupPath.For(new VaultLocation(Path.Combine(root, "infra", "deep", "secrets.local.lv"), VaultPathSource.Explicit, root)));
         Assert.Equal(
             ["LocalVault", "repo", "other.lv"],
-            KeePassGroupPath.For(new VaultLocation(Path.Combine(root, "other.lv"), VaultPathSource.Explicit, root)));
+            StoreGroupPath.For(new VaultLocation(Path.Combine(root, "other.lv"), VaultPathSource.Explicit, root)));
         Assert.Equal(
             ["LocalVault", "loose"],
-            KeePassGroupPath.For(new VaultLocation(Path.Combine(directory.Path, "loose", "secrets.local.lv"), VaultPathSource.Explicit, null)));
+            StoreGroupPath.For(new VaultLocation(Path.Combine(directory.Path, "loose", "secrets.local.lv"), VaultPathSource.Explicit, null)));
     }
 
     [Fact]
@@ -56,12 +56,12 @@ public sealed class KeePassSyncTests : IDisposable
             var secret = group.Entries.Single(e => e.Strings.ReadSafe(PwDefs.TitleField) == "common/db");
             Assert.Equal("s3cret", secret.Strings.ReadSafe(PwDefs.PasswordField));
             var file = group.Entries.Single(e => e.Strings.ReadSafe(PwDefs.TitleField) == "clouds.yaml");
-            Assert.Equal("infra/clouds.yaml", file.Strings.ReadSafe(KeePassVault.PathField));
+            Assert.Equal("infra/clouds.yaml", file.Strings.ReadSafe(KeePassStore.PathField));
             Assert.Equal("a: 1", Encoding.UTF8.GetString(file.Binaries.Get("clouds.yaml").ReadData()));
         }
 
         Assert.All(body.Entries, entry => Assert.Equal(entry.ContentHash(), entry.KeePassBase));
-        Assert.All(Compare(body), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(body), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
 
     [Fact]
@@ -87,7 +87,7 @@ public sealed class KeePassSyncTests : IDisposable
             Assert.StartsWith("otpauth://totp/", entry.Strings.ReadSafe("otp"), StringComparison.Ordinal);
         }
 
-        Assert.All(Compare(body), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(body), c => Assert.Equal(StoreSyncState.Saved, c.State));
         var loaded = VaultBody.CreateEmpty();
         Load(loaded);
         Assert.Equal(body.Entries[0].ContentHash(), Assert.Single(loaded.Entries).ContentHash());
@@ -105,7 +105,7 @@ public sealed class KeePassSyncTests : IDisposable
 
         using var raw = OpenRaw();
         var entry = Single(raw, "gh");
-        Assert.Equal("secret", entry.Strings.ReadSafe(KeePassVault.KindField));
+        Assert.Equal("secret", entry.Strings.ReadSafe(KeePassStore.KindField));
         Assert.DoesNotContain(entry.Strings.GetKeys(), key => key is PwDefs.UserNameField or PwDefs.UrlField or "otp" || key.StartsWith("KP2A_URL", StringComparison.Ordinal) || key.StartsWith("TimeOtp-", StringComparison.Ordinal));
     }
 
@@ -131,7 +131,7 @@ public sealed class KeePassSyncTests : IDisposable
         Assert.Equal("JBSWY3DPEHPK3PXP", xc.Totp!.Secret);
         Assert.Equal(["https://first", "https://second"], xc.Urls);
         Assert.True(body.Find(EntryName.Parse("plain"))!.IsSecret);
-        Assert.All(Compare(body), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(body), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
 
     [Fact]
@@ -145,7 +145,7 @@ public sealed class KeePassSyncTests : IDisposable
             raw.Save();
         }
 
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
 
         Assert.Equal("fine", Assert.Single(content.Items).Name.FullName);
@@ -202,7 +202,7 @@ public sealed class KeePassSyncTests : IDisposable
 
         Set(mine, "b", "x");
         var saved = Save(mine);
-        Assert.Equal(KeePassSyncState.ChangedInKeePass, Assert.Single(saved.Skipped).State);
+        Assert.Equal(StoreSyncState.ChangedInKeePass, Assert.Single(saved.Skipped).State);
 
         var loaded = Load(mine);
         Assert.Equal(1, loaded.Taken);
@@ -220,7 +220,7 @@ public sealed class KeePassSyncTests : IDisposable
         Save(theirs);
         Set(mine, "a", "mine");
 
-        Assert.Equal(KeePassSyncState.Conflict, Assert.Single(Save(mine).Skipped).State);
+        Assert.Equal(StoreSyncState.Conflict, Assert.Single(Save(mine).Skipped).State);
         Assert.Equal(1, Load(mine).Kept);
         Assert.Equal("mine", Value(mine, "a"));
 
@@ -255,7 +255,7 @@ public sealed class KeePassSyncTests : IDisposable
         Assert.Equal("mine", RawPassword("conflict"));
         Assert.Equal("2", RawPassword("removed"));
         Assert.Equal(["changed", "conflict", "extra", "removed"], Titles());
-        Assert.All(Compare(mine).Where(c => c.Name.FullName != "extra"), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(mine).Where(c => c.Name.FullName != "extra"), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
 
     [Fact]
@@ -327,7 +327,7 @@ public sealed class KeePassSyncTests : IDisposable
         theirs.Remove(EntryName.Parse("a"));
         Save(theirs);
 
-        Assert.Equal(KeePassSyncState.RemovedInKeePass, Assert.Single(Save(mine).Skipped).State);
+        Assert.Equal(StoreSyncState.RemovedInKeePass, Assert.Single(Save(mine).Skipped).State);
         Assert.Equal(1, Load(mine, remove: false).Kept);
         Assert.Null(mine.Find(EntryName.Parse("a"))!.KeePassBase);
         Assert.Equal(1, Save(mine).Added);
@@ -357,9 +357,9 @@ public sealed class KeePassSyncTests : IDisposable
         }
 
         var body = Body();
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        KeePassSync.Load(body, content, _ => false, _ => false, Now);
+        StoreSync.Load(body, content, _ => false, _ => false, Now);
 
         Assert.Equal("typed in KeePass", Value(body, "by-hand"));
         Assert.Single(body.Entries);
@@ -370,10 +370,10 @@ public sealed class KeePassSyncTests : IDisposable
     public void SaveMergesChangesMadeToTheFileMeanwhile()
     {
         var body = Body(("a", "1"));
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
             using var content = keePass.Read(Group);
-            KeePassSync.Save(body, content, keePass, Group, _ => false);
+            StoreSync.Save(body, content, keePass, Group, _ => false);
 
             using (var other = OpenRaw())
             {
@@ -398,12 +398,12 @@ public sealed class KeePassSyncTests : IDisposable
         var path = directory.Combine("keyed.kdbx");
         CreateDatabase(path, recycleBin: true, keyFile);
 
-        using (KeePassVault.Open(path, keyFile, Master))
+        using (KeePassStore.Open(path, keyFile, Master))
         {
         }
 
-        Assert.Throws<VaultException>(() => KeePassVault.Open(path, null, Master));
-        var error = Assert.Throws<VaultException>(() => KeePassVault.Open(database, null, "wrong master"));
+        Assert.Throws<VaultException>(() => KeePassStore.Open(path, null, Master));
+        var error = Assert.Throws<VaultException>(() => KeePassStore.Open(database, null, "wrong master"));
         Assert.DoesNotContain("wrong master", error.Message, StringComparison.Ordinal);
     }
 
@@ -436,17 +436,17 @@ public sealed class KeePassSyncTests : IDisposable
         CreateDatabase(other, recycleBin: true);
         var before = body.ToUtf8();
 
-        using (var keePass = KeePassVault.Open(other, null, Master))
+        using (var keePass = KeePassStore.Open(other, null, Master))
         {
-            Assert.Equal(1, KeePassSync.Copy(body, keePass, Group).Written);
+            Assert.Equal(1, StoreSync.Copy(body, keePass, Group).Written);
             keePass.Save();
         }
 
         Assert.Equal(before, body.ToUtf8());
-        using var copy = KeePassVault.Open(other, null, Master);
+        using var copy = KeePassStore.Open(other, null, Master);
         using var content = copy.Read(Group);
         Assert.Equal(["a"], content.Items.Select(i => i.Name.FullName));
-        Assert.All(Compare(body).Where(c => c.State != KeePassSyncState.Local), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(body).Where(c => c.State != StoreSyncState.Local), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
     [Fact]
     public void RequiredValuesShareTheirDeclarationOnly()
@@ -462,7 +462,7 @@ public sealed class KeePassSyncTests : IDisposable
         {
             var entry = raw.RootGroup.GetEntries(true).Single(e => e.Strings.ReadSafe(PwDefs.TitleField) == "os");
             Assert.Equal("your own account", entry.Strings.ReadSafe(PwDefs.NotesField));
-            Assert.Equal(VaultEntry.RequiredKind, entry.Strings.ReadSafe(KeePassVault.KindField));
+            Assert.Equal(VaultEntry.RequiredKind, entry.Strings.ReadSafe(KeePassStore.KindField));
         }
 
         var theirs = Body();
@@ -500,17 +500,17 @@ public sealed class KeePassSyncTests : IDisposable
         var other = directory.Combine("other.kdbx");
         CreateDatabase(other, recycleBin: true);
 
-        using (var keePass = KeePassVault.Open(other, null, Master))
+        using (var keePass = KeePassStore.Open(other, null, Master))
         {
             using var content = keePass.Read(Group);
-            var result = KeePassSync.Save(body, content, keePass, Group, _ => false);
+            var result = StoreSync.Save(body, content, keePass, Group, _ => false);
             Assert.Equal(1, result.Added);
             keePass.Save();
-            KeePassSync.RecordSaved(body, result, Now);
+            StoreSync.RecordSaved(body, result, Now);
         }
 
         Assert.Equal(2, body.Find(EntryName.Parse("a"))!.KeePassBases.Count);
-        Assert.All(Compare(body), c => Assert.Equal(KeePassSyncState.Saved, c.State));
+        Assert.All(Compare(body), c => Assert.Equal(StoreSyncState.Saved, c.State));
     }
 
     [Fact]
@@ -534,19 +534,19 @@ public sealed class KeePassSyncTests : IDisposable
         var keyringPath = directory.Combine("keyring.kdbx");
         CreateDatabase(keyringPath, recycleBin: true);
         string id;
-        using (var team = KeePassVault.Open(database, null, Master))
+        using (var team = KeePassStore.Open(database, null, Master))
         {
             id = team.DatabaseId;
         }
 
-        using (var keyring = KeePassVault.Open(keyringPath, null, Master))
+        using (var keyring = KeePassStore.Open(keyringPath, null, Master))
         {
             Assert.Null(keyring.FindAutoOpen(id, [database], "PC1"));
             keyring.RememberAutoOpen("team", "{DB_DIR}\\team.kdbx", null, "team secret", id);
             keyring.Save();
         }
 
-        using (var keyring = KeePassVault.Open(keyringPath, null, Master))
+        using (var keyring = KeePassStore.Open(keyringPath, null, Master))
         {
             using var byId = keyring.FindAutoOpen(id, [], "PC1");
             Assert.NotNull(byId);
@@ -558,12 +558,12 @@ public sealed class KeePassSyncTests : IDisposable
 
         using (var raw = new RawDatabase(keyringPath, Key()))
         {
-            var entry = raw.RootGroup.FindCreateGroup(KeePassVault.AutoOpenGroup, false).Entries.Single();
+            var entry = raw.RootGroup.FindCreateGroup(KeePassStore.AutoOpenGroup, false).Entries.Single();
             entry.Strings.Set("IfDevice", new ProtectedString(false, "!PC1"));
             raw.Save();
         }
 
-        using (var keyring = KeePassVault.Open(keyringPath, null, Master))
+        using (var keyring = KeePassStore.Open(keyringPath, null, Master))
         {
             Assert.Null(keyring.FindAutoOpen(id, [], "PC1"));
             using var elsewhere = keyring.FindAutoOpen(id, [], "PC2");
@@ -594,12 +594,12 @@ public sealed class KeePassSyncTests : IDisposable
         Set(body, "d", "new");
         body.Remove(EntryName.Parse("a"));
 
-        var states = KeePassSync.ComparePending(body).ToDictionary(c => c.Name.FullName, c => c.State);
+        var states = StoreSync.ComparePending(body).ToDictionary(c => c.Name.FullName, c => c.State);
 
-        Assert.Equal(KeePassSyncState.RemovalPending, states["a"]);
-        Assert.Equal(KeePassSyncState.Changed, states["b"]);
-        Assert.Equal(KeePassSyncState.Local, states["c"]);
-        Assert.Equal(KeePassSyncState.New, states["d"]);
+        Assert.Equal(StoreSyncState.RemovalPending, states["a"]);
+        Assert.Equal(StoreSyncState.Changed, states["b"]);
+        Assert.Equal(StoreSyncState.Local, states["c"]);
+        Assert.Equal(StoreSyncState.New, states["d"]);
     }
 
     [Fact]
@@ -612,30 +612,30 @@ public sealed class KeePassSyncTests : IDisposable
         var folder = Path.GetFileName(repo.Path);
         IReadOnlyList<string> projectGroup = ["LocalVault", folder];
 
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
-            Assert.True(KeePassSync.MaintainGuides(keePass, location, origin));
-            Assert.False(KeePassSync.MaintainGuides(keePass, location, origin));
+            Assert.True(StoreSync.MaintainGuides(keePass, location, origin));
+            Assert.False(StoreSync.MaintainGuides(keePass, location, origin));
             keePass.Save();
         }
 
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
-            Assert.False(KeePassSync.MaintainGuides(keePass, location, origin));
+            Assert.False(StoreSync.MaintainGuides(keePass, location, origin));
             using var content = keePass.Read(projectGroup);
             Assert.Empty(content.Items);
             Assert.Empty(content.Skipped);
-            Assert.True(KeePassSync.MaintainGuides(keePass, location, origin with { Url = "https://dev.azure.com/org/proj/_git/moved" }));
+            Assert.True(StoreSync.MaintainGuides(keePass, location, origin with { Url = "https://dev.azure.com/org/proj/_git/moved" }));
             keePass.Save();
         }
 
         using var raw = OpenRaw();
         var root = raw.RootGroup.FindCreateGroup("LocalVault", false);
         var install = Assert.Single(root.Entries);
-        Assert.Equal(KeePassVault.InstallTitle, install.Strings.ReadSafe(PwDefs.TitleField));
+        Assert.Equal(KeePassStore.InstallTitle, install.Strings.ReadSafe(PwDefs.TitleField));
         Assert.Contains("install.ps1", install.Strings.ReadSafe(PwDefs.NotesField), StringComparison.Ordinal);
         var entry = Assert.Single(root.FindCreateGroup(folder, false).Entries);
-        Assert.Equal(KeePassVault.OriginTitle, entry.Strings.ReadSafe(PwDefs.TitleField));
+        Assert.Equal(KeePassStore.OriginTitle, entry.Strings.ReadSafe(PwDefs.TitleField));
         Assert.Equal("https://dev.azure.com/org/proj/_git/moved", entry.Strings.ReadSafe(PwDefs.UrlField));
         Assert.Contains($"git clone https://dev.azure.com/org/proj/_git/moved {folder}", entry.Strings.ReadSafe(PwDefs.NotesField), StringComparison.Ordinal);
         Assert.Equal("https://dev.azure.com/org/proj/_git/app", Assert.Single(entry.History).Strings.ReadSafe(PwDefs.UrlField));
@@ -650,10 +650,10 @@ public sealed class KeePassSyncTests : IDisposable
             raw.Save();
         }
 
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         var loose = new VaultLocation(directory.Combine("loose", "secrets.local.lv"), VaultPathSource.Explicit, null);
 
-        Assert.False(KeePassSync.MaintainGuides(keePass, loose, null));
+        Assert.False(StoreSync.MaintainGuides(keePass, loose, null));
     }
 
     [Fact]
@@ -663,23 +663,23 @@ public sealed class KeePassSyncTests : IDisposable
         using (var raw = OpenRaw())
         {
             var entry = new PwEntry(true, true);
-            entry.Strings.Set(PwDefs.TitleField, new ProtectedString(false, KeePassVault.InstallTitle));
+            entry.Strings.Set(PwDefs.TitleField, new ProtectedString(false, KeePassStore.InstallTitle));
             entry.Strings.Set(PwDefs.NotesField, new ProtectedString(false, retired));
             raw.RootGroup.FindCreateGroup("LocalVault", true).AddEntry(entry, true);
             raw.Save();
         }
 
         var loose = new VaultLocation(directory.Combine("loose", "secrets.local.lv"), VaultPathSource.Explicit, null);
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
-            Assert.True(KeePassSync.MaintainGuides(keePass, loose, null));
-            Assert.False(KeePassSync.MaintainGuides(keePass, loose, null));
+            Assert.True(StoreSync.MaintainGuides(keePass, loose, null));
+            Assert.False(StoreSync.MaintainGuides(keePass, loose, null));
             keePass.Save();
         }
 
-        var install = Assert.Single(History(KeePassVault.InstallTitle).Skip(1));
-        Assert.Equal($"git clone {KeePassVault.RepositoryUrl} $d; & \"$d\\install.ps1\"", install.Strings.ReadSafe(PwDefs.NotesField));
-        Assert.Equal(retired, Assert.Single(History(KeePassVault.InstallTitle).SkipLast(1)).Strings.ReadSafe(PwDefs.NotesField));
+        var install = Assert.Single(History(KeePassStore.InstallTitle).Skip(1));
+        Assert.Equal($"git clone {KeePassStore.RepositoryUrl} $d; & \"$d\\install.ps1\"", install.Strings.ReadSafe(PwDefs.NotesField));
+        Assert.Equal(retired, Assert.Single(History(KeePassStore.InstallTitle).SkipLast(1)).Strings.ReadSafe(PwDefs.NotesField));
     }
 
     [Fact]
@@ -688,27 +688,27 @@ public sealed class KeePassSyncTests : IDisposable
         using (var raw = OpenRaw())
         {
             var entry = new PwEntry(true, true);
-            entry.Strings.Set(PwDefs.TitleField, new ProtectedString(false, KeePassVault.InstallTitle));
+            entry.Strings.Set(PwDefs.TitleField, new ProtectedString(false, KeePassStore.InstallTitle));
             entry.Strings.Set(PwDefs.NotesField, new ProtectedString(false, "git clone https://dev.azure.com/acme/Tools/_git/LocalVault $d"));
-            entry.Strings.Set(KeePassVault.KindField, new ProtectedString(false, KeePassVault.InstallKind));
+            entry.Strings.Set(KeePassStore.KindField, new ProtectedString(false, KeePassStore.InstallKind));
             raw.RootGroup.FindCreateGroup("LocalVault", true).AddEntry(entry, true);
             raw.Save();
         }
 
-        using (var keePass = KeePassVault.Open(database, null, Master))
+        using (var keePass = KeePassStore.Open(database, null, Master))
         {
-            Assert.True(KeePassSync.MaintainGuides(keePass, new VaultLocation(directory.Combine("loose", "secrets.local.lv"), VaultPathSource.Explicit, null), null));
+            Assert.True(StoreSync.MaintainGuides(keePass, new VaultLocation(directory.Combine("loose", "secrets.local.lv"), VaultPathSource.Explicit, null), null));
             keePass.Save();
         }
 
-        Assert.Equal(KeePassVault.InstallCommand, History(KeePassVault.InstallTitle)[^1].Strings.ReadSafe(PwDefs.NotesField));
+        Assert.Equal(KeePassStore.InstallCommand, History(KeePassStore.InstallTitle)[^1].Strings.ReadSafe(PwDefs.NotesField));
     }
 
     [Theory]
     [InlineData("README.md")]
     [InlineData("skills/localvault/SKILL.md")]
     public void InstallEntryUsesTheDocumentedInstallLine(string document) =>
-        Assert.Contains(KeePassVault.InstallCommand, File.ReadAllText(RepositoryFile(document)), StringComparison.Ordinal);
+        Assert.Contains(KeePassStore.InstallCommand, File.ReadAllText(RepositoryFile(document)), StringComparison.Ordinal);
 
     [Fact]
     public void ARepositoryWithoutOriginHasNone()
@@ -781,28 +781,28 @@ public sealed class KeePassSyncTests : IDisposable
         db.Close();
     }
 
-    private KeePassSaveResult Save(VaultBody body, bool replace = false, bool mirror = false)
+    private StoreSaveResult Save(VaultBody body, bool replace = false, bool mirror = false)
     {
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        var result = KeePassSync.Save(body, content, keePass, Group, _ => replace, mirror);
+        var result = StoreSync.Save(body, content, keePass, Group, _ => replace, mirror);
         keePass.Save();
-        KeePassSync.RecordSaved(body, result, Now);
+        StoreSync.RecordSaved(body, result, Now);
         return result;
     }
 
-    private KeePassLoadResult Load(VaultBody body, bool take = false, bool remove = false)
+    private StoreLoadResult Load(VaultBody body, bool take = false, bool remove = false)
     {
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.Load(body, content, _ => take, _ => remove, Now);
+        return StoreSync.Load(body, content, _ => take, _ => remove, Now);
     }
 
-    private IReadOnlyList<KeePassComparison> Compare(VaultBody body)
+    private IReadOnlyList<StoreComparison> Compare(VaultBody body)
     {
-        using var keePass = KeePassVault.Open(database, null, Master);
+        using var keePass = KeePassStore.Open(database, null, Master);
         using var content = keePass.Read(Group);
-        return KeePassSync.Compare(body, content);
+        return StoreSync.Compare(body, content);
     }
 
     private RawDatabase OpenRaw() => new(database, Key());

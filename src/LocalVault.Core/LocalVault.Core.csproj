@@ -8,7 +8,4 @@
   <ItemGroup>
     <InternalsVisibleTo Include="LocalVault.Core.Tests" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="..\KeePassLib\KeePassLib.csproj" />
-  </ItemGroup>
 </Project>

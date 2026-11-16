@@ -3,7 +3,7 @@ using LocalVault.Core;
 
 namespace LocalVault.Core.Tests;
 
-public sealed class VaultStoreTests : IDisposable
+public sealed class VaultFileTests : IDisposable
 {
     private static readonly DateTimeOffset Created = new(2026, 10, 8, 0, 0, 0, TimeSpan.Zero);
     private readonly TempDirectory directory = new();
@@ -20,7 +20,7 @@ public sealed class VaultStoreTests : IDisposable
 
         Assert.False(snapshot.Exists);
         Assert.Empty(snapshot.Body.Entries);
-        Assert.Equal(VaultStore.AbsentFingerprint, snapshot.Fingerprint);
+        Assert.Equal(VaultFile.AbsentFingerprint, snapshot.Fingerprint);
         Assert.Empty(Directory.EnumerateFileSystemEntries(directory.Path));
     }
 
@@ -104,7 +104,7 @@ public sealed class VaultStoreTests : IDisposable
 
         Parallel.For(0, 4, writer =>
         {
-            var store = new VaultStore(new VaultLocation(path, VaultPathSource.Explicit, null));
+            var store = new VaultFile(new VaultLocation(path, VaultPathSource.Explicit, null));
             for (var i = 0; i < 15; i++)
             {
                 store.Update(body => Put(body, $"w{writer}-{i}", "x"));
@@ -261,7 +261,7 @@ public sealed class VaultStoreTests : IDisposable
     {
         legacy.Values = [new("a", "1")];
         File.WriteAllText(directory.Combine("secrets.local.clixml"), "legacy");
-        var store = new VaultStore(new VaultLocation(directory.Combine("other.lv"), VaultPathSource.Explicit, null), legacy);
+        var store = new VaultFile(new VaultLocation(directory.Combine("other.lv"), VaultPathSource.Explicit, null), legacy);
 
         store.Update(body => Put(body, "b", "2"), new VaultUpdateOptions { AllowCreate = true });
 
@@ -364,7 +364,7 @@ public sealed class VaultStoreTests : IDisposable
         using var repo = TempDirectory.GitRepository(gitignore: "*.clixml\n");
         File.WriteAllText(repo.Combine("secrets.local.clixml"), "<Objs />");
         legacy.Values = [new("a", "1")];
-        var store = new VaultStore(VaultLocation.Resolve(repo.Combine("secrets.local.lv"), null, repo.Path), legacy);
+        var store = new VaultFile(VaultLocation.Resolve(repo.Combine("secrets.local.lv"), null, repo.Path), legacy);
 
         var error = Assert.Throws<VaultException>(() => store.Update(body => Put(body, "b", "2")));
 
@@ -374,7 +374,7 @@ public sealed class VaultStoreTests : IDisposable
         Assert.True(File.Exists(store.Location.LegacyPath!));
     }
 
-    private VaultStore NewStore() =>
+    private VaultFile NewStore() =>
         new(new VaultLocation(directory.Combine("secrets.local.lv"), VaultPathSource.Explicit, null), legacy);
 
     private static void Put(VaultBody body, string name, string value) =>

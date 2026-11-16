@@ -28,7 +28,7 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
 {
     private const int MaxUnlockChain = 8;
     private readonly StoreRegistry registry = new(StoreRegistry.DefaultPath);
-    private readonly Dictionary<string, (KeePassVault Vault, StoreDefinition Store)> opened = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, (IStore Vault, StoreDefinition Store)> opened = new(StringComparer.OrdinalIgnoreCase);
 
     public StoreRegistry Registry => registry;
 
@@ -39,9 +39,9 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
     public IReadOnlyList<StoreResolution> MirrorsFor(VaultLocation location, StoreResolution primary) =>
         storeName is null ? StoreResolver.MirrorsFor(location, primary, registry) : [];
 
-    public (KeePassVault Vault, StoreDefinition Store) For(VaultLocation location) => For(Resolve(location));
+    public (IStore Vault, StoreDefinition Store) For(VaultLocation location) => For(Resolve(location));
 
-    public (KeePassVault Vault, StoreDefinition Store) For(StoreResolution resolution)
+    public (IStore Vault, StoreDefinition Store) For(StoreResolution resolution)
     {
         ArgumentNullException.ThrowIfNull(resolution);
         var id = resolution.DatabaseId;
@@ -63,7 +63,7 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
         return pair;
     }
 
-    public KeePassVault Explicit(StoreDefinition store)
+    public IStore Explicit(StoreDefinition store)
     {
         ArgumentNullException.ThrowIfNull(store);
         return OpenStore(store, store.Id, 0).Vault;
@@ -79,7 +79,7 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
 
     private static string TargetKey(StoreDefinition store) => "target:" + Path.GetFullPath(store.ExpandedTarget);
 
-    private (KeePassVault Vault, StoreDefinition Store) Remember(KeePassVault vault, StoreDefinition store)
+    private (IStore Vault, StoreDefinition Store) Remember(IStore vault, StoreDefinition store)
     {
         if (store.Id is { } recorded && !string.Equals(recorded, vault.DatabaseId, StringComparison.OrdinalIgnoreCase))
         {
@@ -95,18 +95,14 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
         return pair;
     }
 
-    private (KeePassVault Vault, StoreDefinition Store) OpenStore(StoreDefinition store, string? id, int depth)
+    private (IStore Vault, StoreDefinition Store) OpenStore(StoreDefinition store, string? id, int depth)
     {
         if (opened.TryGetValue(TargetKey(store), out var hit))
         {
             return hit;
         }
 
-        if (store.Type != StoreTypes.KeePass)
-        {
-            throw new VaultException($"Store '{store.Name}' is of type '{store.Type}', which this LocalVault doesn't support. Update it with lv update.");
-        }
-
+        _ = StoreProviders.For(store);
         if (store.UnlockWith is null)
         {
             host.Tell($"Opening store '{store.Name}' (KeePass {store.ExpandedTarget}).");
@@ -120,14 +116,16 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
 
         var unlockerStore = registry.FindByName(store.UnlockWith)
             ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{store.UnlockWith}', which isn't defined on this PC. Add it with lv store add {store.UnlockWith} <target>.");
-        var (unlocker, _) = OpenStore(unlockerStore, unlockerStore.Id, depth + 1);
+        var (unlocking, _) = OpenStore(unlockerStore, unlockerStore.Id, depth + 1);
+        var unlocker = unlocking as IUnlockingStore
+            ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{unlockerStore.Name}', a {unlockerStore.Type} store, which can't keep other stores' passwords. Remove it with lv store set {store.Name} --no-unlock.");
         registry.RecordId(unlockerStore, unlocker.DatabaseId);
         using (var target = unlocker.FindAutoOpen(id ?? store.Id, [store.ExpandedTarget], Environment.MachineName))
         {
             if (target is not null)
             {
                 host.Tell($"Opening store '{store.Name}' (KeePass {target.Path}) with the password kept in '{unlockerStore.Name}'.");
-                return Remember(KeePassVault.Open(target.Path, target.KeyFile ?? store.ExpandedKeyFile, target.Password), store);
+                return Remember(StoreProviders.For(store).Open(target.Path, target.KeyFile ?? store.ExpandedKeyFile, target.Password), store);
             }
         }
 
@@ -135,7 +133,7 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
         var master = ReadMaster(store);
         try
         {
-            var vault = KeePassVault.Open(store.ExpandedTarget, store.ExpandedKeyFile, master);
+            var vault = StoreProviders.For(store).Open(store.ExpandedTarget, store.ExpandedKeyFile, master);
             if (host.CanConfirm && host.AskYesNo($"Keep the password of '{store.Name}' in '{unlockerStore.Name}' (AutoOpen group), so that next time '{store.Name}' opens with it?"))
             {
                 unlocker.RememberAutoOpen(store.Name, store.ExpandedTarget, store.ExpandedKeyFile, master, vault.DatabaseId);
@@ -151,12 +149,12 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
         }
     }
 
-    private KeePassVault Prompted(StoreDefinition store)
+    private IStore Prompted(StoreDefinition store)
     {
         var master = ReadMaster(store);
         try
         {
-            return KeePassVault.Open(store.ExpandedTarget, store.ExpandedKeyFile, master);
+            return StoreProviders.For(store).Open(store.ExpandedTarget, store.ExpandedKeyFile, master);
         }
         finally
         {
@@ -177,7 +175,7 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
 
 internal sealed record VaultSyncTotals(int Vaults, int Added, int Updated, int Removed, int Kept);
 
-internal sealed record PersonalTarget(KeePassVault Vault, StoreDefinition Store, bool WithDeclaration);
+internal sealed record PersonalTarget(IStore Vault, StoreDefinition Store, bool WithDeclaration);
 
 internal sealed class PersonalStore(IVaultHost host, StoreAccess access)
 {
@@ -196,7 +194,7 @@ internal sealed class PersonalStore(IVaultHost host, StoreAccess access)
             return null;
         }
 
-        (KeePassVault Vault, StoreDefinition Store) opened;
+        (IStore Vault, StoreDefinition Store) opened;
         try
         {
             opened = access.For(new StoreResolution(primary.Vault, new StoreReference(Definition.Name, Definition.Id), Definition, null));
@@ -241,7 +239,7 @@ internal sealed class ReferenceStores(StoreAccess access, VaultLocation location
 {
     private readonly Dictionary<string, string> failures = new(StringComparer.OrdinalIgnoreCase);
 
-    public ReferenceStore Open(KeePassReference reference, bool personal)
+    public ReferenceStore Open(ItemReference reference, bool personal)
     {
         ArgumentNullException.ThrowIfNull(reference);
         var id = reference.StoreId;
@@ -317,7 +315,7 @@ internal static class RepositoryVaults
 
     public static string Label(VaultLocation location) => StoreResolver.VaultLabel(location);
 
-    public static VaultStore StoreFor(VaultLocation location) => new(location, new ClixmlLegacyReader());
+    public static VaultFile StoreFor(VaultLocation location) => new(location, new ClixmlLegacyReader());
 
     private static bool Same(VaultLocation a, VaultLocation b) => string.Equals(a.Path, b.Path, StringComparison.OrdinalIgnoreCase);
 }
@@ -335,7 +333,7 @@ internal static class VaultSync
         ArgumentNullException.ThrowIfNull(access);
         ArgumentNullException.ThrowIfNull(vaults);
         var done = new List<SavedToStore>();
-        var snapshots = new Dictionary<VaultLocation, (VaultStore Store, VaultSnapshot Snapshot)>();
+        var snapshots = new Dictionary<VaultLocation, (VaultFile Store, VaultSnapshot Snapshot)>();
         var undefined = new List<StoreNotDefinedException>();
         var origins = new Dictionary<string, RepositoryOrigin?>(StringComparer.OrdinalIgnoreCase);
         var personal = new PersonalStore(host, access);
@@ -413,7 +411,7 @@ internal static class VaultSync
                 {
                     foreach (var result in results)
                     {
-                        KeePassSync.RecordSaved(body, result, host.Clock);
+                        StoreSync.RecordSaved(body, result, host.Clock);
                     }
                 }));
             }
@@ -434,7 +432,7 @@ internal static class VaultSync
             primaries.Count, primaries.Sum(d => d.Result.Added), primaries.Sum(d => d.Result.Updated), primaries.Sum(d => d.Result.Deleted), primaries.Sum(d => d.Result.Skipped.Count));
     }
 
-    private sealed record SavedToStore(VaultLocation Location, KeePassSaveResult Result, KeePassVault KeePass, StoreDefinition Target, bool Mirror, bool GuidesChanged)
+    private sealed record SavedToStore(VaultLocation Location, StoreSaveResult Result, IStore KeePass, StoreDefinition Target, bool Mirror, bool GuidesChanged)
     {
         public bool Changed => GuidesChanged || Result.Added + Result.Updated + Result.Deleted > 0;
 
@@ -462,11 +460,11 @@ internal static class VaultSync
             return;
         }
 
-        var group = KeePassGroupPath.For(location);
+        var group = StoreGroupPath.For(location);
         using var content = target.Vault.Read(group);
-        var result = KeePassSync.SavePersonal(
+        var result = StoreSync.SavePersonal(
             body, content, target.Vault, group, target.WithDeclaration, name => overwrite(location, name), new HelloContext(host.Hello, location.Path));
-        var guidesChanged = KeePassSync.MaintainGuides(target.Vault, location, origin);
+        var guidesChanged = StoreSync.MaintainGuides(target.Vault, location, origin);
         done.Add(new SavedToStore(location, result, target.Vault, target.Store, Mirror: false, guidesChanged));
     }
 
@@ -489,17 +487,17 @@ internal static class VaultSync
         IVaultHost host,
         VaultLocation location,
         VaultBody body,
-        (KeePassVault Vault, StoreDefinition Store) target,
+        (IStore Vault, StoreDefinition Store) target,
         RepositoryOrigin? origin,
         bool mirror,
         Func<EntryName, bool> overwrite,
         bool excludeRequired = false)
     {
-        var group = KeePassGroupPath.For(location);
+        var group = StoreGroupPath.For(location);
         using var content = target.Vault.Read(group);
         ReportSkipped(host, content);
-        var result = KeePassSync.Save(body, content, target.Vault, group, overwrite, mirror, excludeRequired, new HelloContext(host.Hello, location.Path));
-        var guidesChanged = KeePassSync.MaintainGuides(target.Vault, location, origin);
+        var result = StoreSync.Save(body, content, target.Vault, group, overwrite, mirror, excludeRequired, new HelloContext(host.Hello, location.Path));
+        var guidesChanged = StoreSync.MaintainGuides(target.Vault, location, origin);
         return new SavedToStore(location, result, target.Vault, target.Store, mirror, guidesChanged);
     }
 
@@ -511,12 +509,12 @@ internal static class VaultSync
         {
             host.Warn(skipped.State switch
             {
-                KeePassSyncState.ChangedInKeePass when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it changed in personal store '{saved.Target.Name}' since your last save or load. Run lv load first.",
-                KeePassSyncState.RemovedInKeePass when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it was removed from personal store '{saved.Target.Name}'. Run lv load, then lv save to put it back.",
+                StoreSyncState.ChangedInKeePass when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it changed in personal store '{saved.Target.Name}' since your last save or load. Run lv load first.",
+                StoreSyncState.RemovedInKeePass when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it was removed from personal store '{saved.Target.Name}'. Run lv load, then lv save to put it back.",
                 _ when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it changed here and in personal store '{saved.Target.Name}'. Use --replace {skipped.Name} to overwrite it there, or lv load to take it.",
-                KeePassSyncState.OnlyInKeePass => $"{label}: '{skipped.Name}' exists only in mirror '{saved.Target.Name}'; left as it is.",
-                KeePassSyncState.ChangedInKeePass => $"{label}: '{skipped.Name}' not saved: it changed in the store since your last save or load. Run lv load first.",
-                KeePassSyncState.RemovedInKeePass => $"{label}: '{skipped.Name}' not saved: it was removed from the store. Run lv load to remove it here or keep it.",
+                StoreSyncState.OnlyInKeePass => $"{label}: '{skipped.Name}' exists only in mirror '{saved.Target.Name}'; left as it is.",
+                StoreSyncState.ChangedInKeePass => $"{label}: '{skipped.Name}' not saved: it changed in the store since your last save or load. Run lv load first.",
+                StoreSyncState.RemovedInKeePass => $"{label}: '{skipped.Name}' not saved: it was removed from the store. Run lv load to remove it here or keep it.",
                 _ => $"{label}: '{skipped.Name}' not saved: it changed here and in the store. Use --replace {skipped.Name} to overwrite the store, or lv load to see theirs.",
             });
         }
@@ -538,12 +536,12 @@ internal static class VaultSync
 
         if (saved.Personal)
         {
-            host.Tell($"{label} -> personal store '{saved.Target.Name}', {KeePassGroupPath.Display(KeePassGroupPath.For(saved.Location))}: {result.Added} of your values added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
+            host.Tell($"{label} -> personal store '{saved.Target.Name}', {StoreGroupPath.Display(StoreGroupPath.For(saved.Location))}: {result.Added} of your values added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
             return;
         }
 
         var kind = saved.Mirror ? "mirror" : "store";
-        host.Tell($"{label} -> {kind} '{saved.Target.Name}', {KeePassGroupPath.Display(KeePassGroupPath.For(saved.Location))}: {result.Added} added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
+        host.Tell($"{label} -> {kind} '{saved.Target.Name}', {StoreGroupPath.Display(StoreGroupPath.For(saved.Location))}: {result.Added} added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
     }
 
     public static (VaultSyncTotals Totals, IReadOnlyList<string> Unresolved) Load(
@@ -574,17 +572,17 @@ internal static class VaultSync
             reached++;
             var store = RepositoryVaults.StoreFor(location);
             var snapshot = store.Read();
-            var group = KeePassGroupPath.For(location);
+            var group = StoreGroupPath.For(location);
             var references = new ReferenceStores(access, location, keePass.DatabaseId);
             using var content = keePass.Read(group, references);
             ReportSkipped(host, content);
             ReportUnresolved(host, location, content);
-            var comparisons = KeePassSync.Compare(snapshot.Body, content);
-            var answers = comparisons.Where(c => c.State == KeePassSyncState.Conflict && content.Find(c.Name)?.Reference is null)
+            var comparisons = StoreSync.Compare(snapshot.Body, content);
+            var answers = comparisons.Where(c => c.State == StoreSyncState.Conflict && content.Find(c.Name)?.Reference is null)
                 .ToDictionary(c => c.Name, c => take(location, c.Name));
             var fromOtherStores = comparisons
-                .Where(c => c.State is KeePassSyncState.OnlyInKeePass or KeePassSyncState.ChangedInKeePass or KeePassSyncState.Conflict
-                    || (c.State == KeePassSyncState.Saved && KeePassSync.ReferenceMoved(snapshot.Body, content.Find(c.Name))))
+                .Where(c => c.State is StoreSyncState.OnlyInKeePass or StoreSyncState.ChangedInKeePass or StoreSyncState.Conflict
+                    || (c.State == StoreSyncState.Saved && StoreSync.ReferenceMoved(snapshot.Body, content.Find(c.Name))))
                 .Select(c => (c.Name, Reference: content.Find(c.Name)?.Reference))
                 .Where(r => r.Reference is not null && !string.Equals(r.Reference.StoreId, content.DatabaseId, StringComparison.OrdinalIgnoreCase))
                 .ToList();
@@ -606,22 +604,22 @@ internal static class VaultSync
 
             var personalAnswers = personalContent is null
                 ? new Dictionary<EntryName, bool>()
-                : KeePassSync.ComparePersonal(snapshot.Body, personalContent)
-                    .Where(c => c.State == KeePassSyncState.Conflict && KeePassSync.PersonalValueOf(personalContent.Find(c.Name))?.Reference is null)
+                : StoreSync.ComparePersonal(snapshot.Body, personalContent)
+                    .Where(c => c.State == StoreSyncState.Conflict && StoreSync.PersonalValueOf(personalContent.Find(c.Name))?.Reference is null)
                     .ToDictionary(c => c.Name, c => take(location, c.Name) == true);
 
-            var remove = comparisons.Where(c => c.State == KeePassSyncState.RemovedInKeePass)
+            var remove = comparisons.Where(c => c.State == StoreSyncState.RemovedInKeePass)
                 .Where(c => removeHere(location, c.Name)).Select(c => c.Name).ToHashSet();
             var needsWrite = comparisons.Any(c =>
-                    c.State is KeePassSyncState.OnlyInKeePass or KeePassSyncState.ChangedInKeePass or KeePassSyncState.Conflict or KeePassSyncState.RemovedInKeePass
-                    || (c.State == KeePassSyncState.Saved && snapshot.Body.Find(c.Name)?.KeePassBaseFor(content.DatabaseId) != c.VaultHash))
+                    c.State is StoreSyncState.OnlyInKeePass or StoreSyncState.ChangedInKeePass or StoreSyncState.Conflict or StoreSyncState.RemovedInKeePass
+                    || (c.State == StoreSyncState.Saved && snapshot.Body.Find(c.Name)?.KeePassBaseFor(content.DatabaseId) != c.VaultHash))
                 || snapshot.Body.KeePassRemovalsFor(content.DatabaseId).Any(r => content.Find(r.Name) is null)
-                || KeePassSync.HelloLoadChanges(snapshot.Body, content, host.Hello)
-                || comparisons.Any(c => c.State == KeePassSyncState.Saved && KeePassSync.ReferenceMoved(snapshot.Body, content.Find(c.Name)))
-                || (personalContent is not null && (KeePassSync.PersonalLoadChanges(snapshot.Body, personalContent, host.Hello)
-                    || comparisons.Any(c => c.State == KeePassSyncState.OnlyInKeePass && c.Kind == VaultEntry.RequiredKind)));
-            var result = new KeePassLoadResult(0, 0, 0, 0);
-            var personalResult = new KeePassLoadResult(0, 0, 0, 0);
+                || StoreSync.HelloLoadChanges(snapshot.Body, content, host.Hello)
+                || comparisons.Any(c => c.State == StoreSyncState.Saved && StoreSync.ReferenceMoved(snapshot.Body, content.Find(c.Name)))
+                || (personalContent is not null && (StoreSync.PersonalLoadChanges(snapshot.Body, personalContent, host.Hello)
+                    || comparisons.Any(c => c.State == StoreSyncState.OnlyInKeePass && c.Kind == VaultEntry.RequiredKind)));
+            var result = new StoreLoadResult(0, 0, 0, 0);
+            var personalResult = new StoreLoadResult(0, 0, 0, 0);
             if (needsWrite)
             {
                 if (!snapshot.Exists && content.Items.Count == 0)
@@ -633,10 +631,10 @@ internal static class VaultSync
                 host.ReportWrite(store.Update(
                     body =>
                     {
-                        result = KeePassSync.Load(body, content, name => answers.TryGetValue(name, out var yes) && yes == true, remove.Contains, host.Clock, host.Hello);
+                        result = StoreSync.Load(body, content, name => answers.TryGetValue(name, out var yes) && yes == true, remove.Contains, host.Clock, host.Hello);
                         if (personalContent is not null)
                         {
-                            personalResult = KeePassSync.LoadPersonal(body, personalContent, name => personalAnswers.TryGetValue(name, out var yes) && yes, host.Clock, host.Hello);
+                            personalResult = StoreSync.LoadPersonal(body, personalContent, name => personalAnswers.TryGetValue(name, out var yes) && yes, host.Clock, host.Hello);
                         }
                     },
                     new VaultUpdateOptions { AllowCreate = true }));
@@ -669,7 +667,7 @@ internal static class VaultSync
         return (new VaultSyncTotals(count, added, taken, removed, kept), unresolved);
     }
 
-    private static (KeePassVault, StoreDefinition)? OpenOrSkip(
+    private static (IStore, StoreDefinition)? OpenOrSkip(
         IVaultHost host, StoreAccess access, StoreResolution resolution, int vaultCount, List<StoreNotDefinedException> undefined)
     {
         try
@@ -692,7 +690,7 @@ internal static class VaultSync
         }
     }
 
-    private static void ReportHello(IVaultHost host, VaultLocation location, KeePassLoadResult result, VaultBody? unchanged)
+    private static void ReportHello(IVaultHost host, VaultLocation location, StoreLoadResult result, VaultBody? unchanged)
     {
         var label = RepositoryVaults.Label(location);
         foreach (var skipped in result.NotSealed)
@@ -718,13 +716,13 @@ internal static class VaultSync
             ?? $"id {id}";
     }
 
-    public static string ReferenceOrigin(KeePassReference reference, string store) =>
+    public static string ReferenceOrigin(ItemReference reference, string store) =>
         $"Its value comes from KeePass entry '{reference.Title}' (store '{store}'); lv save won't change that entry.";
 
-    public static string ReferenceAdvice(EntryName name, KeePassReference reference, bool personal) =>
+    public static string ReferenceAdvice(EntryName name, ItemReference reference, bool personal) =>
         $"To change it for every project, edit '{reference.Title}' in KeePass. To use another source here: {(personal ? $"lv reset {name}" : $"lv set {name} --ref \"<group/title>\"")}";
 
-    private static void ReportUnresolved(IVaultHost host, VaultLocation location, KeePassGroupContent content)
+    private static void ReportUnresolved(IVaultHost host, VaultLocation location, StoreContent content)
     {
         foreach (var unresolved in content.Unresolved)
         {
@@ -732,7 +730,7 @@ internal static class VaultSync
         }
     }
 
-    private static void ReportSkipped(IVaultHost host, KeePassGroupContent content)
+    private static void ReportSkipped(IVaultHost host, StoreContent content)
     {
         foreach (var title in content.Skipped)
         {

@@ -69,7 +69,7 @@ public abstract class TemplateCmdletBase : VaultCmdletBase
         }
     }
 
-    internal static VaultStore VaultAt(string path) => RepositoryVaults.StoreFor(VaultLocation.Resolve(path, null, System.IO.Path.GetDirectoryName(path)!));
+    internal static VaultFile VaultAt(string path) => RepositoryVaults.StoreFor(VaultLocation.Resolve(path, null, System.IO.Path.GetDirectoryName(path)!));
 
     internal static void RequireIgnored(string path)
     {

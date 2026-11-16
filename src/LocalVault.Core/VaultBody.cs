@@ -110,10 +110,10 @@ public sealed class VaultBody
         }
     }
 
-    public IReadOnlyList<KeePassRemoval> KeePassRemovals =>
+    public IReadOnlyList<StoreRemoval> KeePassRemovals =>
         root[KeePassRemovedField] is JsonArray removed ? removed.OfType<JsonObject>().Select(ToRemoval).ToList() : [];
 
-    public IReadOnlyList<KeePassRemoval> KeePassRemovalsFor(string? databaseId) =>
+    public IReadOnlyList<StoreRemoval> KeePassRemovalsFor(string? databaseId) =>
         KeePassRemovals.Where(r => r.Database is null || databaseId is null || string.Equals(r.Database, databaseId, StringComparison.OrdinalIgnoreCase)).ToList();
 
     public static VaultBody CreateEmpty() =>
@@ -310,7 +310,7 @@ public sealed class VaultBody
     public void RecordKeePassBase(EntryName name, string? databaseId, string? hash, DateTimeOffset at) =>
         (Find(name) ?? throw new VaultException($"No entry '{name}'.")).SetKeePassBase(databaseId, hash, at);
 
-    public IReadOnlyList<KeePassRemoval> TakeRemovals(EntryName name, string? databaseId)
+    public IReadOnlyList<StoreRemoval> TakeRemovals(EntryName name, string? databaseId)
     {
         if (root[KeePassRemovedField] is not JsonArray removed)
         {
@@ -336,7 +336,7 @@ public sealed class VaultBody
         return taken.Select(ToRemoval).ToList();
     }
 
-    private static KeePassRemoval ToRemoval(JsonObject node) => new(
+    private static StoreRemoval ToRemoval(JsonObject node) => new(
         EntryName.Parse(node[RemovedNameField]!.GetValue<string>()),
         node[RemovedHashField]!.GetValue<string>(),
         node[RemovedDatabaseField]?.GetValue<string>());
@@ -461,4 +461,4 @@ public sealed record HelloVaultKey(string KeyId, byte[] PublicKey, byte[] Wrappe
     public string Fingerprint => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(PublicKey))[..16];
 }
 
-public sealed record KeePassRemoval(EntryName Name, string Hash, string? Database = null);
+public sealed record StoreRemoval(EntryName Name, string Hash, string? Database = null);

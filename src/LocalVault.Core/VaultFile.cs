@@ -54,7 +54,7 @@ public sealed class VaultChangedException : VaultException
     }
 }
 
-public sealed class VaultStore
+public sealed class VaultFile
 {
     public const string AbsentFingerprint = "absent";
     private const string MigratedSuffix = ".migrated-";
@@ -66,7 +66,7 @@ public sealed class VaultStore
     private readonly ILegacyVaultReader? legacyReader;
     private readonly TimeProvider time;
 
-    public VaultStore(
+    public VaultFile(
         VaultLocation location,
         ILegacyVaultReader? legacyReader = null,
         TimeProvider? time = null)

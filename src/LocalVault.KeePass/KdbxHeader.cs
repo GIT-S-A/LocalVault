@@ -1,7 +1,7 @@
 using System.Text.RegularExpressions;
 using KeePassLib.Collections;
 
-namespace LocalVault.Core;
+namespace LocalVault.KeePass;
 
 public static partial class KdbxHeader
 {
@@ -44,7 +44,7 @@ public static partial class KdbxHeader
 
                 if (field == PublicCustomDataField)
                 {
-                    var id = VariantDictionary.Deserialize(data)?.GetString(KeePassVault.DatabaseIdField);
+                    var id = VariantDictionary.Deserialize(data)?.GetString(KeePassStore.DatabaseIdField);
                     return id is not null && DatabaseIdPattern().IsMatch(id) ? id : null;
                 }
             }

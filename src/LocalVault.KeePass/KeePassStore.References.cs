@@ -2,50 +2,11 @@ using System.Text.RegularExpressions;
 using KeePassLib;
 using KeePassLib.Security;
 using KeePassLib.Utility;
+using LocalVault.Core;
 
-namespace LocalVault.Core;
+namespace LocalVault.KeePass;
 
-public sealed partial record KeePassReference(string StoreId, string ItemId, string? Attachment, string Title)
-{
-    public string Link => Attachment is null ? $"{StoreId}/{ItemId}" : $"{StoreId}/{ItemId}/{Attachment}";
-
-    public bool SameTarget(KeePassReference? other) =>
-        other is not null
-        && string.Equals(StoreId, other.StoreId, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(ItemId, other.ItemId, StringComparison.OrdinalIgnoreCase)
-        && string.Equals(Attachment, other.Attachment, StringComparison.Ordinal);
-
-    public static KeePassReference ParseLink(string link)
-    {
-        ArgumentNullException.ThrowIfNull(link);
-        var parts = link.Split('/', 3);
-        if (parts.Length < 2 || !IsUuid(parts[0]) || !IsUuid(parts[1]) || (parts.Length == 3 && parts[2].Length == 0))
-        {
-            throw new VaultException($"'{KeePassVault.RefField}' must be <store id>/<entry id>[/<attachment>], not '{link}'");
-        }
-
-        return new KeePassReference(parts[0], parts[1], parts.Length == 3 ? parts[2] : null, string.Empty);
-    }
-
-    public static bool IsUuid(string text) => text is not null && UuidPattern().IsMatch(text);
-
-    [GeneratedRegex("^[0-9A-Fa-f]{32}$")]
-    private static partial Regex UuidPattern();
-}
-
-public sealed record KeePassLink(EntryName Name, KeePassReference Reference, string Shape, bool IsPersonal);
-
-public sealed record UnresolvedReference(EntryName Name, string Reason, bool IsPersonal);
-
-public sealed record ReferenceStore(KeePassVault Vault, string Name);
-
-public interface IReferenceStores
-{
-    // Throws VaultException whose message completes "<name> not loaded: ".
-    ReferenceStore Open(KeePassReference reference, bool personal);
-}
-
-public sealed partial class KeePassVault
+public sealed partial class KeePassStore
 {
     public const string RefField = "LocalVault.Ref";
     public const string RefShapeField = "LocalVault.RefShape";
@@ -61,7 +22,7 @@ public sealed partial class KeePassVault
 
     private static readonly string[] ReferenceShapes = [VaultEntry.SecretKind, VaultEntry.CredentialKind, VaultEntry.FileKind, VaultEntry.SshKeyShape];
 
-    private sealed record ReadContext(IReferenceStores? Stores, List<string> Skipped, List<KeePassLink> Links, List<UnresolvedReference> Unresolved);
+    private sealed record ReadContext(IReferenceStores? Stores, List<string> Skipped, List<ItemLink> Links, List<UnresolvedReference> Unresolved);
 
     private static bool HasFieldReference(PwEntry entry) =>
         ReferenceFields.Any(key => entry.Strings.ReadSafe(key).Contains(ReferenceMarker, StringComparison.OrdinalIgnoreCase));
@@ -69,7 +30,7 @@ public sealed partial class KeePassVault
     private static string FieldReferenceRefusal(EntryName name) =>
         $"its KeePass entry uses a {{REF:}} field. Use lv set {name} --ref \"<group/title>\" instead.";
 
-    private static KeePassLink ReadLink(PwEntry entry, EntryName name, bool personal)
+    private static ItemLink ReadLink(PwEntry entry, EntryName name, bool personal)
     {
         var shape = entry.Strings.ReadSafe(RefShapeField);
         if (!ReferenceShapes.Contains(shape, StringComparer.Ordinal))
@@ -77,10 +38,10 @@ public sealed partial class KeePassVault
             throw new VaultException($"'{RefShapeField}' must be {string.Join(", ", ReferenceShapes)}, not '{shape}'");
         }
 
-        return new KeePassLink(name, KeePassReference.ParseLink(entry.Strings.ReadSafe(RefField)), shape, personal);
+        return new ItemLink(name, ItemReference.ParseLink(entry.Strings.ReadSafe(RefField), RefField), shape, personal);
     }
 
-    private static KeePassItem? ResolveLink(PwEntry entry, KeePassLink link, ReadContext context)
+    private static StoreItem? ResolveLink(PwEntry entry, ItemLink link, ReadContext context)
     {
         context.Links.Add(link);
         if (context.Stores is null)
@@ -92,7 +53,7 @@ public sealed partial class KeePassVault
         {
             var store = context.Stores.Open(link.Reference, link.IsPersonal);
             var storedPath = entry.Strings.ReadSafe(PathField);
-            var item = store.Vault.ReadReferenced(link, storedPath.Length == 0 ? null : storedPath, link.IsPersonal ? [] : ReadHosts(entry), store.Name);
+            var item = store.Store.ReadReferenced(link, storedPath.Length == 0 ? null : storedPath, link.IsPersonal ? [] : ReadHosts(entry), store.Name);
             item.IsHello = IsSet(entry, HelloField);
             return item;
         }
@@ -103,7 +64,7 @@ public sealed partial class KeePassVault
         }
     }
 
-    public KeePassItem ReadReferenced(KeePassLink link, string? storedPath, IReadOnlyList<string> hosts, string storeName)
+    public StoreItem ReadReferenced(ItemLink link, string? storedPath, IReadOnlyList<string> hosts, string storeName)
     {
         ArgumentNullException.ThrowIfNull(link);
         var target = FindByUuid(link.Reference.ItemId)
@@ -113,7 +74,7 @@ public sealed partial class KeePassVault
         return item;
     }
 
-    public KeePassItem ReadReferenceTarget(string search, EntryName name, string? shape, string? storedPath, IReadOnlyList<string> hosts, bool personal, string storeName)
+    public StoreItem ReadReferenceTarget(string search, EntryName name, string? shape, string? storedPath, IReadOnlyList<string> hosts, bool personal, string storeName)
     {
         ArgumentNullException.ThrowIfNull(search);
         ArgumentNullException.ThrowIfNull(hosts);
@@ -131,11 +92,11 @@ public sealed partial class KeePassVault
         }
 
         var item = ReadTargetContent(target, name, shape, attachment, storedPath, hosts, personal, storeName);
-        item.Reference = new KeePassReference(DatabaseId, target.Uuid.ToHexString(), attachment, PathOf(target));
+        item.Reference = new ItemReference(DatabaseId, target.Uuid.ToHexString(), attachment, PathOf(target));
         return item;
     }
 
-    private KeePassItem ReadTargetContent(
+    private StoreItem ReadTargetContent(
         PwEntry target, EntryName name, string shape, string? attachment, string? storedPath, IReadOnlyList<string> hosts, bool personal, string storeName)
     {
         var title = PathOf(target);
@@ -156,7 +117,7 @@ public sealed partial class KeePassVault
             var content = binary.ReadData();
             if (!sshKey)
             {
-                return new KeePassItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), content);
+                return new StoreItem(name, VaultEntry.FileKind, StoredPathRules.Normalize(storedPath), content);
             }
 
             string publicKey;
@@ -171,7 +132,7 @@ public sealed partial class KeePassVault
             }
 
             _ = SshKeyPath.Validate(storedPath);
-            return new KeePassItem(name, StoredPathRules.Normalize(storedPath), content, null, new SshKeyInfo(SshKeyInfo.TypeOf(publicKey), publicKey, hosts), personal);
+            return new StoreItem(name, StoredPathRules.Normalize(storedPath), content, null, new SshKeyInfo(SshKeyInfo.TypeOf(publicKey), publicKey, hosts), personal);
         }
 
         var resolved = WithFieldReferencesResolved(target);
@@ -182,7 +143,7 @@ public sealed partial class KeePassVault
 
         return shape == VaultEntry.CredentialKind
             ? ReadCredential(resolved, name)
-            : new KeePassItem(name, VaultEntry.SecretKind, null, resolved.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
+            : new StoreItem(name, VaultEntry.SecretKind, null, resolved.Strings.GetSafe(PwDefs.PasswordField).ReadUtf8());
     }
 
     private PwEntry WithFieldReferencesResolved(PwEntry entry)
@@ -265,7 +226,7 @@ public sealed partial class KeePassVault
         : entry.IsCredential ? VaultEntry.CredentialKind
         : VaultEntry.SecretKind;
 
-    private static void WriteReference(PwEntry target, VaultEntry entry, KeePassReference reference, bool writeHosts)
+    private static void WriteReference(PwEntry target, VaultEntry entry, ItemReference reference, bool writeHosts)
     {
         RemoveCredentialStrings(target);
         target.Strings.Remove(PwDefs.PasswordField);
@@ -314,14 +275,14 @@ public sealed partial class KeePassVault
         return matches.Count switch
         {
             1 => matches[0],
-            0 => throw new VaultException($"No KeePass entry '{search}' outside {KeePassGroupPath.Root}/ in '{Path}'."),
+            0 => throw new VaultException($"No KeePass entry '{search}' outside {StoreGroupPath.Root}/ in '{Path}'."),
             _ => throw new VaultException($"More than one KeePass entry matches '{search}': {string.Join(", ", matches.Select(PathOf))}. Give the group path."),
         };
     }
 
     private bool IsUnderLocalVaultGroup(PwEntry entry)
     {
-        var group = database.RootGroup.Groups.FirstOrDefault(g => string.Equals(g.Name, KeePassGroupPath.Root, StringComparison.OrdinalIgnoreCase));
+        var group = database.RootGroup.Groups.FirstOrDefault(g => string.Equals(g.Name, StoreGroupPath.Root, StringComparison.OrdinalIgnoreCase));
         return group is not null && entry.IsContainedIn(group);
     }
 

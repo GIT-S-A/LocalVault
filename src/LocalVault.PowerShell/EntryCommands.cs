@@ -35,8 +35,8 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         AdoptNewerSshKeys([Location]);
         var snapshot = ReadVault();
         var now = Now;
-        var states = KeePassSync.ComparePending(snapshot.Body, PrimaryDatabaseId());
-        var sync = states.Where(s => s.VaultHash is not null || s.State == KeePassSyncState.Local)
+        var states = StoreSync.ComparePending(snapshot.Body, PrimaryDatabaseId());
+        var sync = states.Where(s => s.VaultHash is not null || s.State == StoreSyncState.Local)
             .ToDictionary(s => s.Name.FullName, s => s.State.ToString(), EntryName.Comparer);
         foreach (var entry in snapshot.Body.Entries.Where(e => e.IsRequired))
         {
@@ -82,9 +82,9 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         WarnAboutUnexported(snapshot.Body, now);
     }
 
-    private void WarnAboutStore(IReadOnlyList<KeePassComparison> states)
+    private void WarnAboutStore(IReadOnlyList<StoreComparison> states)
     {
-        var pending = states.Count(s => s.State is KeePassSyncState.New or KeePassSyncState.Changed or KeePassSyncState.RemovalPending);
+        var pending = states.Count(s => s.State is StoreSyncState.New or StoreSyncState.Changed or StoreSyncState.RemovalPending);
         if (pending == 0 || !StoreKnown())
         {
             return;
@@ -138,7 +138,7 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
         }
 
         var storeKnown = StoreKnown();
-        var personalKey = PersonalStoreId() is { } id ? KeePassSync.PersonalKey(id) : null;
+        var personalKey = PersonalStoreId() is { } id ? StoreSync.PersonalKey(id) : null;
         var onlyHere = body.Entries
             .Where(e => !e.IsMissing && (!storeKnown || e.IsLocal || (e.IsRequired && (personalKey is null || e.KeePassBaseFor(personalKey) is null))))
             .Select(e => e.Name.FullName)
