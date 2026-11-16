@@ -206,6 +206,26 @@ and keep the export off this machine. Until then `Get-VaultEntryList` warns.
 .\tools\test.ps1    # build, xUnit, PSScriptAnalyzer, Pester
 ```
 
+| Folder | Holds |
+|---|---|
+| `src/LocalVault.Core/Vault` | names, entries, body, the vault file and its location |
+| `src/LocalVault.Core/Files` | envelope format, project file, PC settings, templates, other files LocalVault writes |
+| `src/LocalVault.Core/Transfer` | export, import, `.clixml` migration |
+| `src/LocalVault.Core/Stores` | store interfaces, store registry and resolution, sync |
+| `src/LocalVault.Core/Hello` | Windows Hello keys and sealing |
+| `src/LocalVault.Core/Ssh` | SSH key files, generation, adoption |
+| `src/LocalVault.Core/Processes` | git and other external programs |
+| `src/LocalVault.KeePass` | KeePass store over KeePassLib |
+| `src/LocalVault.PowerShell/Cmdlets` | cmdlets, one file per area |
+| `src/LocalVault.PowerShell/Stores` | opening stores, save and load across a repository's vaults |
+| `src/LocalVault.PowerShell/Support` | clipboard, secret conversion, completion, legacy reader |
+| `src/LocalVault.PowerShell` | `LocalVault.psd1`, `LocalVault.Cli.psm1` (the `lv` command) |
+| `tests/LocalVault.Core.Tests` | xUnit, same folders as Core |
+| `tests/LocalVault.KeePass.Tests` | xUnit against temporary `.kdbx` files |
+| `tests/pester` | end-to-end tests of the module and `lv` |
+
+Namespaces don't follow folders: everything in an assembly shares one namespace.
+
 The build needs Microsoft.PowerShell.PlatyPS 1.0.3. Help is written in `docs/LocalVault/` and compiled
 into the module at build time; a new command or parameter needs its text there, or the help tests
 fail. `tools/docs.ps1` regenerates `docs/reference.md` from those pages; the tests fail when it is
