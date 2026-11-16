@@ -8,7 +8,7 @@ One machine-local secret store per project: PS module (contract) + thin CLI + Cl
 
 - C1: PowerShell 7.6+ (.NET 10), Windows only (DPAPI). C# `net10.0-windows`. ∀ `.ps1`: `Set-StrictMode -Version Latest`, `$ErrorActionPreference = 'Stop'`.
 - C2: warnings = errors: C# `TreatWarningsAsErrors`, `Nullable enable`, `AnalysisLevel latest-recommended`; PSScriptAnalyzer clean. xUnit ∀ Core logic; Pester 6 ∀ cmdlet behaviour.
-- C3: C# where logic lives: `LocalVault.Core` (no PS dependency, ⊥ store-type code) holds names, body, formats, crypto, vault file, store sync & registry, store interfaces `IStore`/`IUnlockingStore`/`IStoreProvider`. `LocalVault.KeePass` = KeePass store over KeePassLib. `LocalVault.PowerShell` = binary cmdlets (contract): prompts, SecureString, ShouldProcess, env; references store assemblies directly, picks provider by store `type`. Legacy clixml read needs PS deserializer → cmdlet layer. CLI = dispatch only.
+- C3: C# where logic lives: `LocalVault.Core` (no PS dependency, ⊥ store-type code) holds names, body, formats, crypto, vault file, store sync & registry, store interfaces `IStore`/`IUnlockingStore`/`IStoreProvider`/`IStorePrompt`. `LocalVault.KeePass` = KeePass store over KeePassLib. `LocalVault.PowerShell` = binary cmdlets (contract): prompts (store prompts via `IStorePrompt` over host), SecureString, ShouldProcess, env; references store assemblies directly, picks provider by store `type`. Legacy clixml read needs PS deserializer → cmdlet layer. CLI = dispatch only.
 - C4: vault in consuming project folder, gitignored. ⊥ `%LOCALAPPDATA%` for vault (KP registry, ⊥ secret, lives there).
 - C5: one vault file may serve several scripts of one project.
 - C6: SSH keys = `ssh-key` entries (§I.SSH keys), personal | shared, for SSH to hosts only; ⊥ git wiring (git over HTTPS). `__Ssh*` legacy import refused (V10, V139).
@@ -450,7 +450,7 @@ V152: Hello prompt only in an interactive session: ⊥ console | input redirecte
 V153: ∀ read of a Hello value outside the module (output, env, clipboard, file, template, child stdin) happens on an unsealed copy of the body that is never written; `Set-VaultEntry` on a Hello credential part (`n#user`) unseals once, then reseals. Personal file values sealed by Hello ⊥ written to `~/` by `lv load` (`lv restore <name>` writes them).
 V154: Hello key created only after `NCryptOpenKey` → `NTE_BAD_KEYSET` 0x80090016 | `NTE_NOT_FOUND` 0x80090011 (state `none`); `NTE_NO_KEY` 0x8009000D → `unavailable` "isn't ready in this window … open a new PowerShell window"; any other status → `unavailable` w/ hex code. ⊥ create | overwrite on other statuses.
 V155: database id source: id recorded on this PC (`stores.json` | `localvault.json`) > KDBX 4 outer header `PublicCustomData` `LocalVault.DatabaseId` (⊥ password) > store opened (password). `Register-VaultStore` common → id recorded at add (header, else opened); non-console & header ⊥ id → added w/o id, recorded at first open. `-Project` w/o target → id copied from PC store when known. `Set-VaultProjectStore` w/ id known → ⊥ store opened. ∀ open → real id ≠ recorded → error, nothing written (header unauthenticated: checked at first open). ∀ save → header `LocalVault.DatabaseId` set. KDBX 3 → ⊥ header field → opened.
-V156: Core ⊥ reference KeePassLib | any store assembly; sync & cmdlets reach a store only via `IStore`/`IUnlockingStore`/`IStoreProvider`; 1 assembly per store type. Type renames ⊥ change body JSON (`kp`, `kpRemoved`, `ref` kept).
+V156: Core ⊥ reference KeePassLib | any store assembly; sync & cmdlets reach a store only via `IStore`/`IUnlockingStore`/`IStoreProvider`; provider asks its own secrets via `IStorePrompt`, ⊥ console access in store assemblies; prompt owns & clears answers; kept AutoOpen password = 1st answer of prompt; 1 assembly per store type. Type renames ⊥ change body JSON (`kp`, `kpRemoved`, `ref` kept).
 
 ## §T Tasks
 
@@ -558,6 +558,7 @@ T99|x|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)
 T100|x|help pages, `about_LocalVault` (Hello kind, one prompt per command, PIN always offered, biometric-only ⊥ enforceable via Passport KSP), SKILL.md, reference.md; beta17|C11,I.Hello
 T101|x|database id in KDBX 4 header; `lv store add` records id; `lv store use` w/o opening when id known|I.KeePass,V155
 T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass*→Store* (sync, item, content, reference, link, removal, group path), `VaultStore`→`VaultFile`; KeePass xUnit → `LocalVault.KeePass.Tests`, in-memory `IStore` for sync tests; install.ps1 DLL list; beta18 (ships T91, T101 too)|C3,C10,V81,V156
+T103|.|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
 
 ## §B Bugs
 
