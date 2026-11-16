@@ -120,56 +120,30 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
         var unlocker = unlocking as IUnlockingStore
             ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{unlockerStore.Name}', a {unlockerStore.Type} store, which can't keep other stores' passwords. Remove it with lv store set {store.Name} --no-unlock.");
         registry.RecordId(unlockerStore, unlocker.DatabaseId);
-        using (var target = unlocker.FindAutoOpen(id ?? store.Id, [store.ExpandedTarget], Environment.MachineName))
+        if (unlocker.FindAutoOpen(id ?? store.Id, [store.ExpandedTarget], Environment.MachineName) is { } target)
         {
-            if (target is not null)
-            {
-                host.Tell($"Opening store '{store.Name}' (KeePass {target.Path}) with the password kept in '{unlockerStore.Name}'.");
-                return Remember(StoreProviders.For(store).Open(target.Path, target.KeyFile ?? store.ExpandedKeyFile, target.Password), store);
-            }
+            using var keptPrompt = new StorePrompt(host, store.Name, target);
+            host.Tell($"Opening store '{store.Name}' (KeePass {target.Path}) with the password kept in '{unlockerStore.Name}'.");
+            return Remember(StoreProviders.For(store).Open(target.Path, target.KeyFile ?? store.ExpandedKeyFile, keptPrompt), store);
         }
 
         host.Tell($"Opening store '{store.Name}' (KeePass {store.ExpandedTarget}). '{unlockerStore.Name}' doesn't hold its password yet.");
-        var master = ReadMaster(store);
-        try
+        using var prompt = new StorePrompt(host, store.Name);
+        var vault = StoreProviders.For(store).Open(store.ExpandedTarget, store.ExpandedKeyFile, prompt);
+        if (host.CanConfirm && host.AskYesNo($"Keep the password of '{store.Name}' in '{unlockerStore.Name}' (AutoOpen group), so that next time '{store.Name}' opens with it?"))
         {
-            var vault = StoreProviders.For(store).Open(store.ExpandedTarget, store.ExpandedKeyFile, master);
-            if (host.CanConfirm && host.AskYesNo($"Keep the password of '{store.Name}' in '{unlockerStore.Name}' (AutoOpen group), so that next time '{store.Name}' opens with it?"))
-            {
-                unlocker.RememberAutoOpen(store.Name, store.ExpandedTarget, store.ExpandedKeyFile, master, vault.DatabaseId);
-                unlocker.Save();
-                host.Tell($"Kept in '{unlockerStore.Name}'. If KeePass has {Path.GetFileName(unlockerStore.ExpandedTarget)} open, reload it there before saving.");
-            }
+            unlocker.RememberAutoOpen(store.Name, store.ExpandedTarget, store.ExpandedKeyFile, prompt.FirstAnswer, vault.DatabaseId);
+            unlocker.Save();
+            host.Tell($"Kept in '{unlockerStore.Name}'. If KeePass has {Path.GetFileName(unlockerStore.ExpandedTarget)} open, reload it there before saving.");
+        }
 
-            return Remember(vault, store);
-        }
-        finally
-        {
-            Array.Clear(master);
-        }
+        return Remember(vault, store);
     }
 
     private IStore Prompted(StoreDefinition store)
     {
-        var master = ReadMaster(store);
-        try
-        {
-            return StoreProviders.For(store).Open(store.ExpandedTarget, store.ExpandedKeyFile, master);
-        }
-        finally
-        {
-            Array.Clear(master);
-        }
-    }
-
-    private char[] ReadMaster(StoreDefinition store)
-    {
-        if (!host.CanPrompt)
-        {
-            throw new VaultException("The KeePass master password is needed and there is no console to ask on.");
-        }
-
-        return SecretText.ToChars(host.AskSecret($"KeePass master password for {store.Name}"));
+        using var prompt = new StorePrompt(host, store.Name);
+        return StoreProviders.For(store).Open(store.ExpandedTarget, store.ExpandedKeyFile, prompt);
     }
 }
 

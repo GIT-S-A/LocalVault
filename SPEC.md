@@ -558,7 +558,7 @@ T99|x|`lv run --stdin` + Pester (stdin bytes reach child, ⊥ string, exit code)
 T100|x|help pages, `about_LocalVault` (Hello kind, one prompt per command, PIN always offered, biometric-only ⊥ enforceable via Passport KSP), SKILL.md, reference.md; beta17|C11,I.Hello
 T101|x|database id in KDBX 4 header; `lv store add` records id; `lv store use` w/o opening when id known|I.KeePass,V155
 T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass*→Store* (sync, item, content, reference, link, removal, group path), `VaultStore`→`VaultFile`; KeePass xUnit → `LocalVault.KeePass.Tests`, in-memory `IStore` for sync tests; install.ps1 DLL list; beta18 (ships T91, T101 too)|C3,C10,V81,V156
-T103|.|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
+T103|x|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
 
 ## §B Bugs
 

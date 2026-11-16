@@ -38,7 +38,7 @@ public interface IStoreProvider
 {
     string Type { get; }
 
-    IStore Open(string target, string? keyFile, ReadOnlySpan<char> password);
+    IStore Open(string target, string? keyFile, IStorePrompt prompt);
 
     // Reads the id without the password; null when the target doesn't carry one.
     string? ReadDatabaseId(string target);
