@@ -242,11 +242,13 @@ Releasing: raise `Prerelease` (or `ModuleVersion`) in `src/LocalVault.PowerShell
 commit, push, then:
 
 ```powershell
-.\tools\release.ps1    # tests the pushed commit in a clean checkout, then tags and pushes v<version>
+.\tools\release.ps1    # tests and builds the pushed commit in a clean checkout, signs, tags, publishes
 ```
 
-Every PC builds a release from its tag, so the clean checkout is what catches a file that works here but
-was never committed. There is no CI pipeline.
+The release is built from a clean checkout, so a file that works here but was never committed fails there.
+`release.ps1` signs every DLL and PowerShell file through Azure Key Vault and uploads `LocalVault.zip`, its
+SHA-256 and `install.ps1` to the GitHub release. `install.ps1` checks the hash and refuses files not signed
+by GIT. Releasing needs `az login`, `azuresigntool` and `gh`. There is no CI pipeline.
 
 Design and invariants: [SPEC.md](SPEC.md).
 
