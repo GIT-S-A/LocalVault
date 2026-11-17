@@ -1,5 +1,6 @@
 using System.Management.Automation;
 using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
@@ -21,7 +22,7 @@ public abstract class SshKeyCmdletBase : VaultCmdletBase
     {
         get
         {
-            var origin = RepositoryOrigin.Of(Location);
+            var origin = Location.ReadOrigin();
             var root = Location.GitRoot ?? Location.Directory;
             return SshKeyPath.RepositoryNameOf(origin?.Url, origin?.Folder ?? System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(root)));
         }

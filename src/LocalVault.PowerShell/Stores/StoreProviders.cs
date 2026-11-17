@@ -1,4 +1,5 @@
 using LocalVault.Core;
+using LocalVault.Engine;
 using LocalVault.KeePass;
 
 namespace LocalVault.PowerShell;

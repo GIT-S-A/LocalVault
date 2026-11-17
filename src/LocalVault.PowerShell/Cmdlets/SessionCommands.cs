@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Management.Automation;
 using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
@@ -143,7 +144,7 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
     {
         if (entry.Ssh is not null)
         {
-            var plan = SshKeyFiles.Write(entry, Location.Path, RepositoryOrigin.Of(Location)?.Url, Overwrite, Now);
+            var plan = SshKeyFiles.Write(entry, Location.Path, Location.ReadOrigin()?.Url, Overwrite, Now);
             if (plan.Refused)
             {
                 WriteWarning(SshKeyFiles.Describe(plan, entry.Name));

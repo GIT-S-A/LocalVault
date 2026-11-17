@@ -1,4 +1,4 @@
-﻿
+
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.31903.59
@@ -11,13 +11,15 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalVault.PowerShell", "sr
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{0AB3BF05-4346-4AA6-1389-037BE0695223}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalVault.Core.Tests", "tests\LocalVault.Core.Tests\LocalVault.Core.Tests.csproj", "{FD276AE9-9FDA-4349-A8D6-08055ED4D30A}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalVault.Engine.Tests", "tests\LocalVault.Engine.Tests\LocalVault.Engine.Tests.csproj", "{FD276AE9-9FDA-4349-A8D6-08055ED4D30A}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KeePassLib", "src\KeePassLib\KeePassLib.csproj", "{1FE5DEC6-6C6B-474D-BA70-08F78FF21403}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalVault.KeePass", "src\LocalVault.KeePass\LocalVault.KeePass.csproj", "{01225CF5-E26B-4B41-8FA5-3E94BB43F891}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalVault.KeePass.Tests", "tests\LocalVault.KeePass.Tests\LocalVault.KeePass.Tests.csproj", "{E8BD7E15-ABF0-47B7-9CF6-CCE408DF77D9}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LocalVault.Engine", "src\LocalVault.Engine\LocalVault.Engine.csproj", "{D199BF8B-6D12-4256-8325-7A5E1DA81767}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -101,6 +103,18 @@ Global
 		{E8BD7E15-ABF0-47B7-9CF6-CCE408DF77D9}.Release|x64.Build.0 = Release|Any CPU
 		{E8BD7E15-ABF0-47B7-9CF6-CCE408DF77D9}.Release|x86.ActiveCfg = Release|Any CPU
 		{E8BD7E15-ABF0-47B7-9CF6-CCE408DF77D9}.Release|x86.Build.0 = Release|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Debug|x64.ActiveCfg = Debug|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Debug|x64.Build.0 = Debug|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Debug|x86.ActiveCfg = Debug|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Debug|x86.Build.0 = Debug|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Release|Any CPU.Build.0 = Release|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Release|x64.ActiveCfg = Release|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Release|x64.Build.0 = Release|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Release|x86.ActiveCfg = Release|Any CPU
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767}.Release|x86.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -112,5 +126,6 @@ Global
 		{1FE5DEC6-6C6B-474D-BA70-08F78FF21403} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{01225CF5-E26B-4B41-8FA5-3E94BB43F891} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 		{E8BD7E15-ABF0-47B7-9CF6-CCE408DF77D9} = {0AB3BF05-4346-4AA6-1389-037BE0695223}
+		{D199BF8B-6D12-4256-8325-7A5E1DA81767} = {827E0CD3-B72D-47B6-A68D-7590B98EB39B}
 	EndGlobalSection
 EndGlobal

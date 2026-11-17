@@ -322,8 +322,8 @@ Describe 'Windows Hello entries in exports and stores' {
             Set-Content -LiteralPath $script -Value @"
 `$ErrorActionPreference = 'Stop'
 Import-Module '$(Join-Path $env:LOCALVAULT_MODULE_PATH 'LocalVault.psd1')'
-`$key = [LocalVault.Core.SoftwareHelloKey]::new()
-[LocalVault.Core.HelloKeys].GetProperty('Override', [Reflection.BindingFlags]'NonPublic, Static').SetValue(`$null, `$key)
+`$key = [LocalVault.Engine.SoftwareHelloKey]::new()
+[LocalVault.Engine.HelloKeys].GetProperty('Override', [Reflection.BindingFlags]'NonPublic, Static').SetValue(`$null, `$key)
 `$value = [securestring]::new(); 'kp-hello'.ToCharArray() | ForEach-Object { `$value.AppendChar(`$_) }
 Set-VaultEntry -Path '$mine' -Name 'db' -Value `$value -Hello 6>`$null
 `$before = `$key.Prompts

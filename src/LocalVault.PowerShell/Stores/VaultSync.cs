@@ -1,4 +1,5 @@
 using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
@@ -144,7 +145,7 @@ internal static class VaultSync
             return;
         }
 
-        var group = StoreGroupPath.For(location);
+        var group = location.StoreGroup;
         using var content = target.Vault.Read(group);
         var result = StoreSync.SavePersonal(
             body, content, target.Vault, group, target.WithDeclaration, name => overwrite(location, name), new HelloContext(host.Hello, location.Path));
@@ -161,7 +162,7 @@ internal static class VaultSync
 
         if (!known.TryGetValue(gitRoot, out var origin))
         {
-            known[gitRoot] = origin = RepositoryOrigin.Of(location);
+            known[gitRoot] = origin = location.ReadOrigin();
         }
 
         return origin;
@@ -177,7 +178,7 @@ internal static class VaultSync
         Func<EntryName, bool> overwrite,
         bool excludeRequired = false)
     {
-        var group = StoreGroupPath.For(location);
+        var group = location.StoreGroup;
         using var content = target.Vault.Read(group);
         ReportSkipped(host, content);
         var result = StoreSync.Save(body, content, target.Vault, group, overwrite, mirror, excludeRequired, new HelloContext(host.Hello, location.Path));
@@ -220,12 +221,12 @@ internal static class VaultSync
 
         if (saved.Personal)
         {
-            host.Tell($"{label} -> personal store '{saved.Target.Name}', {StoreGroupPath.Display(StoreGroupPath.For(saved.Location))}: {result.Added} of your values added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
+            host.Tell($"{label} -> personal store '{saved.Target.Name}', {StoreGroupPath.Display(saved.Location.StoreGroup)}: {result.Added} of your values added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
             return;
         }
 
         var kind = saved.Mirror ? "mirror" : "store";
-        host.Tell($"{label} -> {kind} '{saved.Target.Name}', {StoreGroupPath.Display(StoreGroupPath.For(saved.Location))}: {result.Added} added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
+        host.Tell($"{label} -> {kind} '{saved.Target.Name}', {StoreGroupPath.Display(saved.Location.StoreGroup)}: {result.Added} added, {result.Updated} updated, {result.Deleted} removed, {result.Skipped.Count} not saved.");
     }
 
     public static (VaultSyncTotals Totals, IReadOnlyList<string> Unresolved) Load(
@@ -256,7 +257,7 @@ internal static class VaultSync
             reached++;
             var store = RepositoryVaults.StoreFor(location);
             var snapshot = store.Read();
-            var group = StoreGroupPath.For(location);
+            var group = location.StoreGroup;
             var references = new ReferenceStores(access, location, keePass.DatabaseId);
             using var content = keePass.Read(group, references);
             ReportSkipped(host, content);

@@ -198,7 +198,7 @@ Details: Get-Help Invoke-LocalVault -Full
     }
 
     $location = {
-        [LocalVault.Core.VaultLocation]::Resolve(
+        [LocalVault.Engine.VaultLocation]::Resolve(
             $options['path'], $env:LOCALVAULT_PATH, (Get-Location -PSProvider FileSystem).ProviderPath)
     }
 
@@ -274,14 +274,14 @@ Details: Get-Help Invoke-LocalVault -Full
                     $resolved = & $location
                     $state = if (Test-Path -LiteralPath $resolved.Path -PathType Leaf) { 'exists' }
                     elseif ($resolved.LegacyPath -and (Test-Path -LiteralPath $resolved.LegacyPath -PathType Leaf)) {
-                        "not created yet; $([LocalVault.Core.VaultLocation]::LegacyFileName) moves into it on the first write"
+                        "not created yet; $([LocalVault.Engine.VaultLocation]::LegacyFileName) moves into it on the first write"
                     }
                     else { 'not created yet' }
-                    $from = if ($resolved.Source -eq 'Environment') { ", from `$env:$([LocalVault.Core.VaultLocation]::EnvironmentVariable)" } else { '' }
+                    $from = if ($resolved.Source -eq 'Environment') { ", from `$env:$([LocalVault.Engine.VaultLocation]::EnvironmentVariable)" } else { '' }
                     "Vault: $($resolved.Path) ($state$from)"
                 }
                 catch [LocalVault.Core.VaultException] {
-                    "Vault: none. This folder isn't in a git repository; use --path or `$env:$([LocalVault.Core.VaultLocation]::EnvironmentVariable)."
+                    "Vault: none. This folder isn't in a git repository; use --path or `$env:$([LocalVault.Engine.VaultLocation]::EnvironmentVariable)."
                 }
             }
             'start' {
@@ -309,7 +309,7 @@ Details: Get-Help Invoke-LocalVault -Full
                     })
                 $ignored = $true
                 if ($resolved.GitRoot) {
-                    try { $ignored = [LocalVault.Core.GitIgnore]::IsIgnored($resolved.Path) } catch { $ignored = $false }
+                    try { $ignored = [LocalVault.Engine.GitIgnore]::IsIgnored($resolved.Path) } catch { $ignored = $false }
                 }
 
                 $state = if ($exists) {
@@ -317,7 +317,7 @@ Details: Get-Help Invoke-LocalVault -Full
                     $entries = @(Get-VaultEntryList @vault 3>$null 6>$null)
                     "$($entries.Count) entries$(if ($current) { ", $($current.Pending + $current.RemovalsPending) change(s) not in the store" })"
                 }
-                elseif ($legacy) { "not created yet; $([LocalVault.Core.VaultLocation]::LegacyFileName) is here" }
+                elseif ($legacy) { "not created yet; $([LocalVault.Engine.VaultLocation]::LegacyFileName) is here" }
                 else { 'not created yet' }
                 if ($resolved.GitRoot) { "Project: $($resolved.GitRoot)" }
                 "Vault:   $($resolved.Path) ($state)"
@@ -335,7 +335,7 @@ Details: Get-Help Invoke-LocalVault -Full
                 elseif ($resolved.GitRoot -and $stores.Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $resolved.GitRoot 'localvault.json'))) { $next.Add('lv store use <name>   name the store in localvault.json, then commit it') }
                 if (@($stores | Where-Object Scope -EQ 'Computer').Count -gt 1 -and -not $unlocked) { $next.Add('lv store add <name> <target> --unlock-with <your personal store>   optional: open that store with the password kept in your personal one') }
                 if (-not $ignored) { $next.Add("add the line secrets.local.* to $(Join-Path $resolved.GitRoot '.gitignore')   before anything else") }
-                if (-not $exists -and $legacy) { $next.Add("lv list   reads $([LocalVault.Core.VaultLocation]::LegacyFileName); the first change moves it into the vault") }
+                if (-not $exists -and $legacy) { $next.Add("lv list   reads $([LocalVault.Engine.VaultLocation]::LegacyFileName); the first change moves it into the vault") }
                 elseif (-not $exists -and $others.Count -gt 0 -and -not $options.ContainsKey('path')) {
                     $next.Add("lv start --path $($others[0])   the vault of this repository is in a subfolder")
                     $others = @($others | Select-Object -Skip 1)

@@ -1,5 +1,6 @@
 using System.Management.Automation;
 using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
@@ -397,7 +398,7 @@ public abstract class StoreSyncCmdletBase : VaultCmdletBase
     [ValidateNotNullOrEmpty]
     public string? Store { get; set; }
 
-    protected IReadOnlyList<string> Group => StoreGroupPath.For(Location);
+    protected IReadOnlyList<string> Group => Location.StoreGroup;
 
     internal StoreAccess NewAccess() => new(this, Store);
 }
@@ -502,7 +503,7 @@ public sealed class GetVaultStoreStatusCommand : StoreSyncCmdletBase
             var states = snapshot.Exists ? StoreSync.ComparePending(snapshot.Body, resolution.DatabaseId) : [];
             WriteObject(new VaultStoreStatus(
                 resolution.Vault,
-                StoreGroupPath.Display(StoreGroupPath.For(location)),
+                StoreGroupPath.Display(location.StoreGroup),
                 resolution.Definition?.Name ?? (resolution.Reference is null ? null : resolution.Label),
                 resolution.Definition?.Scope.ToString(),
                 resolution.Definition?.Target,
@@ -568,7 +569,7 @@ public sealed class CopyVaultToStoreCommand : StoreSyncCmdletBase
             WriteWarning($"'{missing.Name}' not copied: {missing.Reason}. lv load restores it from the store.");
         }
 
-        var guidesChanged = StoreSync.MaintainGuides(keePass, Location, RepositoryOrigin.Of(Location));
+        var guidesChanged = StoreSync.MaintainGuides(keePass, Location, Location.ReadOrigin());
         if (written > 0 || guidesChanged)
         {
             keePass.Save();

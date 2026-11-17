@@ -7,14 +7,16 @@
     <PackageReference Include="xunit.v3" Version="4.0.1" />
   </ItemGroup>
   <ItemGroup>
+    <ProjectReference Include="..\..\src\LocalVault.Engine\LocalVault.Engine.csproj" />
     <ProjectReference Include="..\..\src\LocalVault.KeePass\LocalVault.KeePass.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <Compile Include="..\LocalVault.Core.Tests\TempDirectory.cs" Link="TempDirectory.cs" />
+    <Compile Include="..\LocalVault.Engine.Tests\TempDirectory.cs" Link="TempDirectory.cs" />
   </ItemGroup>
   <ItemGroup>
     <Using Include="Xunit" />
     <Using Include="LocalVault.Core" />
-    <Using Include="LocalVault.Core.Tests" />
+    <Using Include="LocalVault.Engine" />
+    <Using Include="LocalVault.Engine.Tests" />
   </ItemGroup>
 </Project>

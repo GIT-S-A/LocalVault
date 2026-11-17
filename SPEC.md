@@ -564,7 +564,7 @@ T101|x|database id in KDBX 4 header; `lv store add` records id; `lv store use` w
 T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass*→Store* (sync, item, content, reference, link, removal, group path), `VaultStore`→`VaultFile`; KeePass xUnit → `LocalVault.KeePass.Tests`, in-memory `IStore` for sync tests; install.ps1 DLL list; beta18 (ships T91, T101 too)|C3,C10,V81,V156
 T103|x|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
 T104|x|source folders per area in Core, PowerShell, Core.Tests; StoreEngine.cs split 1 class per file; namespaces unchanged|§I layout
-T105|.|split `LocalVault.Engine` (logic) out of `LocalVault.Core` (contract); namespaces follow assemblies; location-based group path & origin → `VaultLocation`; test project → `LocalVault.Engine.Tests`; install.ps1 DLL list|C3,V81,V156,§I layout
+T105|x|split `LocalVault.Engine` (logic) out of `LocalVault.Core` (contract); namespaces follow assemblies; location-based group path & origin → `VaultLocation`; test project → `LocalVault.Engine.Tests`; install.ps1 DLL list|C3,V81,V156,§I layout
 
 ## §B Bugs
 

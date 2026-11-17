@@ -13,13 +13,13 @@ Describe 'Leftover backups' {
         $script:destination = Join-Path $script:folder 'backups'
         $script:fixtures = Join-Path $PSScriptRoot '../fixtures'
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret '1')
-        $script:location = [LocalVault.Core.VaultLocation]::Resolve($vault, $null, $script:folder)
+        $script:location = [LocalVault.Engine.VaultLocation]::Resolve($vault, $null, $script:folder)
         $script:addBackupSettings = {
             param([string]$Destination)
             $keyFile = [IO.File]::ReadAllBytes((Join-Path $fixtures 'localvault-2-beta1.lvkey'))
-            $settings = [LocalVault.Core.BackupSettings]::Create('0123456789abcdef', $Destination, 'fixture passphrase 2', $keyFile)
-            $store = [LocalVault.Core.VaultFile]::new($location, $null)
-            $store.Update([Action[LocalVault.Core.VaultBody]] { param($body) $body.Backup = $settings }, $null) | Out-Null
+            $settings = [LocalVault.Engine.BackupSettings]::Create('0123456789abcdef', $Destination, 'fixture passphrase 2', $keyFile)
+            $store = [LocalVault.Engine.VaultFile]::new($location, $null)
+            $store.Update([Action[LocalVault.Engine.VaultBody]] { param($body) $body.Backup = $settings }, $null) | Out-Null
         }
         $script:addBackup = {
             param([string]$Folder, [string]$Name = '20261008T120000000Z-0123456789abcdef.lvbak')
@@ -46,7 +46,7 @@ Describe 'Leftover backups' {
     }
 
     It 'finds backups in the default OneDrive folder without settings' {
-        $default = [LocalVault.Core.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
+        $default = [LocalVault.Engine.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
         & $addBackup $default | Out-Null
 
         Get-VaultEntryList -Path $vault -WarningVariable warnings -WarningAction SilentlyContinue | Out-Null
@@ -64,7 +64,7 @@ Describe 'Leftover backups' {
         & $addBackupSettings $destination
         $own = & $addBackup $destination
         $foreign = & $addBackup $destination '20261008T120000000Z-fedcba9876543210.lvbak'
-        $default = [LocalVault.Core.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
+        $default = [LocalVault.Engine.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
         & $addBackup $default | Out-Null
 
         Clear-Vault -Path $vault -Confirm:$false
@@ -74,7 +74,7 @@ Describe 'Leftover backups' {
     }
 
     It 'are deleted by Clear-Vault after the vault itself is gone' {
-        $default = [LocalVault.Core.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
+        $default = [LocalVault.Engine.LeftoverBackups]::DefaultFolder($location, [Environment]::MachineName, $env:OneDrive)
         $backup = & $addBackup $default
         Remove-Item -LiteralPath $vault
 

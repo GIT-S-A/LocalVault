@@ -2,17 +2,6 @@ namespace LocalVault.Core;
 
 public sealed record RepositoryOrigin(string Url, string Folder)
 {
-    public static RepositoryOrigin? Of(VaultLocation location)
-    {
-        ArgumentNullException.ThrowIfNull(location);
-        if (location.GitRoot is not { } gitRoot || ReadOriginUrl(gitRoot) is not { Length: > 0 } url)
-        {
-            return null;
-        }
-
-        return new RepositoryOrigin(WithoutCredentials(url), Path.GetFileName(Path.TrimEndingDirectorySeparator(gitRoot)));
-    }
-
     public static string WithoutCredentials(string url)
     {
         ArgumentNullException.ThrowIfNull(url);
@@ -35,17 +24,5 @@ public sealed record RepositoryOrigin(string Url, string Folder)
         var userName = authority[..at].Split(':')[0];
         var keptUser = isHttp || userName.Length == 0 ? string.Empty : userName + "@";
         return url[..authorityStart] + keptUser + url[(authorityStart + at + 1)..];
-    }
-
-    private static string? ReadOriginUrl(string gitRoot)
-    {
-        try
-        {
-            return Git.Run(gitRoot, "remote", "get-url", "origin") is { ExitCode: 0 } result ? result.Output.Trim() : null;
-        }
-        catch (TimeoutException)
-        {
-            return null;
-        }
     }
 }

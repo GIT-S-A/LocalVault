@@ -1,5 +1,5 @@
 using System.Security;
-using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 

@@ -101,9 +101,9 @@ Describe 'Credential entries' {
     It 'upgrades an older vault on its first write' {
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret '1')
         $sealed = Get-Content -LiteralPath $vault -Raw
-        $body = [LocalVault.Core.Envelope]::OpenLocal($sealed)
+        $body = [LocalVault.Engine.Envelope]::OpenLocal($sealed)
         $old = [Text.Encoding]::UTF8.GetString($body).Replace('"schema":5', '"schema":2')
-        [IO.File]::WriteAllText($vault, [LocalVault.Core.Envelope]::SealLocal([Text.Encoding]::UTF8.GetBytes($old)))
+        [IO.File]::WriteAllText($vault, [LocalVault.Engine.Envelope]::SealLocal([Text.Encoding]::UTF8.GetBytes($old)))
 
         $said = Set-VaultEntry -Path $vault -Name 'b' -Value (ConvertTo-TestSecret '2') 6>&1 | Out-String
 

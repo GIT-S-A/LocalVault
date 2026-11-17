@@ -29,16 +29,16 @@ public sealed class KeePassSyncTests : IDisposable
     public void GroupFollowsRepositoryFolderAndFileName()
     {
         var root = directory.CreateDirectory("repo");
-        Assert.Equal(["LocalVault", "repo"], StoreGroupPath.For(new VaultLocation(Path.Combine(root, "secrets.local.lv"), VaultPathSource.GitRoot, root)));
+        Assert.Equal(["LocalVault", "repo"], new VaultLocation(Path.Combine(root, "secrets.local.lv"), VaultPathSource.GitRoot, root).StoreGroup);
         Assert.Equal(
             ["LocalVault", "repo", "infra", "deep"],
-            StoreGroupPath.For(new VaultLocation(Path.Combine(root, "infra", "deep", "secrets.local.lv"), VaultPathSource.Explicit, root)));
+            new VaultLocation(Path.Combine(root, "infra", "deep", "secrets.local.lv"), VaultPathSource.Explicit, root).StoreGroup);
         Assert.Equal(
             ["LocalVault", "repo", "other.lv"],
-            StoreGroupPath.For(new VaultLocation(Path.Combine(root, "other.lv"), VaultPathSource.Explicit, root)));
+            new VaultLocation(Path.Combine(root, "other.lv"), VaultPathSource.Explicit, root).StoreGroup);
         Assert.Equal(
             ["LocalVault", "loose"],
-            StoreGroupPath.For(new VaultLocation(Path.Combine(directory.Path, "loose", "secrets.local.lv"), VaultPathSource.Explicit, null)));
+            new VaultLocation(Path.Combine(directory.Path, "loose", "secrets.local.lv"), VaultPathSource.Explicit, null).StoreGroup);
     }
 
     [Fact]
@@ -608,7 +608,7 @@ public sealed class KeePassSyncTests : IDisposable
         using var repo = TempDirectory.GitRepository();
         repo.Git("remote", "add", "origin", "https://jdoe:t0ken@dev.azure.com/org/proj/_git/app");
         var location = new VaultLocation(repo.Combine("infra", "secrets.local.lv"), VaultPathSource.Explicit, repo.Path);
-        var origin = RepositoryOrigin.Of(location)!;
+        var origin = location.ReadOrigin()!;
         var folder = Path.GetFileName(repo.Path);
         IReadOnlyList<string> projectGroup = ["LocalVault", folder];
 
@@ -715,7 +715,7 @@ public sealed class KeePassSyncTests : IDisposable
     {
         using var repo = TempDirectory.GitRepository();
 
-        Assert.Null(RepositoryOrigin.Of(new VaultLocation(repo.Combine("secrets.local.lv"), VaultPathSource.GitRoot, repo.Path)));
+        Assert.Null(new VaultLocation(repo.Combine("secrets.local.lv"), VaultPathSource.GitRoot, repo.Path).ReadOrigin());
     }
 
     [Theory]

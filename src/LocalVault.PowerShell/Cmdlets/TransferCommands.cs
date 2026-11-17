@@ -3,6 +3,7 @@ using System.Management.Automation;
 using System.Management.Automation.Host;
 using System.Security;
 using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 

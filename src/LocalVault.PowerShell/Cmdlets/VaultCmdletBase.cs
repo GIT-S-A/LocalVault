@@ -3,6 +3,7 @@ using System.Management.Automation;
 using System.Management.Automation.Host;
 using System.Security;
 using LocalVault.Core;
+using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
@@ -161,7 +162,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
         return ReadVault().Body;
     }
 
-    protected string? OriginUrl => RepositoryOrigin.Of(Location)?.Url;
+    protected string? OriginUrl => Location.ReadOrigin()?.Url;
 
     internal void WriteKeyFile(VaultEntry entry, bool overwrite)
     {
@@ -185,7 +186,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
             try
             {
                 var store = RepositoryVaults.StoreFor(location);
-                var origin = RepositoryOrigin.Of(location)?.Url;
+                var origin = location.ReadOrigin()?.Url;
                 var newer = SshKeyAdoption.FindNewer(store.Read().Body, origin, Now);
                 if (newer.Count == 0)
                 {
@@ -220,7 +221,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
             var entries = RepositoryVaults.StoreFor(location).Read().Body.Entries;
             foreach (var key in entries.Where(e => e.Ssh is not null && !e.IsMissing))
             {
-                var plan = SshKeyFiles.Write(key, location.Path, RepositoryOrigin.Of(location)?.Url, overwrite: false, Now);
+                var plan = SshKeyFiles.Write(key, location.Path, location.ReadOrigin()?.Url, overwrite: false, Now);
                 if (plan.Refused)
                 {
                     WriteWarning(SshKeyFiles.Describe(plan, key.Name));

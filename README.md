@@ -206,25 +206,32 @@ and keep the export off this machine. Until then `Get-VaultEntryList` warns.
 .\tools\test.ps1    # build, xUnit, PSScriptAnalyzer, Pester
 ```
 
+The assemblies form three layers. `LocalVault.Core` is the shared contract and references no other
+LocalVault assembly. `LocalVault.Engine` and each store assembly reference Core only.
+`LocalVault.PowerShell` references all of them and picks the store implementation by store type.
+
 | Folder | Holds |
 |---|---|
-| `src/LocalVault.Core/Vault` | names, entries, body, the vault file and its location |
-| `src/LocalVault.Core/Files` | envelope format, project file, PC settings, templates, other files LocalVault writes |
-| `src/LocalVault.Core/Transfer` | export, import, `.clixml` migration |
-| `src/LocalVault.Core/Stores` | store interfaces, store registry and resolution, sync |
-| `src/LocalVault.Core/Hello` | Windows Hello keys and sealing |
-| `src/LocalVault.Core/Ssh` | SSH key files, generation, adoption |
-| `src/LocalVault.Core/Processes` | git and other external programs |
+| `src/LocalVault.Core/Entries` | entry names, `VaultEntry`, TOTP, exceptions |
+| `src/LocalVault.Core/Stores` | store interfaces and the types they exchange, store types |
+| `src/LocalVault.Core/Ssh` | SSH key information and OpenSSH private key parsing |
+| `src/LocalVault.Engine/Vault` | body, the vault file and its location |
+| `src/LocalVault.Engine/Files` | envelope format, project file, PC settings, templates, other files LocalVault writes |
+| `src/LocalVault.Engine/Transfer` | export, import, `.clixml` migration |
+| `src/LocalVault.Engine/Stores` | store registry and resolution, sync |
+| `src/LocalVault.Engine/Hello` | Windows Hello keys and sealing |
+| `src/LocalVault.Engine/Ssh` | SSH key files, generation, adoption |
+| `src/LocalVault.Engine/Processes` | git and other external programs |
 | `src/LocalVault.KeePass` | KeePass store over KeePassLib |
 | `src/LocalVault.PowerShell/Cmdlets` | cmdlets, one file per area |
 | `src/LocalVault.PowerShell/Stores` | opening stores, save and load across a repository's vaults |
 | `src/LocalVault.PowerShell/Support` | clipboard, secret conversion, completion, legacy reader |
 | `src/LocalVault.PowerShell` | `LocalVault.psd1`, `LocalVault.Cli.psm1` (the `lv` command) |
-| `tests/LocalVault.Core.Tests` | xUnit, same folders as Core |
+| `tests/LocalVault.Engine.Tests` | xUnit for Engine and Core, same folders |
 | `tests/LocalVault.KeePass.Tests` | xUnit against temporary `.kdbx` files |
 | `tests/pester` | end-to-end tests of the module and `lv` |
 
-Namespaces don't follow folders: everything in an assembly shares one namespace.
+Each assembly has one namespace, named after it. Folders don't add namespaces.
 
 The build needs Microsoft.PowerShell.PlatyPS 1.0.3. Help is written in `docs/LocalVault/` and compiled
 into the module at build time; a new command or parameter needs its text there, or the help tests
