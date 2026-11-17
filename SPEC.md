@@ -7,8 +7,8 @@ One machine-local secret store per project: PS module (contract) + thin CLI + Cl
 ## §C Constraints
 
 - C1: PowerShell 7.6+ (.NET 10), Windows only (DPAPI). C# `net10.0-windows`. ∀ `.ps1`: `Set-StrictMode -Version Latest`, `$ErrorActionPreference = 'Stop'`.
-- C2: warnings = errors: C# `TreatWarningsAsErrors`, `Nullable enable`, `AnalysisLevel latest-recommended`; PSScriptAnalyzer clean. xUnit ∀ Core logic; Pester 6 ∀ cmdlet behaviour.
-- C3: C# where logic lives: `LocalVault.Core` (no PS dependency, ⊥ store-type code) holds names, body, formats, crypto, vault file, store sync & registry, store interfaces `IStore`/`IUnlockingStore`/`IStoreProvider`/`IStorePrompt`. `LocalVault.KeePass` = KeePass store over KeePassLib. `LocalVault.PowerShell` = binary cmdlets (contract): prompts (store prompts via `IStorePrompt` over host), SecureString, ShouldProcess, env; references store assemblies directly, picks provider by store `type`. Legacy clixml read needs PS deserializer → cmdlet layer. CLI = dispatch only.
+- C2: warnings = errors: C# `TreatWarningsAsErrors`, `Nullable enable`, `AnalysisLevel latest-recommended`; PSScriptAnalyzer clean. xUnit ∀ Core & Engine logic; Pester 6 ∀ cmdlet behaviour.
+- C3: C# where logic lives, 3 layers. `LocalVault.Core` = shared contract, references nothing: store interfaces `IStore`/`IUnlockingStore`/`IStoreProvider`/`IStorePrompt` & their types, entry model (`VaultEntry`, `EntryName`, TOTP, SSH key info), exceptions, `StoreTypes`. `LocalVault.Engine` → Core: body, formats, crypto, vault file, store sync & registry, Hello, transfer, templates, SSH key files, git. `LocalVault.KeePass` = KeePass store over KeePassLib. `LocalVault.PowerShell` = binary cmdlets (contract): prompts (store prompts via `IStorePrompt` over host), SecureString, ShouldProcess, env; references Engine & store assemblies directly, picks provider by store `type`. Legacy clixml read needs PS deserializer → cmdlet layer. CLI = dispatch only.
 - C4: vault in consuming project folder, gitignored. ⊥ `%LOCALAPPDATA%` for vault (KP registry, ⊥ secret, lives there).
 - C5: one vault file may serve several scripts of one project.
 - C6: SSH keys = `ssh-key` entries (§I.SSH keys), personal | shared, for SSH to hosts only; ⊥ git wiring (git over HTTPS). `__Ssh*` legacy import refused (V10, V139).
@@ -24,14 +24,16 @@ One machine-local secret store per project: PS module (contract) + thin CLI + Cl
 
 ```
 LocalVault.sln  Directory.Build.props        warnings=errors, nullable, analyzers
-src/LocalVault.Core/                         C# class lib, no PS reference
-  Vault/ Files/ Transfer/ Stores/ Hello/ Ssh/ Processes/   folder per area; namespace stays LocalVault.Core
+src/LocalVault.Core/                         shared contract, references nothing
+  Entries/ Stores/ Ssh/                       entry model | store contract | SSH key info
+src/LocalVault.Engine/                       C# logic → Core, no PS reference
+  Vault/ Files/ Transfer/ Stores/ Hello/ Ssh/ Processes/   folder per area
 src/LocalVault.KeePass/                      KeePass store: IStore over KeePassLib
 src/KeePassLib/                               builds vendor/KeePassLib + Compat.cs
 vendor/KeePassLib/                            KeePassLib upstream, unmodified; License.txt, UPSTREAM.txt
 src/LocalVault.PowerShell/                   C# binary cmdlets; LocalVault.psd1 + LocalVault.Cli.psm1 at root
   Cmdlets/ Stores/ Support/                   cmdlet classes | store engine, 1 class per file | helpers; namespace stays LocalVault.PowerShell
-tests/LocalVault.Core.Tests/                 xUnit, folders mirror LocalVault.Core
+tests/LocalVault.Engine.Tests/               xUnit for Engine & Core, folders mirror them
 tests/LocalVault.KeePass.Tests/              xUnit w/ temp kdbx
 tests/pester/*.Tests.ps1  tests/fixtures/    end-to-end, v1 fixtures, multi-process
 install.ps1                                  release download | unpacked release | checkout build → Modules\LocalVault\<ver>\ + skill
@@ -374,7 +376,7 @@ V84: `Export-VaultToStore` / `Import-VaultFromStore` w/o `-Path` & `LOCALVAULT_P
 V85: read (Get-VaultEntry, Copy-VaultEntry, Resolve-VaultEntry, Use-VaultEnv, Restore-VaultFile) misses entry|vault & store known & interactive console → one load of the repository's vaults (conflicts keep local), then retry; ⊥ console → plain error.
 V83: `install.ps1` ∀ install: release older than installed (version, final > prerelease, label, number) → error, nothing changed, unless `-Downgrade` (alias `-Force`; `lv update --downgrade`).
 V82: vault creation: other vault files in repo refuse only default-location creation; explicit `-Path`/env → allowed (several vaults per repo).
-V81: `install.ps1` copies nothing unless the build output holds the manifest, `LocalVault.PowerShell.dll`, `LocalVault.Core.dll`, `LocalVault.KeePass.dll`, `KeePassLib.dll`; `global.json` accepts any .NET 10 SDK (10.0.100, latestFeature).
+V81: `install.ps1` copies nothing unless the build output holds the manifest, `LocalVault.PowerShell.dll`, `LocalVault.Core.dll`, `LocalVault.Engine.dll`, `LocalVault.KeePass.dll`, `KeePassLib.dll`; `global.json` accepts any .NET 10 SDK (10.0.100, latestFeature).
 V80: superseded by V110 (⊥ `source.txt`; `lv update` runs the installed module's `install.ps1`).
 V86: `lv` syntax stable from beta7: ⊥ `kp`, `kp-catalog`, `recover`, `set-file`, `share`, `unshare`, `--force`, `--keepass` (clean cut, ⊥ alias). Cmdlets ⊥ `*KeePass*` names; KeePass = store type only.
 V87: store resolution per vault (§I.KeePass "vault store"); each DB opened once per run whatever the number of vaults & references to it; vault w/ unresolved store → skipped w/ message in repo-wide save/load, error for one vault.
@@ -452,7 +454,7 @@ V152: Hello prompt only in an interactive session: ⊥ console | input redirecte
 V153: ∀ read of a Hello value outside the module (output, env, clipboard, file, template, child stdin) happens on an unsealed copy of the body that is never written; `Set-VaultEntry` on a Hello credential part (`n#user`) unseals once, then reseals. Personal file values sealed by Hello ⊥ written to `~/` by `lv load` (`lv restore <name>` writes them).
 V154: Hello key created only after `NCryptOpenKey` → `NTE_BAD_KEYSET` 0x80090016 | `NTE_NOT_FOUND` 0x80090011 (state `none`); `NTE_NO_KEY` 0x8009000D → `unavailable` "isn't ready in this window … open a new PowerShell window"; any other status → `unavailable` w/ hex code. ⊥ create | overwrite on other statuses.
 V155: database id source: id recorded on this PC (`stores.json` | `localvault.json`) > KDBX 4 outer header `PublicCustomData` `LocalVault.DatabaseId` (⊥ password) > store opened (password). `Register-VaultStore` common → id recorded at add (header, else opened); non-console & header ⊥ id → added w/o id, recorded at first open. `-Project` w/o target → id copied from PC store when known. `Set-VaultProjectStore` w/ id known → ⊥ store opened. ∀ open → real id ≠ recorded → error, nothing written (header unauthenticated: checked at first open). ∀ save → header `LocalVault.DatabaseId` set. KDBX 3 → ⊥ header field → opened.
-V156: Core ⊥ reference KeePassLib | any store assembly; sync & cmdlets reach a store only via `IStore`/`IUnlockingStore`/`IStoreProvider`; provider asks its own secrets via `IStorePrompt`, ⊥ console access in store assemblies; prompt owns & clears answers; kept AutoOpen password = 1st answer of prompt; 1 assembly per store type. Type renames ⊥ change body JSON (`kp`, `kpRemoved`, `ref` kept).
+V156: Core ⊥ reference any LocalVault assembly; Engine → Core, ⊥ store assembly; store assemblies → Core & own libraries, ⊥ Engine; Core internals visible to Engine only. Sync & cmdlets reach a store only via `IStore`/`IUnlockingStore`/`IStoreProvider`; provider asks its own secrets via `IStorePrompt`, ⊥ console access in store assemblies; prompt owns & clears answers; kept AutoOpen password = 1st answer of prompt; 1 assembly per store type. Type renames ⊥ change body JSON (`kp`, `kpRemoved`, `ref` kept).
 
 ## §T Tasks
 
@@ -562,6 +564,7 @@ T101|x|database id in KDBX 4 header; `lv store add` records id; `lv store use` w
 T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass*→Store* (sync, item, content, reference, link, removal, group path), `VaultStore`→`VaultFile`; KeePass xUnit → `LocalVault.KeePass.Tests`, in-memory `IStore` for sync tests; install.ps1 DLL list; beta18 (ships T91, T101 too)|C3,C10,V81,V156
 T103|x|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
 T104|x|source folders per area in Core, PowerShell, Core.Tests; StoreEngine.cs split 1 class per file; namespaces unchanged|§I layout
+T105|.|split `LocalVault.Engine` (logic) out of `LocalVault.Core` (contract); namespaces follow assemblies; location-based group path & origin → `VaultLocation`; test project → `LocalVault.Engine.Tests`; install.ps1 DLL list|C3,V81,V156,§I layout
 
 ## §B Bugs
 
