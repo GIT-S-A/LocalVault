@@ -1,7 +1,5 @@
 using System.Text;
 using KeePassLib;
-using KeePassLib.Cryptography.KeyDerivation;
-using KeePassLib.Keys;
 using KeePassLib.Security;
 using KeePassLib.Serialization;
 
@@ -9,7 +7,6 @@ namespace LocalVault.KeePass.Tests;
 
 public sealed class SshKeyStoreTests : IDisposable
 {
-    private const string Master = "test master 1";
     private const string PublicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIGmCmhyZfFSbAVfJ/bovNv4H3f/VIW8/KGdICZD31KiE test@example.com";
     private const string Fingerprint = "SHA256:ygwjj+x/jcbcUNmwhazPNZzoRvNv7XDnLrscAy0ZQ0M";
     private const string KeyPath = "~/.ssh/proj/deploy";
@@ -233,22 +230,4 @@ public sealed class SshKeyStoreTests : IDisposable
         }
     }
 
-    private static CompositeKey Key()
-    {
-        var key = new CompositeKey();
-        key.AddUserKey(new KcpPassword(Master));
-        return key;
-    }
-
-    private static void CreateDatabase(string path)
-    {
-        var db = new PwDatabase();
-        db.New(IOConnectionInfo.FromPath(path), Key());
-        var kdf = new AesKdf().GetDefaultParameters();
-        kdf.SetUInt64(AesKdf.ParamRounds, 1000);
-        db.KdfParameters = kdf;
-        db.RecycleBinEnabled = true;
-        db.Save(null);
-        db.Close();
-    }
 }

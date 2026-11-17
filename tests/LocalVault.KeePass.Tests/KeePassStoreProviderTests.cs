@@ -1,14 +1,7 @@
-using KeePassLib;
-using KeePassLib.Cryptography.KeyDerivation;
-using KeePassLib.Keys;
-using KeePassLib.Serialization;
-
 namespace LocalVault.KeePass.Tests;
 
 public sealed class KeePassStoreProviderTests : IDisposable
 {
-    private const string Master = "test master 1";
-
     private readonly TempDirectory directory = new();
 
     public void Dispose() => directory.Dispose();
@@ -35,19 +28,6 @@ public sealed class KeePassStoreProviderTests : IDisposable
         var error = Assert.Throws<VaultException>(() => new KeePassStoreProvider().Open(path, null, new ScriptedPrompt("team", "wrong")));
 
         Assert.Contains("does not open", error.Message, StringComparison.Ordinal);
-    }
-
-    private static void CreateDatabase(string path)
-    {
-        var key = new CompositeKey();
-        key.AddUserKey(new KcpPassword(Master));
-        var db = new PwDatabase();
-        db.New(IOConnectionInfo.FromPath(path), key);
-        var kdf = new AesKdf().GetDefaultParameters();
-        kdf.SetUInt64(AesKdf.ParamRounds, 1000);
-        db.KdfParameters = kdf;
-        db.Save(null);
-        db.Close();
     }
 
     private sealed class ScriptedPrompt(string storeName, string answer) : IStorePrompt

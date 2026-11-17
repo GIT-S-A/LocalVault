@@ -1,15 +1,9 @@
 using System.Buffers.Binary;
-using KeePassLib;
-using KeePassLib.Cryptography.KeyDerivation;
-using KeePassLib.Keys;
-using KeePassLib.Serialization;
 
 namespace LocalVault.KeePass.Tests;
 
 public sealed class KdbxHeaderTests : IDisposable
 {
-    private const string Master = "test master 1";
-
     private readonly TempDirectory directory = new();
 
     public void Dispose() => directory.Dispose();
@@ -56,16 +50,4 @@ public sealed class KdbxHeaderTests : IDisposable
         return bytes;
     }
 
-    private static void CreateDatabase(string path)
-    {
-        var key = new CompositeKey();
-        key.AddUserKey(new KcpPassword(Master));
-        var db = new PwDatabase();
-        db.New(IOConnectionInfo.FromPath(path), key);
-        var kdf = new AesKdf().GetDefaultParameters();
-        kdf.SetUInt64(AesKdf.ParamRounds, 1000);
-        db.KdfParameters = kdf;
-        db.Save(null);
-        db.Close();
-    }
 }

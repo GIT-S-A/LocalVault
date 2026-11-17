@@ -1,7 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text;
 using KeePassLib;
-using KeePassLib.Cryptography.KeyDerivation;
 using KeePassLib.Keys;
 using KeePassLib.Security;
 using KeePassLib.Serialization;
@@ -10,7 +9,6 @@ namespace LocalVault.KeePass.Tests;
 
 public sealed class KeePassSyncTests : IDisposable
 {
-    private const string Master = "test master 1";
     private static readonly DateTimeOffset Now = new(2026, 10, 9, 12, 0, 0, TimeSpan.Zero);
     private static readonly IReadOnlyList<string> Group = ["LocalVault", "proj"];
 
@@ -755,30 +753,6 @@ public sealed class KeePassSyncTests : IDisposable
         entry.Strings.Set(PwDefs.TitleField, new ProtectedString(false, title));
         entry.Strings.Set(PwDefs.PasswordField, new ProtectedString(true, password));
         group.AddEntry(entry, true);
-    }
-
-    private static CompositeKey Key(string? keyFile = null)
-    {
-        var key = new CompositeKey();
-        key.AddUserKey(new KcpPassword(Master));
-        if (keyFile is not null)
-        {
-            key.AddUserKey(new KcpKeyFile(keyFile));
-        }
-
-        return key;
-    }
-
-    private static void CreateDatabase(string path, bool recycleBin, string? keyFile = null)
-    {
-        var db = new PwDatabase();
-        db.New(IOConnectionInfo.FromPath(path), Key(keyFile));
-        var kdf = new AesKdf().GetDefaultParameters();
-        kdf.SetUInt64(AesKdf.ParamRounds, 1000);
-        db.KdfParameters = kdf;
-        db.RecycleBinEnabled = recycleBin;
-        db.Save(null);
-        db.Close();
     }
 
     private StoreSaveResult Save(VaultBody body, bool replace = false, bool mirror = false)

@@ -1,14 +1,11 @@
 using System.Text;
 using KeePassLib;
-using KeePassLib.Cryptography.KeyDerivation;
-using KeePassLib.Keys;
 using KeePassLib.Serialization;
 
 namespace LocalVault.KeePass.Tests;
 
 public sealed class HelloSyncTests : IDisposable
 {
-    private const string Master = "test master 1";
     private const string Vault = "C:/repo/secrets.local.lv";
     private static readonly DateTimeOffset Now = new(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
     private static readonly IReadOnlyList<string> Group = ["LocalVault", "proj"];
@@ -22,13 +19,7 @@ public sealed class HelloSyncTests : IDisposable
     {
         hello = new HelloEntries(key);
         database = directory.Combine("team.kdbx");
-        var db = new PwDatabase();
-        db.New(IOConnectionInfo.FromPath(database), Key());
-        var kdf = new AesKdf().GetDefaultParameters();
-        kdf.SetUInt64(AesKdf.ParamRounds, 1000);
-        db.KdfParameters = kdf;
-        db.Save(null);
-        db.Close();
+        CreateDatabase(database);
     }
 
     public void Dispose()
@@ -308,13 +299,6 @@ public sealed class HelloSyncTests : IDisposable
     {
         using var raw = new RawDatabase(database);
         return raw.Group?.Entries.Select(e => e.Strings.ReadSafe(PwDefs.TitleField)).ToList() ?? [];
-    }
-
-    private static CompositeKey Key()
-    {
-        var composite = new CompositeKey();
-        composite.AddUserKey(new KcpPassword(Master));
-        return composite;
     }
 
     private sealed class RawDatabase : IDisposable

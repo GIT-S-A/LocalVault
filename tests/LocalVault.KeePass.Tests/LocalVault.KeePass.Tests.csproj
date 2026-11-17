@@ -18,5 +18,6 @@
     <Using Include="LocalVault.Core" />
     <Using Include="LocalVault.Engine" />
     <Using Include="LocalVault.Engine.Tests" />
+    <Using Include="LocalVault.KeePass.Tests.TestDatabase" Static="true" />
   </ItemGroup>
 </Project>
