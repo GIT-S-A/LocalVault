@@ -5,7 +5,7 @@ using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
-public sealed record VaultEntryInfo(string Name, string? Scope, string Key, string Kind, string Sync, DateTimeOffset? Created, TimeSpan? Age, string? Note = null, string? User = null, string Hello = "");
+public sealed record VaultEntryInfo(string Name, string? Scope, string Key, string Kind, string Sync, DateTimeOffset? Created, TimeSpan? Age, string? Note = null, string? User = null, string Hello = "", bool UserSecret = false);
 
 public sealed record VaultHelloStatus(string State, bool? Hardware, string Provider, string? KeyId, string? VaultKeyId, int Entries, string[] Missing, string? Reason);
 
@@ -44,6 +44,7 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
             sync[entry.Name.FullName] = entry.IsMissing ? "Missing" : "Personal";
         }
         var unreadable = new List<(string Name, string Reason)>();
+        var userSecrets = UserSecretNames();
         foreach (var entry in snapshot.Body.Entries
                      .Where(e => Scope is null || string.Equals(e.Name.Scope, Scope, StringComparison.OrdinalIgnoreCase))
                      .OrderBy(e => e.Name.FullName, StringComparer.OrdinalIgnoreCase))
@@ -66,7 +67,7 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
             WriteObject(new VaultEntryInfo(
                 entry.Name.FullName, entry.Name.Scope, entry.Name.Key, entry.Kind,
                 sync.TryGetValue(entry.Name.FullName, out var state) ? state : string.Empty,
-                entry.Created, now - entry.Created, entry.RequiredNote, entry.UserName, hello));
+                entry.Created, now - entry.Created, entry.RequiredNote, entry.UserName, hello, userSecrets.Contains(entry.Name.FullName)));
         }
 
         foreach (var group in unreadable.GroupBy(u => u.Reason))
@@ -81,6 +82,33 @@ public sealed class GetVaultEntryListCommand : VaultCmdletBase
             WriteWarning($"Required values not set on this PC: {string.Join(", ", missing)}. Run lv set <name> for each (lv start shows where to get them).");
         }
         WarnAboutUnexported(snapshot.Body, now);
+    }
+
+    private HashSet<string> UserSecretNames()
+    {
+        var names = new HashSet<string>(EntryName.Comparer);
+        if (Location.GitRoot is null)
+        {
+            return names;
+        }
+
+        try
+        {
+            foreach (var reference in ProjectFile.ReadUserSecrets(Location)
+                         .Where(t => string.Equals(t.Vault, Location.Path, StringComparison.OrdinalIgnoreCase))
+                         .SelectMany(t => t.Keys.Values))
+            {
+                if (EntryReference.TryParse(reference, out var parsed))
+                {
+                    names.Add(parsed.Name.FullName);
+                }
+            }
+        }
+        catch (VaultException)
+        {
+        }
+
+        return names;
     }
 
     private void WarnAboutStore(IReadOnlyList<StoreComparison> states)

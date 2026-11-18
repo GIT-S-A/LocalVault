@@ -24,14 +24,16 @@ $script:LvSyntax = @{
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--stdin <name>] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @('stdin') }
     'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] [--replace] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default]]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace', 'default') }
+    'user-secrets' = @{ Usage = 'lv user-secrets [list [<id|project>] | set <id|project> <key> [--entry <name[#part]>] [--personal] | get <id|project> <key> [--show] | pick | untrack <id|project> <key> | load [<id|project>] [--overwrite] | clear [<id|project>]]'; Min = 0; Max = 3; Options = @('entry', 'personal', 'show', 'overwrite') }
 }
-$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment', 'stdin', 'ref', 'ref-store')
+$script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment', 'stdin', 'ref', 'ref-store', 'entry')
 $script:LvListOptions = @('host')
 $script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'hello', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared', 'source', 'no-source')
 $script:LvSubcommands = @{
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
     'ssh-key' = @('list', 'new', 'hosts', 'path', 'tools')
+    'user-secrets' = @('list', 'set', 'get', 'pick', 'untrack', 'load', 'clear')
 }
 $script:LvEntryCommands = @('get', 'clip', 'rm', 'mark', 'set', 'restore')
 $script:LvTargetPattern = '[\\/]|\.kdbx$|^[A-Za-z][A-Za-z0-9]+:'
@@ -181,6 +183,16 @@ SSH keys (for SSH to hosts; files in ~/.ssh/<repository>/)
   ssh-key path <name>                  the key file, for tools that take -i
   ssh-key tools [<dir> | --default]    the OpenSSH folder in use; <dir> replaces Windows OpenSSH on this PC
 
+.NET user secrets (secrets.json of each UserSecretsId; <id|project>: the id, or a project's name)
+  user-secrets [<id|project>]          each id, its projects, tracked keys and their state, untracked keys
+  user-secrets pick                    choose an id, then a key already in its secrets.json or a new one
+  user-secrets set <id|project> <key>  asks for the value, keeps it in the vault, tracks it, writes it;
+    [--entry <name[#part]>] [--personal]   --entry tracks an existing entry; --personal: each person's own
+  user-secrets get <id|project> <key> [--show]   the tracked value, as lv get
+  user-secrets untrack <id|project> <key>   stops tracking a key; its vault entry stays
+  user-secrets load [<id|project>] [--overwrite]   writes the tracked values; lv load does it too
+  user-secrets clear [<id|project>]    removes the tracked values that still match the vault
+
   update [<tag>] [--downgrade]         installs the newest LocalVault release, or the given tag
 
 Details: Get-Help Invoke-LocalVault -Full
@@ -248,7 +260,7 @@ Details: Get-Help Invoke-LocalVault -Full
         }
         if ($Command -eq '-h') { $Command = 'help' }
         if (-not $syntax.ContainsKey($Command)) {
-            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run ssh-key hello update. Run lv alone for details."
+            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run ssh-key user-secrets hello update. Run lv alone for details."
         }
 
         $rule = $syntax[$Command]
@@ -379,7 +391,7 @@ Details: Get-Help Invoke-LocalVault -Full
                 $scope = if ($words.Count -gt 0) { @{ Scope = $words[0] } } else { @{} }
                 $entries = @(Get-VaultEntryList @vault @scope)
                 if ($entries.Count -gt 0) {
-                    $columns = @('Name', 'Kind') + @(if (@($entries | Where-Object User).Count -gt 0) { 'User' }) + @(if (@($entries | Where-Object Hello).Count -gt 0) { 'Hello' }) + @('Sync', 'Created', 'Age')
+                    $columns = @('Name', 'Kind') + @(if (@($entries | Where-Object User).Count -gt 0) { 'User' }) + @(if (@($entries | Where-Object Hello).Count -gt 0) { 'Hello' }) + @(if (@($entries | Where-Object UserSecret).Count -gt 0) { 'UserSecret' }) + @('Sync', 'Created', 'Age')
                     $entries | Format-Table $columns -AutoSize
                 }
                 else {
@@ -628,6 +640,66 @@ Details: Get-Help Invoke-LocalVault -Full
                         $tools = Set-VaultSshTools @choice
                         "OpenSSH: $($tools.Directory)$(if ($tools.IsDefault) { ' (Windows OpenSSH)' } else { " (from $($tools.Settings))" })"
                     }
+                }
+            }
+            'user-secrets' {
+                $sub = if ($words.Count -eq 0) { 'list' } else { $words[0] }
+                $rest = @($words | Select-Object -Skip 1)
+                $allowed = @{ list = @(); set = @('entry', 'personal'); get = @('show'); pick = @(); untrack = @(); load = @('overwrite'); clear = @() }
+                if (-not $allowed.ContainsKey($sub)) { & $fail "Unknown user-secrets command '$sub'." }
+                foreach ($name in $options.Keys) {
+                    if ($name -notin 'path', 'help' -and $allowed[$sub] -notcontains $name) { & $fail "lv user-secrets $sub doesn't take --$name." }
+                }
+                $counts = @{ list = 0, 1; set = 2, 2; get = 2, 2; pick = 0, 0; untrack = 2, 2; load = 0, 1; clear = 0, 1 }
+                if ($rest.Count -lt $counts[$sub][0] -or $rest.Count -gt $counts[$sub][1]) {
+                    & $fail "lv user-secrets $sub takes $(if ($counts[$sub][0] -eq $counts[$sub][1]) { $counts[$sub][0] } else { "$($counts[$sub][0]) to $($counts[$sub][1])" }) word(s) after '$sub'."
+                }
+                $target = if ($rest.Count -gt 0) { @{ Target = $rest[0] } } else { @{} }
+                switch ($sub) {
+                    'list' {
+                        $rows = @(Get-VaultUserSecretList @vault @target)
+                        if ($rows.Count -eq 0) { "No project of this repository has a UserSecretsId. dotnet user-secrets init --project <project> adds one." }
+                        else { $rows | Format-Table Id, @{ Label = 'Projects'; Expression = { $_.Projects -join ', ' } }, Key, Entry, State -AutoSize }
+                    }
+                    'set' {
+                        $source = if ($options.ContainsKey('entry')) {
+                            if ($options['personal']) { & $fail 'Give --entry or --personal, not both.' }
+                            @{ Entry = $options.entry }
+                        }
+                        else { @{ Personal = [bool]$options['personal'] } }
+                        Set-VaultUserSecret @vault -Target $rest[0] -Key $rest[1] @source
+                    }
+                    'get' {
+                        if (-not ($options['show'] -or [Console]::IsOutputRedirected -or $MyInvocation.PipelinePosition -lt $MyInvocation.PipelineLength)) {
+                            & $fail 'lv user-secrets get prints a value on screen only with --show.'
+                        }
+                        Get-VaultUserSecret @vault -Target $rest[0] -Key $rest[1] -AsPlainText
+                    }
+                    'pick' {
+                        if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { & $fail 'lv user-secrets pick needs a console. Use lv user-secrets set <id|project> <key> instead.' }
+                        $groups = @(Get-VaultUserSecretList @vault | Where-Object { $_.Projects.Count -gt 0 } | Group-Object Id)
+                        if ($groups.Count -eq 0) { 'No project of this repository has a UserSecretsId. dotnet user-secrets init --project <project> adds one.'; break }
+                        for ($n = 0; $n -lt $groups.Count; $n++) { "  $($n + 1)  $($groups[$n].Name)  $($groups[$n].Group[0].Projects -join ', ')" }
+                        $typed = Read-Host 'User secrets to add a key to (number)'
+                        $number = 0
+                        if (-not [int]::TryParse($typed, [ref]$number) -or $number -lt 1 -or $number -gt $groups.Count) { & $fail "'$typed' is not one of the numbers shown." }
+                        $id = $groups[$number - 1].Name
+                        $untracked = @($groups[$number - 1].Group | Where-Object State -EQ 'Untracked' | ForEach-Object Key)
+                        for ($n = 0; $n -lt $untracked.Count; $n++) { "  $($n + 1)  $($untracked[$n])   already in secrets.json, not tracked" }
+                        "  $($untracked.Count + 1)  new key"
+                        $typed = Read-Host 'Key (number)'
+                        if (-not [int]::TryParse($typed, [ref]$number) -or $number -lt 1 -or $number -gt $untracked.Count + 1) { & $fail "'$typed' is not one of the numbers shown." }
+                        if ($number -le $untracked.Count) {
+                            Set-VaultUserSecret @vault -Target $id -Key $untracked[$number - 1] -FromFile
+                        }
+                        else {
+                            $key = Read-Host 'New key, such as ConnectionStrings:Default'
+                            Set-VaultUserSecret @vault -Target $id -Key $key
+                        }
+                    }
+                    'untrack' { Remove-VaultUserSecret @vault -Target $rest[0] -Key $rest[1] }
+                    'load' { Write-VaultUserSecret @vault @target -Overwrite:([bool]$options['overwrite']) }
+                    'clear' { Clear-VaultUserSecret @vault @target }
                 }
             }
             'update' {

@@ -260,6 +260,7 @@ public sealed class ClearVaultCommand : VaultCmdletBase
             : ProjectFile.ReadTemplates(Location)
                 .Where(t => string.Equals(t.Vault, Location.Path, StringComparison.OrdinalIgnoreCase) && File.Exists(t.Path))
                 .ToList();
+        ClearUserSecrets();
         VaultFile.Delete();
         Say($"Deleted {Location.Path}");
         DeleteLeftoverBackups(leftovers);
@@ -271,6 +272,30 @@ public sealed class ClearVaultCommand : VaultCmdletBase
             }
 
             Say($"Deleted {string.Join(", ", rendered.Select(t => t.Display))}");
+        }
+    }
+
+    private void ClearUserSecrets()
+    {
+        if (Location.GitRoot is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var tracking = new UserSecretTracking(Location);
+            var own = new HashSet<string>([Location.Path], StringComparer.OrdinalIgnoreCase);
+            var written = tracking.Tracking.Where(t => own.Contains(t.Vault) && File.Exists(UserSecretsFile.PathFor(t.Id)))
+                .Select(t => tracking.Label(t.Id)).Distinct().ToList();
+            if (written.Count > 0 && (!IsInteractive || Confirm($"Also remove its values from {string.Join(", ", written)}? They hold them in plain text.")))
+            {
+                tracking.Clear(this, own, null, null);
+            }
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            WriteWarning($".NET user secrets not cleared: {ex.Message}");
         }
     }
 }

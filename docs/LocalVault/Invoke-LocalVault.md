@@ -85,6 +85,13 @@ it says that the vault is missing or empty.
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
+| `user-secrets` | `[list] [<id\|project>]` | `Get-VaultUserSecretList` |
+| `user-secrets set` | `<id\|project> <key> [--entry <name[#part]>] [--personal]` | `Set-VaultUserSecret`; the value is asked, or read from redirected input |
+| `user-secrets get` | `<id\|project> <key> [--show]` | `Get-VaultUserSecret`, with the output rules of `get` |
+| `user-secrets pick` | | in a console, lists the ids with their projects, then the keys of that `secrets.json` not tracked yet and a new key; runs `Set-VaultUserSecret` with the choice |
+| `user-secrets untrack` | `<id\|project> <key>` | `Remove-VaultUserSecret` |
+| `user-secrets load` | `[<id\|project>] [--overwrite]` | `Write-VaultUserSecret`; exit code 2 when values differ without a console |
+| `user-secrets clear` | `[<id\|project>]` | `Clear-VaultUserSecret` |
 | `update` | `[<tag>] [--downgrade]` | downloads the newest GitHub release (or the tag), checks its SHA256 and signatures, and installs it with the installed module's `install.ps1`; says it is up to date and does nothing when that release is installed; refuses an older release without `--downgrade` |
 | `--version` | | prints the installed release |
 

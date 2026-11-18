@@ -94,6 +94,10 @@ SSH private key, when the file doesn't exist yet, readable by the current user, 
 Administrators only. It never replaces an existing file; a different one gives a warning, and
 `Restore-VaultFile -Overwrite` replaces it.
 
+Then the cmdlet writes the .NET user secrets that `localvault.json` tracks for the loaded vaults, as
+`Write-VaultUserSecret` does. Without a console, an id whose `secrets.json` holds another value for a
+tracked key is left as it is and reported; the load still succeeds.
+
 An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
 
 An entry with the custom string `LocalVault.Hello` set to `true`, and an entry already sealed in the

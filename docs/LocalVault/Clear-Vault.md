@@ -43,6 +43,10 @@ Files written from the repository's templates with this vault's values (see `Wri
 hold those values in plain text. In a console, the cmdlet asks whether to delete them too; without
 a console, it deletes them. The templates stay.
 
+The .NET user secrets tracked for this vault hold its values in plain text too. In a console, the
+cmdlet asks whether to remove them, as `Clear-VaultUserSecret` does; without a console, it removes
+them. Values changed in `secrets.json` stay.
+
 ## EXAMPLES
 
 ### Example 1 - Delete the vault of the current repository

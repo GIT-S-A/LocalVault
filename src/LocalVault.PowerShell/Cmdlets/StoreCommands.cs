@@ -457,7 +457,29 @@ public sealed class ImportVaultFromStoreCommand : StoreSyncCmdletBase
         FillMissingValues(access, present);
         AdoptNewerSshKeys(present);
         WritePersonalFiles(present);
+        WriteUserSecrets(present);
         WriteObject(new StoreLoadSummary(totals.Added, totals.Updated, totals.Kept, totals.Removed));
+    }
+
+    private void WriteUserSecrets(IReadOnlyList<VaultLocation> present)
+    {
+        if (Location.GitRoot is null)
+        {
+            return;
+        }
+
+        try
+        {
+            var tracking = new UserSecretTracking(Location);
+            if (tracking.Tracking.Count > 0)
+            {
+                tracking.Load(this, present.Select(p => p.Path).ToHashSet(StringComparer.OrdinalIgnoreCase), null, null, overwrite: false, lenient: true);
+            }
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            WriteWarning($".NET user secrets not written: {ex.Message}");
+        }
     }
 }
 

@@ -36,6 +36,10 @@ Deletes a vault file and its previous version.
 
 Deletes the files written from templates.
 
+### [Clear-VaultUserSecret](Clear-VaultUserSecret.md)
+
+Removes the tracked values from the .NET user secrets.
+
 ### [Compare-VaultWithStore](Compare-VaultWithStore.md)
 
 Compares the entries of a vault with its store.
@@ -88,6 +92,14 @@ Gets the store of each vault of the repository and what isn't saved yet.
 
 Gets the templated files of the repository and their state.
 
+### [Get-VaultUserSecret](Get-VaultUserSecret.md)
+
+Gets the vault value of a tracked .NET user secret.
+
+### [Get-VaultUserSecretList](Get-VaultUserSecretList.md)
+
+Gets the .NET user secrets of the repository and the state of each key.
+
 ### [Import-Vault](Import-Vault.md)
 
 Merges entries from an export, a backup or a `secrets.local.clixml` file into a vault.
@@ -115,6 +127,10 @@ Deletes one entry from a vault.
 ### [Remove-VaultTemplate](Remove-VaultTemplate.md)
 
 Stops managing a templated file.
+
+### [Remove-VaultUserSecret](Remove-VaultUserSecret.md)
+
+Stops tracking a .NET user secret.
 
 ### [Resolve-VaultEntry](Resolve-VaultEntry.md)
 
@@ -144,6 +160,10 @@ Sets or shows the OpenSSH folder that LocalVault uses on this PC.
 
 Changes one setting of a store without defining it again.
 
+### [Set-VaultUserSecret](Set-VaultUserSecret.md)
+
+Starts tracking a .NET user secret, or changes its value.
+
 ### [Unregister-VaultStore](Unregister-VaultStore.md)
 
 Removes a store from this PC or from the project.
@@ -159,3 +179,7 @@ Copies vault secrets into environment variables of the current process.
 ### [Write-VaultTemplate](Write-VaultTemplate.md)
 
 Writes templated files from their templates and the vault.
+
+### [Write-VaultUserSecret](Write-VaultUserSecret.md)
+
+Writes the tracked values into the .NET user secrets.

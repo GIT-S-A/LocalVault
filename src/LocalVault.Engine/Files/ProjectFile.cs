@@ -9,6 +9,8 @@ public sealed record ProjectStoreEntry(string Name, string? Target, string? Id, 
 
 public sealed record ProjectTemplate(string Path, string Template, string Vault, string Display);
 
+public sealed record ProjectUserSecrets(string Id, string Vault, IReadOnlyDictionary<string, string> Keys);
+
 public static class ProjectFile
 {
     public const string FileName = "localvault.json";
@@ -28,6 +30,8 @@ public static class ProjectFile
     private const string TemplatesField = "templates";
     private const string TemplateField = "template";
     private const string VaultField = "vault";
+    private const string UserSecretsField = "userSecrets";
+    private const string KeysField = "keys";
     private const string LegacyRoleField = "role";
     private const string LegacyLabelField = "label";
     private const string LegacyPrimaryRole = "primary";
@@ -126,6 +130,95 @@ public static class ProjectFile
         Write(file, root);
         return true;
     }
+
+    public static IReadOnlyList<ProjectUserSecrets> ReadUserSecrets(VaultLocation location)
+    {
+        if (Read(location) is not { } root)
+        {
+            return [];
+        }
+
+        return UserSecrets(root)
+            .Select(node => new ProjectUserSecrets(
+                node[IdField]!.GetValue<string>(),
+                VaultOf(location, node),
+                (node[KeysField] as JsonObject ?? [])
+                    .Where(key => key.Value is JsonValue value && value.TryGetValue<string>(out _))
+                    .ToDictionary(key => key.Key, key => key.Value!.GetValue<string>(), StringComparer.OrdinalIgnoreCase)))
+            .ToList();
+    }
+
+    public static string TrackUserSecret(VaultLocation location, string id, string key, string reference)
+    {
+        var file = RequirePath(location);
+        var root = Read(location) ?? NewRoot();
+        if (root[UserSecretsField] is not JsonArray items)
+        {
+            items = new JsonArray();
+            root[UserSecretsField] = items;
+        }
+
+        var item = UserSecrets(root).FirstOrDefault(node => SameUserSecrets(location, node, id));
+        if (item is null)
+        {
+            item = new JsonObject { [IdField] = id };
+            if (!SamePath(location.Path, DefaultVaultPath(location)))
+            {
+                item[VaultField] = Relative(location);
+            }
+
+            item[KeysField] = new JsonObject();
+            items.Add(item);
+        }
+
+        if (item[KeysField] is not JsonObject keys)
+        {
+            keys = new JsonObject();
+            item[KeysField] = keys;
+        }
+
+        if (keys.FirstOrDefault(existing => string.Equals(existing.Key, key, StringComparison.OrdinalIgnoreCase)).Key is { } spelled)
+        {
+            keys.Remove(spelled);
+        }
+
+        keys[key] = reference;
+        Write(file, root);
+        return file;
+    }
+
+    public static bool UntrackUserSecret(VaultLocation location, string id, string key)
+    {
+        var file = RequirePath(location);
+        if (Read(location) is not { } root
+            || UserSecrets(root).FirstOrDefault(node => SameUserSecrets(location, node, id)) is not { } item
+            || item[KeysField] is not JsonObject keys
+            || keys.FirstOrDefault(existing => string.Equals(existing.Key, key, StringComparison.OrdinalIgnoreCase)).Key is not { } spelled)
+        {
+            return false;
+        }
+
+        keys.Remove(spelled);
+        if (keys.Count == 0)
+        {
+            ((JsonArray)root[UserSecretsField]!).Remove(item);
+        }
+
+        Write(file, root);
+        return true;
+    }
+
+    private static IEnumerable<JsonObject> UserSecrets(JsonObject root) =>
+        (root[UserSecretsField] as JsonArray ?? []).OfType<JsonObject>().Where(node => node[IdField] is JsonValue);
+
+    private static bool SameUserSecrets(VaultLocation location, JsonObject node, string id) =>
+        string.Equals(node[IdField]!.GetValue<string>(), id, StringComparison.OrdinalIgnoreCase) && SamePath(VaultOf(location, node), location.Path);
+
+    private static string VaultOf(VaultLocation location, JsonObject node) =>
+        node[VaultField]?.GetValue<string>() is { } vault ? FullPath(location, vault) : DefaultVaultPath(location);
+
+    private static string DefaultVaultPath(VaultLocation location) =>
+        System.IO.Path.Combine(location.GitRoot!, VaultLocation.DefaultFileName);
 
     public static bool AddVault(VaultLocation location)
     {

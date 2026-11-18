@@ -157,7 +157,8 @@ You can't pipe objects to this cmdlet.
 
 This cmdlet returns one object for each entry. The object has the **Name**, **Scope**, **Key**,
 **Kind**, **Created** and **Age** properties. For a credential, the **User** property holds its user
-name, which isn't a secret.
+name, which isn't a secret. The **UserSecret** property is `True` for an entry that fills a .NET user
+secret tracked in `localvault.json`.
 
 ## NOTES
 

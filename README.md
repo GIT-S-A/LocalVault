@@ -95,7 +95,11 @@ when there is no `prod/db`.
 | `Write-VaultTemplate [[-File] f]`, `Clear-VaultTemplate [[-File] f]` | `lv template render [f]`, `lv template clear [f]` | writes or deletes the real files (git must ignore them) |
 | `Get-VaultTemplate`, `Remove-VaultTemplate [-File] f` | `lv template`, `lv template rm f` | state of each templated file; stop managing one |
 | | `lv run [VAR=name ...] -- <command>` | variables and templated files exist only while the command runs |
-| `Clear-Vault` | `lv clear` | deletes the vault and its previous version, and the files written from its templates |
+| `Get-VaultUserSecretList [[-Target] t]` | `lv user-secrets [t]` | each UserSecretsId of the repository's .NET projects, its projects, tracked keys and their state; `t` = id or project name |
+| `Set-VaultUserSecret [-Target] t [-Key] k [-Entry n[#part] \| -FromFile] [-Personal]` | `lv user-secrets set t k [--entry n] [--personal]`, `lv user-secrets pick` | keeps the value of key `k` in the vault, tracks it in localvault.json and writes it to the id's `secrets.json` |
+| `Get-VaultUserSecret [-Target] t [-Key] k`, `Remove-VaultUserSecret [-Target] t [-Key] k` | `lv user-secrets get t k`, `lv user-secrets untrack t k` | the tracked value; stop tracking a key |
+| `Write-VaultUserSecret [[-Target] t] [-Overwrite]`, `Clear-VaultUserSecret [[-Target] t]` | `lv user-secrets load [t] [--overwrite]`, `lv user-secrets clear [t]` | writes the tracked values, or removes those still equal to the vault's; `lv load` writes them too |
+| `Clear-Vault` | `lv clear` | deletes the vault and its previous version, the files written from its templates and its values in .NET user secrets |
 
 `lv` alone shows the installed release, lists its commands and names the vault it would use (`lv --version`: the release only); a command used with a wrong syntax prints its usage. Tab completes commands, options and entry names. Every vault cmdlet takes `-Path`;
 `lv` takes `--path`. `lv` exits 0, 1 on error, 2 when an import
@@ -216,7 +220,7 @@ LocalVault assembly. `LocalVault.Engine` and each store assembly reference Core 
 | `src/LocalVault.Core/Stores` | store interfaces and the types they exchange, store types |
 | `src/LocalVault.Core/Ssh` | SSH key information and OpenSSH private key parsing |
 | `src/LocalVault.Engine/Vault` | body, the vault file and its location |
-| `src/LocalVault.Engine/Files` | envelope format, project file, PC settings, templates, other files LocalVault writes |
+| `src/LocalVault.Engine/Files` | envelope format, project file, PC settings, templates, .NET projects and user secrets, other files LocalVault writes |
 | `src/LocalVault.Engine/Transfer` | export, import, `.clixml` migration |
 | `src/LocalVault.Engine/Stores` | store registry and resolution, sync |
 | `src/LocalVault.Engine/Hello` | Windows Hello keys and sealing |

@@ -14,6 +14,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Add-VaultTemplate](#add-vaulttemplate): Turns a file that holds secrets into a committed template.
 - [Clear-Vault](#clear-vault): Deletes a vault file and its previous version.
 - [Clear-VaultTemplate](#clear-vaulttemplate): Deletes the files written from templates.
+- [Clear-VaultUserSecret](#clear-vaultusersecret): Removes the tracked values from the .NET user secrets.
 - [Compare-VaultWithStore](#compare-vaultwithstore): Compares the entries of a vault with its store.
 - [Copy-VaultEntry](#copy-vaultentry): Copies a secret to the clipboard for a short time.
 - [Copy-VaultToStore](#copy-vaulttostore): Copies the shared entries of a vault once to another store.
@@ -27,6 +28,8 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Get-VaultStore](#get-vaultstore): Gets the stores of the project and of this PC.
 - [Get-VaultStoreStatus](#get-vaultstorestatus): Gets the store of each vault of the repository and what isn't saved yet.
 - [Get-VaultTemplate](#get-vaulttemplate): Gets the templated files of the repository and their state.
+- [Get-VaultUserSecret](#get-vaultusersecret): Gets the vault value of a tracked .NET user secret.
+- [Get-VaultUserSecretList](#get-vaultusersecretlist): Gets the .NET user secrets of the repository and the state of each key.
 - [Import-Vault](#import-vault): Merges entries from an export, a backup or a `secrets.local.clixml` file into a vault.
 - [Import-VaultFromStore](#import-vaultfromstore): Loads the shared entries of the repository's vaults from their stores.
 - [Invoke-LocalVault](#invoke-localvault): Runs a LocalVault command from a short command line.
@@ -34,6 +37,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Register-VaultStore](#register-vaultstore): Defines a store on this PC or in the project.
 - [Remove-VaultEntry](#remove-vaultentry): Deletes one entry from a vault.
 - [Remove-VaultTemplate](#remove-vaulttemplate): Stops managing a templated file.
+- [Remove-VaultUserSecret](#remove-vaultusersecret): Stops tracking a .NET user secret.
 - [Resolve-VaultEntry](#resolve-vaultentry): Gets a secret for a scope, or the shared secret when the scope has none.
 - [Restore-VaultFile](#restore-vaultfile): Writes file entries of a vault back to disk.
 - [Set-VaultEntry](#set-vaultentry): Adds or replaces a secret, a credential or a file in a vault.
@@ -41,10 +45,12 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Set-VaultSshKeyHost](#set-vaultsshkeyhost): Sets the hosts an SSH key of the vault is for.
 - [Set-VaultSshTools](#set-vaultsshtools): Sets or shows the OpenSSH folder that LocalVault uses on this PC.
 - [Set-VaultStore](#set-vaultstore): Changes one setting of a store without defining it again.
+- [Set-VaultUserSecret](#set-vaultusersecret): Starts tracking a .NET user secret, or changes its value.
 - [Unregister-VaultStore](#unregister-vaultstore): Removes a store from this PC or from the project.
 - [Update-VaultTemplate](#update-vaulttemplate): Takes the edits of templated files back into their templates.
 - [Use-VaultEnv](#use-vaultenv): Copies vault secrets into environment variables of the current process.
 - [Write-VaultTemplate](#write-vaulttemplate): Writes templated files from their templates and the vault.
+- [Write-VaultUserSecret](#write-vaultusersecret): Writes the tracked values into the .NET user secrets.
 
 ## Concepts
 
@@ -609,6 +615,10 @@ Files written from the repository's templates with this vault's values (see `Wri
 hold those values in plain text. In a console, the cmdlet asks whether to delete them too; without
 a console, it deletes them. The templates stay.
 
+The .NET user secrets tracked for this vault hold its values in plain text too. In a console, the
+cmdlet asks whether to remove them, as `Clear-VaultUserSecret` does; without a console, it removes
+them. Values changed in `secrets.json` stay.
+
 ### Examples
 
 #### Example 1 - Delete the vault of the current repository
@@ -792,6 +802,72 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 ### Notes
 
 `lv template clear [<file>]` runs this cmdlet.
+
+## Clear-VaultUserSecret
+
+Removes the tracked values from the .NET user secrets.
+
+### Syntax
+
+```text
+Clear-VaultUserSecret [[-Target] <string>] [-Path <string>] [<CommonParameters>]
+```
+
+### Description
+
+The `Clear-VaultUserSecret` cmdlet removes each tracked key from `secrets.json` when the file still holds the vault value. A value changed in the file is kept and named. A file left empty is deleted, and then its folder when it is empty.
+
+The tracking in `localvault.json` and the vault entries stay. `Clear-Vault` runs the same removal for the keys of the vault it deletes.
+
+### Examples
+
+#### Example 1 - Remove the values written from the vault
+
+```powershell
+Clear-VaultUserSecret
+```
+
+### Parameters
+
+#### -Path
+
+Specifies the path to the vault file, which also names the git repository whose user secrets the cmdlet handles. A relative path is resolved from the current location. If you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then `secrets.local.lv` at the root of the git repository that contains the current location. With this parameter or the environment variable, the cmdlet handles only the keys tracked by that vault.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Target
+
+Specifies the user secrets by the **UserSecretsId** of a project of the repository, or by the name of a project, which is its `.csproj` file name without the extension. Without it, the cmdlet clears every tracked id.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output.
+
+### Notes
+
+`lv user-secrets clear [<id|project>]` runs this cmdlet.
 
 ## Compare-VaultWithStore
 
@@ -1689,7 +1765,8 @@ case-sensitive. If you omit this parameter, the cmdlet gets every entry.
 
 **LocalVault.PowerShell.VaultEntryInfo**: This cmdlet returns one object for each entry. The object has the **Name**, **Scope**, **Key**,
 **Kind**, **Created** and **Age** properties. For a credential, the **User** property holds its user
-name, which isn't a secret.
+name, which isn't a secret. The **UserSecret** property is `True` for an entry that fills a .NET user
+secret tracked in `localvault.json`.
 
 ### Notes
 
@@ -2178,6 +2255,178 @@ empty when it isn't or when a value is missing.
 
 `lv template` runs this cmdlet.
 
+## Get-VaultUserSecret
+
+Gets the vault value of a tracked .NET user secret.
+
+### Syntax
+
+```text
+Get-VaultUserSecret [-Target] <string> [-Key] <string> [-AsPlainText] [-Path <string>]
+ [<CommonParameters>]
+```
+
+### Description
+
+The `Get-VaultUserSecret` cmdlet returns the value of the vault entry that fills a tracked key. It returns a **SecureString** by default, or a **String** with **AsPlainText**. A `#user` or `#url` part is always a **String**.
+
+The value comes from the vault, not from `secrets.json`.
+
+### Examples
+
+#### Example 1 - Pass a tracked value to a program
+
+```powershell
+Get-VaultUserSecret -Target Api -Key ConnectionStrings:Default -AsPlainText | sqlcmd -i schema.sql [<CommonParameters>]
+```
+
+### Parameters
+
+#### -AsPlainText
+
+Returns the value as a **String**.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Key
+
+Specifies the tracked configuration key.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 1 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file, which also names the git repository whose user secrets the cmdlet handles. A relative path is resolved from the current location. If you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then `secrets.local.lv` at the root of the git repository that contains the current location. With this parameter or the environment variable, the cmdlet handles only the keys tracked by that vault.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Target
+
+Specifies the user secrets by the **UserSecretsId** of a project of the repository, or by the name of a project, which is its `.csproj` file name without the extension.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**System.Security.SecureString**: The value, by default.
+
+**System.String**: The value, with **AsPlainText**, or a `#user` or `#url` part.
+
+### Notes
+
+`lv user-secrets get <id|project> <key>` runs this cmdlet, with the output rules of `lv get`.
+
+## Get-VaultUserSecretList
+
+Gets the .NET user secrets of the repository and the state of each key.
+
+### Syntax
+
+```text
+Get-VaultUserSecretList [[-Target] <string>] [-Path <string>] [<CommonParameters>]
+```
+
+### Description
+
+The `Get-VaultUserSecretList` cmdlet lists each **UserSecretsId** used by a project of the repository, and each id that `localvault.json` still tracks. For each id, it returns one row per tracked key, one row per key of its `secrets.json` that no vault tracks, and one row without a key when there is neither.
+
+The projects come from the `.sln` and `.slnx` files of the repository. Without a solution file, every `.csproj` outside `bin`, `obj` and folders whose name starts with a dot counts. A project without a `UserSecretsId` of its own takes the one in the nearest `Directory.Build.props`.
+
+The cmdlet never returns a value. It reads no Windows Hello entry, so it never prompts.
+
+### Examples
+
+#### Example 1 - List the user secrets of the repository
+
+```powershell
+Get-VaultUserSecretList | Format-Table Id, Projects, Key, Entry, State [<CommonParameters>]
+```
+
+```Output
+Id                                   Projects Key                       Entry                     State
+--                                   -------- ---                       -----                     -----
+0f4c2a9e-55b1-4c7e-9a43-2f8e1d6b7c10 {Api}    ConnectionStrings:Default ConnectionStrings:Default Written
+0f4c2a9e-55b1-4c7e-9a43-2f8e1d6b7c10 {Api}    Logging:Seq:ApiKey                                  Untracked
+```
+
+### Parameters
+
+#### -Path
+
+Specifies the path to the vault file, which also names the git repository whose user secrets the cmdlet handles. A relative path is resolved from the current location. If you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then `secrets.local.lv` at the root of the git repository that contains the current location. With this parameter or the environment variable, the cmdlet handles only the keys tracked by that vault.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Target
+
+Specifies the user secrets by the **UserSecretsId** of a project of the repository, or by the name of a project, which is its `.csproj` file name without the extension. Without it, the cmdlet lists every id.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**LocalVault.PowerShell.VaultUserSecretInfo**: This cmdlet returns the **Id**, the **Projects** that use it, the **Key**, the vault **Entry** that fills it and the **State**: `Written`, `Differs`, `Absent`, `NoValue` or `Untracked`. `NoValue` means the vault has no value for the entry on this PC.
+
+### Notes
+
+`lv user-secrets [<id|project>]` runs this cmdlet.
+
 ## Import-Vault
 
 Merges entries from an export, a backup or a `secrets.local.clixml` file into a vault.
@@ -2456,6 +2705,10 @@ SSH private key, when the file doesn't exist yet, readable by the current user, 
 Administrators only. It never replaces an existing file; a different one gives a warning, and
 `Restore-VaultFile -Overwrite` replaces it.
 
+Then the cmdlet writes the .NET user secrets that `localvault.json` tracks for the loaded vaults, as
+`Write-VaultUserSecret` does. Without a console, an id whose `secrets.json` holds another value for a
+tracked key is left as it is and reported; the load still succeeds.
+
 An SSH key whose file another clone of the repository on this PC replaced with a newer key is updated in the vault first, and reported. The vault's key becomes the previous key when the clone kept it as `<file>.old`.
 
 An entry with the custom string `LocalVault.Hello` set to `true`, and an entry already sealed in the
@@ -2631,6 +2884,13 @@ it says that the vault is missing or empty.
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
+| `user-secrets` | `[list] [<id\|project>]` | `Get-VaultUserSecretList` |
+| `user-secrets set` | `<id\|project> <key> [--entry <name[#part]>] [--personal]` | `Set-VaultUserSecret`; the value is asked, or read from redirected input |
+| `user-secrets get` | `<id\|project> <key> [--show]` | `Get-VaultUserSecret`, with the output rules of `get` |
+| `user-secrets pick` | | in a console, lists the ids with their projects, then the keys of that `secrets.json` not tracked yet and a new key; runs `Set-VaultUserSecret` with the choice |
+| `user-secrets untrack` | `<id\|project> <key>` | `Remove-VaultUserSecret` |
+| `user-secrets load` | `[<id\|project>] [--overwrite]` | `Write-VaultUserSecret`; exit code 2 when values differ without a console |
+| `user-secrets clear` | `[<id\|project>]` | `Clear-VaultUserSecret` |
 | `update` | `[<tag>] [--downgrade]` | downloads the newest GitHub release (or the tag), checks its SHA256 and signatures, and installs it with the installed module's `install.ps1`; says it is up to date and does nothing when that release is installed; refuses an older release without `--downgrade` |
 | `--version` | | prints the installed release |
 
@@ -3484,6 +3744,86 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 ### Notes
 
 `lv template rm <file>` runs this cmdlet.
+
+## Remove-VaultUserSecret
+
+Stops tracking a .NET user secret.
+
+### Syntax
+
+```text
+Remove-VaultUserSecret [-Target] <string> [-Key] <string> [-Path <string>] [<CommonParameters>]
+```
+
+### Description
+
+The `Remove-VaultUserSecret` cmdlet removes a key from the tracking of this vault in `localvault.json`. When `secrets.json` still holds the vault value of the key, the cmdlet removes the key from the file. A value changed in the file is kept.
+
+The vault entry stays.
+
+### Examples
+
+#### Example 1 - Stop tracking a key
+
+```powershell
+Remove-VaultUserSecret -Target Api -Key Logging:Seq:ApiKey [<CommonParameters>]
+```
+
+### Parameters
+
+#### -Key
+
+Specifies the tracked configuration key.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 1 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file, which also names the git repository whose user secrets the cmdlet handles. A relative path is resolved from the current location. If you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then `secrets.local.lv` at the root of the git repository that contains the current location. With this parameter or the environment variable, the cmdlet handles only the keys tracked by that vault.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Target
+
+Specifies the user secrets by the **UserSecretsId** of a project of the repository, or by the name of a project, which is its `.csproj` file name without the extension.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output.
+
+### Notes
+
+`lv user-secrets untrack <id|project> <key>` runs this cmdlet.
 
 ## Resolve-VaultEntry
 
@@ -4903,6 +5243,171 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 `lv store set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default]
 [--personal | --no-personal] [--project]` runs this cmdlet.
 
+## Set-VaultUserSecret
+
+Starts tracking a .NET user secret, or changes its value.
+
+### Syntax
+
+```text
+Set-VaultUserSecret [-Target] <string> [-Key] <string> [-Value <securestring>] [-Personal]
+ [-Path <string>] [<CommonParameters>]
+```
+
+```text
+Set-VaultUserSecret [-Target] <string> [-Key] <string> -Entry <string> [-Path <string>]
+ [<CommonParameters>]
+```
+
+```text
+Set-VaultUserSecret [-Target] <string> [-Key] <string> -FromFile [-Personal] [-Path <string>]
+ [<CommonParameters>]
+```
+
+### Description
+
+The `Set-VaultUserSecret` cmdlet keeps the value of one configuration key of a project's user secrets in the vault, records the key in `localvault.json`, and writes it to the `secrets.json` of the **UserSecretsId**. The file is `%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json`. Other keys of the file stay as they are.
+
+Without **Entry** or **FromFile**, the cmdlet asks for the value, or takes **Value**. A key already tracked by this vault gets its new value in the entry it is tracked with. A new key gets a new entry named after the key. When the key isn't a valid entry name or the name is taken, the cmdlet asks for another name in a console. In a console, it also asks whether the value is shared with the team or personal. A personal value becomes a required entry: each person sets their own, and `lv save` copies it to the personal store.
+
+The **Entry** parameter tracks an existing entry, or one part of a credential, without changing its value. The **FromFile** parameter takes the value already in `secrets.json` into the vault and leaves the file unchanged.
+
+When `secrets.json` holds another value for the key, the cmdlet asks before replacing it. Without a console, it writes nothing to the file and fails. Windows Hello entries, file entries, SSH keys and `#totp` parts are refused. A key that another vault of the repository tracks for the same id is refused.
+
+### Examples
+
+#### Example 1 - Track a new connection string
+
+```powershell
+Set-VaultUserSecret -Target Api -Key ConnectionStrings:Default [<CommonParameters>]
+```
+
+The cmdlet asks for the value, stores it in the vault and writes it to the user secrets of the `Api` project.
+
+#### Example 2 - Take a value already in secrets.json
+
+```powershell
+Set-VaultUserSecret -Target Api -Key Logging:Seq:ApiKey -FromFile -Personal [<CommonParameters>]
+```
+
+#### Example 3 - Track the user name of a credential
+
+```powershell
+Set-VaultUserSecret -Target Api -Key Smtp:User -Entry smtp#user [<CommonParameters>]
+```
+
+### Parameters
+
+#### -Entry
+
+Specifies an existing entry, or one part of a credential such as `smtp#user`, whose value fills the key.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | Entry |
+| Position | Named |
+| Required | Entry |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -FromFile
+
+Takes the value of the key from `secrets.json` into a new vault entry.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | FromFile |
+| Position | Named |
+| Required | FromFile |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Key
+
+Specifies the configuration key, such as `ConnectionStrings:Default`. Keys are compared without regard to case.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 1 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file, which also names the git repository whose user secrets the cmdlet handles. A relative path is resolved from the current location. If you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then `secrets.local.lv` at the root of the git repository that contains the current location. With this parameter or the environment variable, the cmdlet handles only the keys tracked by that vault.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Personal
+
+Keeps a new value as a personal value without asking. Without a console and without this parameter, a new value is shared.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | Value, FromFile |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Target
+
+Specifies the user secrets by the **UserSecretsId** of a project of the repository, or by the name of a project, which is its `.csproj` file name without the extension.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Value
+
+Specifies the value as a **SecureString**. Without it, the cmdlet asks for the value, or reads one line of redirected input.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Security.SecureString |
+| Parameter sets | Value |
+| Position | Named |
+| Required | False |
+| Pipeline input | by value |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**System.Security.SecureString**: You can pipe the value to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output.
+
+### Notes
+
+`lv user-secrets set <id|project> <key> [--entry <name[#part]>] [--personal]` runs this cmdlet. `lv user-secrets pick` runs it with **FromFile** or with a new key. Commit `localvault.json` so that `lv load` writes the key on every clone.
+
 ## Unregister-VaultStore
 
 Removes a store from this PC or from the project.
@@ -5397,3 +5902,91 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 
 `lv template render [<file>]` runs this cmdlet. `lv run` runs it before the command, and
 `Clear-VaultTemplate` after.
+
+## Write-VaultUserSecret
+
+Writes the tracked values into the .NET user secrets.
+
+### Syntax
+
+```text
+Write-VaultUserSecret [[-Target] <string>] [-Overwrite] [-Path <string>] [<CommonParameters>]
+```
+
+### Description
+
+The `Write-VaultUserSecret` cmdlet writes the vault value of every tracked key into the `secrets.json` of its **UserSecretsId**. Keys that aren't tracked stay as they are. A file that already holds every value is not written.
+
+When the file holds another value for a tracked key, the cmdlet asks before replacing it. Without a console, it writes nothing for that id and fails; `lv` then exits with code 2. The **Overwrite** parameter replaces those values without asking. A key whose entry has no value on this PC is skipped and named. An id that no project of the repository uses any more is skipped with a warning.
+
+`Import-VaultFromStore` runs the same write after it loads the vaults. There, a conflict without a console is reported and the load succeeds.
+
+### Examples
+
+#### Example 1 - Write every tracked value
+
+```powershell
+Write-VaultUserSecret
+```
+
+#### Example 2 - Replace values changed by hand
+
+```powershell
+Write-VaultUserSecret -Target Api -Overwrite [<CommonParameters>]
+```
+
+### Parameters
+
+#### -Overwrite
+
+Replaces values that differ from the vault without asking.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file, which also names the git repository whose user secrets the cmdlet handles. A relative path is resolved from the current location. If you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then `secrets.local.lv` at the root of the git repository that contains the current location. With this parameter or the environment variable, the cmdlet handles only the keys tracked by that vault.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Target
+
+Specifies the user secrets by the **UserSecretsId** of a project of the repository, or by the name of a project, which is its `.csproj` file name without the extension. Without it, the cmdlet writes every tracked id.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output. It reports the keys it writes.
+
+### Notes
+
+`lv user-secrets load [<id|project>] [--overwrite]` runs this cmdlet.
