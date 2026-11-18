@@ -1,7 +1,7 @@
 # Getting started with LocalVault
 
-This guide covers the usual path: one vault on one PC, then a team store, then personal values and
-SSH keys, then a new machine. Each step names the `lv` command; the cmdlet that runs it is in the
+This guide covers the usual path: one vault on one PC, then a team store, then personal values,
+SSH keys and .NET user secrets, then a new machine. Each step names the `lv` command; the cmdlet that runs it is in the
 [reference](reference.md).
 
 Requirements: Windows, PowerShell 7.6 or later, git. A store needs a KeePass database (`.kdbx`); no
@@ -118,7 +118,27 @@ user, SYSTEM and Administrators only, as OpenSSH requires. `lv load` writes it w
 never replaces an existing file; `lv restore <name> --overwrite` replaces it. Only a person's own
 value can be written under the profile; a file in the team store with such a path is never loaded.
 
-## 7. A new machine
+## 7. .NET user secrets
+
+A .NET project with a `UserSecretsId` reads `%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json`.
+LocalVault keeps chosen keys of that file in the vault and writes them back on every PC.
+
+```powershell
+lv user-secrets                                       # each id, its projects, tracked and untracked keys
+lv user-secrets set Webshop.Api ConnectionStrings:Main   # asks for the value: shared or personal
+lv user-secrets pick                                  # choose an id, then a key from its secrets.json
+git add localvault.json; git commit -m "chore: track user secrets"
+```
+
+| Command | Effect |
+|---|---|
+| `lv load` | writes the tracked keys into each `secrets.json`; a key set by hand to another value is kept, with a warning |
+| `lv user-secrets load --overwrite` | replaces such values with the vault's |
+| `lv user-secrets clear` | removes the tracked keys still equal to the vault's |
+
+Other keys of `secrets.json` are never changed.
+
+## 8. A new machine
 
 ```powershell
 # 1. installation, as in step 1
@@ -131,9 +151,10 @@ lv load
 `lv load` asks for the personal database's password, creates every vault of the repository from the
 team store, fills in the personal values from the personal store, and writes personal files such as
 SSH keys. In a console, it then asks for each required value still missing, showing its note, and
-offers to save what was typed to the personal store. `lv start` lists anything left to do.
+offers to save what was typed to the personal store. It then writes the tracked .NET user secrets.
+`lv start` lists anything left to do.
 
-## 8. A copy outside the stores
+## 9. A copy outside the stores
 
 Entries marked local exist on this PC only. `lv list` warns when such entries were not exported in the
 last 30 days.

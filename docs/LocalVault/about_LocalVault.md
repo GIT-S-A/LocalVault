@@ -330,6 +330,49 @@ lv run OS_PASSWORD=OsPassword -- terraform apply
 Prefer variables when the tool reads them: `docker compose` reads `${VAR}`
 from the environment, and the OpenStack client reads `OS_PASSWORD`.
 
+### .NET user secrets
+
+A .NET project with a `UserSecretsId` reads its secrets from
+`%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json`. LocalVault keeps chosen
+keys of that file in the vault and writes them back to it.
+
+- The projects are those listed in the repository's `.sln` and `.slnx`
+  files. Without a solution file, every `.csproj` outside `bin`, `obj` and
+  folders starting with `.` counts.
+- The id is the project's `<UserSecretsId>`, else the one in the nearest
+  `Directory.Build.props` up to the repository root. An id built from MSBuild
+  properties, such as `$(Name)`, is refused.
+- Several projects can share one id. Commands take the id or a project name.
+- Keys are flat, as `dotnet user-secrets` writes them: `ConnectionStrings:Main`.
+
+`lv user-secrets set <id|project> <key>` (`Set-VaultUserSecret`) asks for the
+value, keeps it in an entry named after the key, records the key in
+`localvault.json`, and writes it to `secrets.json`. `--entry <name[#part]>`
+uses an existing entry instead. In a console, it asks whether the value is
+shared or personal; `--personal` makes the entry a required entry, filled by
+each person. `lv user-secrets pick` lists the ids with their projects, then
+takes a key already in the chosen `secrets.json` or a new key.
+
+`localvault.json` holds the tracked keys and the entry of each, never a value.
+Two vaults can't track the same key of the same id. Windows Hello entries and
+`#totp` parts can't be tracked.
+
+Only `lv user-secrets set`, `pick`, `load` and `lv load` write `secrets.json`.
+A write changes the tracked keys and leaves the other keys as they are. When
+a tracked key holds a value that differs from the vault's:
+
+| Command | Behaviour |
+| --- | --- |
+| `lv user-secrets load`, in a console | Asks once per id; the default keeps the file. |
+| `lv user-secrets load`, without a console | Writes nothing for that id and fails with exit code 2. |
+| `lv user-secrets load --overwrite` | Writes the vault's values. |
+| `lv load` | Writes nothing for that id and writes a warning. |
+
+`lv user-secrets clear` (`Clear-VaultUserSecret`) and `Clear-Vault` remove the
+tracked keys whose value still equals the vault's, and name the others. A
+`secrets.json` left empty is deleted with its folder. `lv user-secrets
+untrack` stops tracking a key; the vault entry stays.
+
 ### Data loss
 
 The secrets in a vault are lost when:
