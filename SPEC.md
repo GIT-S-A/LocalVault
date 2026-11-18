@@ -118,6 +118,13 @@ body  := { schema: 5|6, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, en
 - KeePass: hello entry stored plain as its kind + custom string `LocalVault.Hello` = `true`; declaration → `LocalVault.RequiredHello` = `true`. Flag ⊥ in content hash.
 - interface `IHelloKey` (Core): `State`, `UnavailableReason`, `IsHardware`, `KeyId`, `PublicKey`, `Create(message)`, `Decrypt(wrapped, message)`; `HelloKeys.Current` = Windows key; tests set internal `HelloKeys.Override` (in-process only, ⊥ setting on disk) to a software RSA key.
 
+### .NET user secrets
+
+- tracking = `localvault.json` `userSecrets: [{ id, vault?, keys: { <config key>: <reference> } }]`; vault = repo-relative vault path, absent → `<git root>/secrets.local.lv`; reference = `name[#part]` (V105). Projects ⊥ stored.
+- projects := ∪ `.csproj` named by every `.sln` (`Project(...) = "…", "<path>"`) & `.slnx` (`<Project Path>`) under git root; none → every `.csproj` under git root ⊥ `bin`, `obj`, dot folders. Project id := csproj `<UserSecretsId>`, else nearest `Directory.Build.props` from csproj dir up to git root (V158). Several projects may share 1 id.
+- target := `<id>` (exact UserSecretsId of a project) | project name (csproj file name w/o extension, unique) → its id (V157).
+- file := `$env:APPDATA\Microsoft\UserSecrets\<id>\secrets.json` (dotnet `PathHelper` rule); JSON object, flat keys `A:B`; read: comments, trailing commas, nested objects (flattened w/ `:`) accepted; written flat & indented, comments dropped (as `dotnet user-secrets set`).
+
 ### PC settings
 
 `%LOCALAPPDATA%\LocalVault\settings.json` (per Windows account & machine, ⊥ secrets, ⊥ project level) `{ schema: 1, sshDir?: "<absolute folder>", sshInclude?: true|false }`. Unknown fields kept.
@@ -191,7 +198,7 @@ Creation of missing vault → V21.
 ### Cmdlets (all take `-Path`)
 
 ```
-cmd: Get-VaultEntryList [-Scope s]                      → {Name, Kind, Created, Age, Hello}[]   ⊥ value; export-age warning V31; Hello ∈ '' | Ready | Missing | Required (declaration w/ hello) (V148); Kind = real kind
+cmd: Get-VaultEntryList [-Scope s]                      → {Name, Kind, Created, Age, Hello, UserSecret}[]   ⊥ value; export-age warning V31; Hello ∈ '' | Ready | Missing | Required (declaration w/ hello) (V148); Kind = real kind; UserSecret = entry tracked by ≥ 1 user-secrets key
 cmd: Set-VaultEntry ... -Hello                          → with -Value | -FilePath | -Credential | -Required | n#part: entry sealed per §I.Hello (V144); entry already Hello | declared w/ hello → new value sealed w/o -Hello (sticky)
 cmd: Set-VaultEntry -Name n -Protection Hello|Dpapi     → value resealed (⊥ prompt) | unsealed (one prompt); declaration flag set | cleared; already so → told, ⊥ write
 cmd: Get-VaultHelloStatus                               → {State (Ready|Software|None|Unavailable|KeyChanged), Hardware, Provider, KeyId, VaultKeyId, Entries, Missing[], Reason}; ⊥ prompt
@@ -244,6 +251,13 @@ cmd: Invoke-VaultScp -Name n -ArgumentList a[]          → scp, same options
 cmd: Remove-VaultSshOrphan                              → orphaned keys deleted, ConfirmImpact High (V133)
 cmd: Set-VaultSshInclude -Enabled bool                  → Include line in ~/.ssh/config (V134)
 cmd: Set-VaultSshTools [-Directory d | -Default]        → settings.json sshDir (V135); w/o args → folder in use
+cmd: Get-VaultUserSecretList [-Target t]                → ∀ id: {Id, Projects, Key, Entry, State}[]; State ∈ Written|Differs|Absent|NoValue|Untracked (key in file only); ⊥ value
+cmd: Set-VaultUserSecret -Target t -Key k [-Value <SecureString> | -Entry n[#part]] [-Personal]
+                                                        → tracked; -Entry → existing entry mapped, ⊥ value asked; else value → entry (V159), asked if missing; then V160 for that key
+cmd: Get-VaultUserSecret -Target t -Key k [-AsPlainText] → tracked key's vault value (as Get-VaultEntry)
+cmd: Remove-VaultUserSecret -Target t -Key k            → untracked; key cleared per V161; vault entry kept
+cmd: Write-VaultUserSecret [-Target t] [-Overwrite]     → V160
+cmd: Clear-VaultUserSecret [-Target t]                  → V161
 ```
 
 ### CLI `lv` (alias of `Invoke-LocalVault`, exported by module)
@@ -286,6 +300,13 @@ cmd: lv ssh-key include on|off
 cmd: lv ssh-key tools [<dir> | --default]
 cmd: lv ssh <name> [<target>] [-- <ssh args>]
 cmd: lv scp <name> -- <scp args>
+cmd: lv user-secrets [list] [<id|project>]                    Get-VaultUserSecretList
+cmd: lv user-secrets set <id|project> <key> [--entry <name[#part]>] [--personal]   Set-VaultUserSecret; value: stdin if redirected, else hidden prompt
+cmd: lv user-secrets get <id|project> <key> [--show]          Get-VaultUserSecret; output rules of `lv get`
+cmd: lv user-secrets pick                                     V162
+cmd: lv user-secrets untrack <id|project> <key>               Remove-VaultUserSecret
+cmd: lv user-secrets load [<id|project>] [--overwrite]        Write-VaultUserSecret
+cmd: lv user-secrets clear [<id|project>]                     Clear-VaultUserSecret
 cmd: lv update [<tag>] [--downgrade]
 global: --path <vault>
 exit ($LASTEXITCODE): 0 ok, 1 error, 2 import conflicts unresolved
@@ -455,6 +476,13 @@ V153: ∀ read of a Hello value outside the module (output, env, clipboard, file
 V154: Hello key created only after `NCryptOpenKey` → `NTE_BAD_KEYSET` 0x80090016 | `NTE_NOT_FOUND` 0x80090011 (state `none`); `NTE_NO_KEY` 0x8009000D → `unavailable` "isn't ready in this window … open a new PowerShell window"; any other status → `unavailable` w/ hex code. ⊥ create | overwrite on other statuses.
 V155: database id source: id recorded on this PC (`stores.json` | `localvault.json`) > KDBX 4 outer header `PublicCustomData` `LocalVault.DatabaseId` (⊥ password) > store opened (password). `Register-VaultStore` common → id recorded at add (header, else opened); non-console & header ⊥ id → added w/o id, recorded at first open. `-Project` w/o target → id copied from PC store when known. `Set-VaultProjectStore` w/ id known → ⊥ store opened. ∀ open → real id ≠ recorded → error, nothing written (header unauthenticated: checked at first open). ∀ save → header `LocalVault.DatabaseId` set. KDBX 3 → ⊥ header field → opened.
 V156: Core ⊥ reference any LocalVault assembly; Engine → Core, ⊥ store assembly; store assemblies → Core & own libraries, ⊥ Engine; Core internals visible to Engine only. Sync & cmdlets reach a store only via `IStore`/`IUnlockingStore`/`IStoreProvider`; provider asks its own secrets via `IStorePrompt`, ⊥ console access in store assemblies; prompt owns & clears answers; kept AutoOpen password = 1st answer of prompt; 1 assembly per store type. Type renames ⊥ change body JSON (`kp`, `kpRemoved`, `ref` kept).
+V157: user-secrets target: exact id of a repo project > unique project name > error listing ids w/ their projects. Tracked id no project uses anymore → kept, shown & reported by list/load, ⊥ written.
+V158: UserSecretsId: value contains `$(` → error naming file ("set UserSecretsId literally"); project w/o id ⊥ listed; id ∉ `^[A-Za-z0-9._-]+$` | `.` | `..` → error (⊥ path outside `UserSecrets`).
+V159: new entry from user-secrets set/pick: name = config key when valid LV name & free, else asked (console) | error. Console → asked shared | personal; `--personal` / `-Personal` → personal ⊥ asking; non-interactive w/o → shared (as `lv set`). Personal → required declaration + personal value (V115, personal store). Refused: kind file | ssh-key, hello entry (V144), `#totp` part. Id & key already tracked by another vault → refused naming it. `-Path` on any `*-VaultUserSecret*` → only tracking of that vault.
+V160: user-secrets load: per id one read-modify-write (temp + replace); keys compared ordinal ignore-case; other keys kept; unchanged → ⊥ write. Existing key w/ other value → console: key names listed (⊥ values), one yes/no, default no; `-Overwrite` → yes; non-interactive w/o → error, nothing written for that id, exit 2. Reference w/o value → key skipped & named. Report = key names & counts, ⊥ value. File changes only on user-secrets set/pick/load & `lv load` (V163).
+V161: user-secrets clear: tracked key removed only when value = vault value, else kept & named; empty object → file deleted, then folder if empty. `Clear-Vault` → that vault's tracked keys cleared (console: asked, as V101).
+V162: `lv user-secrets pick`: console only (⊥ console → error). Menu 1: ids w/ their projects. Menu 2: untracked keys of that file + "new key". Existing key → its value → vault entry (V159), tracked, file unchanged. New key → key asked, value hidden prompt → entry, tracked, V160 for that key. Values ⊥ shown.
+V163: `Import-VaultFromStore` (`lv load`) → after all vaults loaded, V160 for tracking of loaded vaults; conflict w/o console | declined → that id skipped & reported; load result unaffected.
 
 ## §T Tasks
 
@@ -552,7 +580,7 @@ T89|.|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, 
 T90|.|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
 T91|x|references resolved by module (`LocalVault.Ref`, kind `reference`), any PC store for personal values, shared refs into vault store | project `source` stores; `-ReferenceStore`/`--ref-store`, `-Source`/`--source`|I.References,V131,V132
 T92|.|`Reset-VaultEntry` / `lv reset`|V137
-T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset; beta19|C11
+T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset, .NET user secrets; beta19|C11
 T94|x|marker origin `""` ≠ URL; `lv start` shows adoption report & warning; `Get-VaultEntry` on ssh-key adopts first; tab completion ⊥ adopts|V126,V127,B30,B31
 T95|x|spike: NGC KSP → create OK (1 prompt); OAEP SHA-1/SHA-256 refused, PKCS#1 OK; AUTH_MANDATORY → 2nd decrypt on same handle prompts; `NgcKeyImplType` 0x21 = hardware; prompt shown w/ foreground hwnd when ⊥ console window|I.Hello
 T96|x|Core: `IHelloKey` + NGC impl + test impl, vault key pair, seal/unseal blob, body `hello`, `meta.hello`, schema 6 + xUnit (round trip, AAD swap fails, key missing, keyId mismatch, zeroing)|I.Hello,I.Entry,V144,V145,V148,V151
@@ -565,6 +593,7 @@ T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass
 T103|x|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
 T104|x|source folders per area in Core, PowerShell, Core.Tests; StoreEngine.cs split 1 class per file; namespaces unchanged|§I layout
 T105|x|split `LocalVault.Engine` (logic) out of `LocalVault.Core` (contract); namespaces follow assemblies; location-based group path & origin → `VaultLocation`; test project → `LocalVault.Engine.Tests`; install.ps1 DLL list|C3,V81,V156,§I layout
+T106|.|.NET user secrets: `localvault.json` `userSecrets` by id, project & id discovery, `*-VaultUserSecret*`, `lv user-secrets` (list, set, get, pick, untrack, load, clear), load after `lv load`, removal by `Clear-Vault`, `UserSecret` list column; xUnit (discovery, id, merge) + Pester (APPDATA redirected)|I..NET user secrets,V157-V163
 
 ## §B Bugs
 
