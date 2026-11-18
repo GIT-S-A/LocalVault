@@ -252,8 +252,8 @@ cmd: Remove-VaultSshOrphan                              → orphaned keys delete
 cmd: Set-VaultSshInclude -Enabled bool                  → Include line in ~/.ssh/config (V134)
 cmd: Set-VaultSshTools [-Directory d | -Default]        → settings.json sshDir (V135); w/o args → folder in use
 cmd: Get-VaultUserSecretList [-Target t]                → ∀ id: {Id, Projects, Key, Entry, State}[]; State ∈ Written|Differs|Absent|NoValue|Untracked (key in file only); ⊥ value
-cmd: Set-VaultUserSecret -Target t -Key k [-Value <SecureString> | -Entry n[#part]] [-Personal]
-                                                        → tracked; -Entry → existing entry mapped, ⊥ value asked; else value → entry (V159), asked if missing; then V160 for that key
+cmd: Set-VaultUserSecret -Target t -Key k [-Value <SecureString> | -Entry n[#part] | -FromFile] [-Personal]
+                                                        → tracked; -Entry → existing entry mapped, ⊥ value asked; -FromFile → value from secrets.json, file unchanged (V162); else value → entry (V159), asked if missing; key already tracked by this vault → its entry takes the value; then V160 for that key
 cmd: Get-VaultUserSecret -Target t -Key k [-AsPlainText] → tracked key's vault value (as Get-VaultEntry)
 cmd: Remove-VaultUserSecret -Target t -Key k            → untracked; key cleared per V161; vault entry kept
 cmd: Write-VaultUserSecret [-Target t] [-Overwrite]     → V160
@@ -593,7 +593,7 @@ T102|x|store interfaces in Core + `LocalVault.KeePass` assembly; renames KeePass
 T103|x|`IStorePrompt` in Core; `IStoreProvider.Open(target, keyFile, prompt)`; KeePass asks own master password; `StorePrompt` over `IVaultHost`, AutoOpen kept password via prompt; ships in beta18|C3,V156
 T104|x|source folders per area in Core, PowerShell, Core.Tests; StoreEngine.cs split 1 class per file; namespaces unchanged|§I layout
 T105|x|split `LocalVault.Engine` (logic) out of `LocalVault.Core` (contract); namespaces follow assemblies; location-based group path & origin → `VaultLocation`; test project → `LocalVault.Engine.Tests`; install.ps1 DLL list|C3,V81,V156,§I layout
-T106|.|.NET user secrets: `localvault.json` `userSecrets` by id, project & id discovery, `*-VaultUserSecret*`, `lv user-secrets` (list, set, get, pick, untrack, load, clear), load after `lv load`, removal by `Clear-Vault`, `UserSecret` list column; xUnit (discovery, id, merge) + Pester (APPDATA redirected)|I..NET user secrets,V157-V163
+T106|x|.NET user secrets: `localvault.json` `userSecrets` by id, project & id discovery, `*-VaultUserSecret*`, `lv user-secrets` (list, set, get, pick, untrack, load, clear), load after `lv load`, removal by `Clear-Vault`, `UserSecret` list column; xUnit (discovery, id, merge) + Pester (APPDATA redirected)|I..NET user secrets,V157-V163
 
 ## §B Bugs
 
