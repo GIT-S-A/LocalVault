@@ -271,7 +271,7 @@ public abstract partial class VaultCmdletBase : PSCmdlet, IVaultHost
             {
                 if (entry.IsSshKeyShape)
                 {
-                    if (AskSshKey(access, location, entry))
+                    if (!AdoptMissingSshKey(location, entry) && AskSshKey(access, location, entry))
                     {
                         keys++;
                         written.Add(location);

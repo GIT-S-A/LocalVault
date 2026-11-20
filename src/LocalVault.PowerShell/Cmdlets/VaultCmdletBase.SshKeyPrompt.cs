@@ -68,28 +68,53 @@ public abstract partial class VaultCmdletBase
                     .Select(entry => SshKeyAdoption.FindForMissing(entry, origin, Now))
                     .OfType<AdoptedSshKey>()
                     .ToList();
-                if (found.Count == 0)
-                {
-                    continue;
-                }
-
-                Report(store.Update(body =>
-                {
-                    foreach (var key in found)
-                    {
-                        body.SetPersonalValue(key.Entry.Name, key.Entry);
-                    }
-                }));
-                foreach (var key in found)
-                {
-                    SshKeyAdoption.AddUser(key.Entry, origin, location.Path);
-                    Say($"{key.Entry.Name}: using the key in {SshKeyFiles.TargetOf(key.Entry)}, written there by {key.WrittenBy}");
-                }
+                StoreAdoptedKeys(location, store, origin, found);
             }
             catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
             {
                 WriteWarning($"SSH keys of {location.Path} not checked against the other clones: {ex.Message}");
             }
+        }
+    }
+
+    private bool AdoptMissingSshKey(VaultLocation location, VaultEntry declaration)
+    {
+        try
+        {
+            var origin = location.ReadOrigin()?.Url;
+            if (SshKeyAdoption.FindForMissing(declaration, origin, Now) is not { } key)
+            {
+                return false;
+            }
+
+            StoreAdoptedKeys(location, RepositoryVaults.StoreFor(location), origin, [key]);
+            return true;
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            WriteWarning($"SSH keys of {location.Path} not checked against the other clones: {ex.Message}");
+            return false;
+        }
+    }
+
+    private void StoreAdoptedKeys(VaultLocation location, VaultFile store, string? origin, List<AdoptedSshKey> found)
+    {
+        if (found.Count == 0)
+        {
+            return;
+        }
+
+        Report(store.Update(body =>
+        {
+            foreach (var key in found)
+            {
+                body.SetPersonalValue(key.Entry.Name, key.Entry);
+            }
+        }));
+        foreach (var key in found)
+        {
+            SshKeyAdoption.AddUser(key.Entry, origin, location.Path);
+            Say($"{key.Entry.Name}: using the key in {SshKeyFiles.TargetOf(key.Entry)}, written there by {key.WrittenBy}");
         }
     }
 
