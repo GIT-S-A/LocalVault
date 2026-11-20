@@ -112,6 +112,14 @@ Loads the shared entries of the repository's vaults from their stores.
 
 Runs a LocalVault command from a short command line.
 
+### [Invoke-VaultScp](Invoke-VaultScp.md)
+
+Runs scp with the key of an SSH key entry.
+
+### [Invoke-VaultSsh](Invoke-VaultSsh.md)
+
+Runs ssh with the key of an SSH key entry.
+
 ### [New-VaultSshKey](New-VaultSshKey.md)
 
 Creates an SSH key pair for the hosts of a project and stores it in the vault.
@@ -147,6 +155,10 @@ Adds or replaces a secret or a file in a vault.
 ### [Set-VaultProjectStore](Set-VaultProjectStore.md)
 
 Names the project's primary store.
+
+### [Set-VaultSshInclude](Set-VaultSshInclude.md)
+
+Adds or removes the line of `~/.ssh/config` that gives other OpenSSH tools the repository keys.
 
 ### [Set-VaultSshKeyHost](Set-VaultSshKeyHost.md)
 

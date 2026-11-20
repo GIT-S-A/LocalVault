@@ -629,6 +629,12 @@ public sealed class VaultEntry
         }
     }
 
+    internal void RetirePrevious()
+    {
+        Node.Remove(PreviousField);
+        (Meta?[SshField] as JsonObject)?.Remove(ReplacedAtField);
+    }
+
     internal void MarkHello() => EnsureMeta()[HelloField] = new JsonObject();
 
     internal void SetLocal(bool local)

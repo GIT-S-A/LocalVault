@@ -285,6 +285,9 @@ public sealed class VaultBody
         (Find(name) ?? throw new VaultException($"No entry '{name}'.")).SetSshHosts(hosts.Select(SshKeyInfo.NormalizeHost).ToList());
     }
 
+    public void RetirePreviousKey(EntryName name) =>
+        (Find(name) ?? throw new VaultException($"No entry '{name}'.")).RetirePrevious();
+
     public void SetSharing(EntryName name, bool local)
     {
         var existing = Find(name) ?? throw new VaultException($"No entry '{name}'.");

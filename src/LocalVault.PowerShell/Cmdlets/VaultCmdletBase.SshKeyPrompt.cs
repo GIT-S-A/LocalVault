@@ -53,6 +53,12 @@ public abstract partial class VaultCmdletBase
         {
             Say(SshKeyFiles.Describe(plan, entry.Name));
         }
+
+        if (!plan.Refused)
+        {
+            RefreshSshConfig(location, System.IO.Path.GetDirectoryName(plan.Target)!);
+            OfferSshInclude(plan.State == SshKeyWriteState.Write);
+        }
     }
 
     private void AdoptMissingSshKeys(IReadOnlyList<VaultLocation> vaults, IReadOnlySet<EntryName>? only)

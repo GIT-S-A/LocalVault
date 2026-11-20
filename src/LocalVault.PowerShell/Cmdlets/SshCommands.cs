@@ -276,6 +276,113 @@ public sealed class SetVaultSshKeyHostCommand : SshKeyCmdletBase
 
         Report(VaultFile.Update(body => body.SetSshHosts(name, hosts)));
         Say(hosts.Count == 0 ? $"{name} has no hosts." : $"{name} is for {string.Join(", ", hosts)}.");
+        var entry = ReadVault().Body.Find(name)!;
+        var folder = System.IO.Path.GetDirectoryName(SshKeyFiles.TargetOf(entry))!;
+        if (!entry.IsMissing && System.IO.Directory.Exists(folder))
+        {
+            RefreshSshConfig(Location, folder);
+        }
+    }
+}
+
+public abstract class SshRunCmdletBase : SshKeyCmdletBase
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    public string Name { get; set; } = string.Empty;
+
+    protected VaultEntry KeyForUse()
+    {
+        var name = EntryName.Parse(Name);
+        AdoptNewerSshKeys([Location]);
+        var entry = RequireSshKey(ReadForUse(body => body.Find(name) is { IsMissing: false }, _ => [name]), name);
+        RequireValue(entry);
+        if (!File.Exists(SshKeyFiles.KeyFileOf(entry)))
+        {
+            WriteKeyFile(entry, overwrite: false);
+        }
+
+        return File.Exists(SshKeyFiles.KeyFileOf(entry))
+            ? entry
+            : throw new VaultException($"The key file of {name} isn't on this PC and couldn't be written.");
+    }
+
+    protected void RunAttached(string executable, IReadOnlyList<string> arguments) =>
+        SessionState.PSVariable.Set("global:LASTEXITCODE", ToolProcess.RunAttached(executable, arguments, SessionState.Path.CurrentFileSystemLocation.ProviderPath));
+}
+
+[Cmdlet(VerbsLifecycle.Invoke, "VaultSsh")]
+public sealed class InvokeVaultSshCommand : SshRunCmdletBase
+{
+    [Parameter(Position = 1)]
+    [ValidateNotNullOrEmpty]
+    public string? Target { get; set; }
+
+    [Parameter]
+    public string[] ArgumentList { get; set; } = [];
+
+    protected override void Run()
+    {
+        var entry = KeyForUse();
+        RunAttached(Tools.SshPath, SshCommandLine.Ssh(entry, Target ?? SoleHost(entry), ArgumentList));
+    }
+
+    private static string SoleHost(VaultEntry entry) => entry.SshHosts.Count switch
+    {
+        1 => entry.SshHosts[0],
+        0 => throw new VaultException($"{entry.Name} has no hosts: give one (lv ssh {entry.Name} <user@host>), or add it with lv ssh-key hosts {entry.Name} <user@host>."),
+        _ => throw new VaultException($"{entry.Name} is for several hosts: give one of {string.Join(", ", entry.SshHosts)}."),
+    };
+}
+
+[Cmdlet(VerbsLifecycle.Invoke, "VaultScp")]
+public sealed class InvokeVaultScpCommand : SshRunCmdletBase
+{
+    [Parameter(Mandatory = true)]
+    public string[] ArgumentList { get; set; } = [];
+
+    protected override void Run()
+    {
+        var tools = Tools;
+        if (!File.Exists(tools.ScpPath))
+        {
+            throw new VaultException($"{tools.Directory} has no {SshTools.Scp}.");
+        }
+
+        RunAttached(tools.ScpPath, SshCommandLine.Scp(KeyForUse(), ArgumentList));
+    }
+}
+
+public sealed record VaultSshIncludeInfo(bool Enabled, string ConfigPath);
+
+[Cmdlet(VerbsCommon.Set, "VaultSshInclude", SupportsShouldProcess = true)]
+[OutputType(typeof(VaultSshIncludeInfo))]
+public sealed class SetVaultSshIncludeCommand : PSCmdlet
+{
+    [Parameter(Mandatory = true, Position = 0)]
+    public bool Enabled { get; set; }
+
+    protected override void ProcessRecord()
+    {
+        var config = SshConfigFile.UserConfigPath;
+        try
+        {
+            if (!ShouldProcess(config, Enabled ? $"Add '{SshConfigFile.IncludeLine}'" : $"Remove '{SshConfigFile.IncludeLine}'"))
+            {
+                return;
+            }
+
+            new PcSettings(PcSettings.DefaultPath).SshInclude = Enabled;
+            _ = Enabled ? SshConfigFile.AddInclude(config) : SshConfigFile.RemoveInclude(config);
+            WriteObject(new VaultSshIncludeInfo(Enabled, config));
+        }
+        catch (VaultException ex)
+        {
+            ThrowTerminatingError(new ErrorRecord(ex, "LocalVault", ErrorCategory.InvalidOperation, null));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ThrowTerminatingError(new ErrorRecord(ex, "LocalVault.File", ErrorCategory.WriteError, null));
+        }
     }
 }
 

@@ -295,6 +295,58 @@ Describe 'SSH keys' {
         (Get-VaultSshKey -Path $script:vault -Name deploy).Type | Should -Be 'ed25519'
     }
 
+    It 'connects with lv ssh and passes the exit code of ssh' {
+        New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+        Push-Location $script:repo
+        try {
+            lv ssh deploy 2>$null
+            $LASTEXITCODE | Should -Be 1
+            Set-VaultSshKeyHost -Path $script:vault -Name deploy -HostName deploy@127.0.0.1:1, deploy@127.0.0.2:1 6>$null
+            { Invoke-VaultSsh -Path $script:vault -Name deploy } | Should -Throw '*several hosts: give one of deploy@127.0.0.1:1, deploy@127.0.0.2:1*'
+
+            $typed = 'ssh', 'deploy', 'deploy@127.0.0.1:1', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=3'
+            lv @typed 2>$null
+            $LASTEXITCODE | Should -Be 255
+            $splatted = 'ssh', 'deploy', 'deploy@127.0.0.2:1', '--', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=3'
+            lv @splatted 2>$null
+            $LASTEXITCODE | Should -Be 255
+            { Invoke-VaultSsh -Path $script:vault -Name deploy -Target '-oProxyCommand=calc' } | Should -Throw '*is not a host*'
+            lv scp deploy 2>$null
+            $LASTEXITCODE | Should -Be 1
+        }
+        finally { Pop-Location }
+    }
+
+    It 'writes lv.config with a block per host and follows host changes' {
+        New-VaultSshKey -Path $script:vault -Name deploy -HostName deploy@srv1.example.com -Shared 6>$null 3>$null | Out-Null
+        $config = Join-Path $script:keyFolder 'lv.config'
+
+        Get-Content -LiteralPath $config -Raw | Should -Match "Match host srv1\.example\.com user deploy\n    IdentityFile ~/\.ssh/proj/deploy\n    IdentitiesOnly yes"
+
+        Set-VaultSshKeyHost -Path $script:vault -Name deploy -HostName srv2.example.com 6>$null
+        $text = Get-Content -LiteralPath $config -Raw
+        $text | Should -Match 'Match host srv2\.example\.com\n'
+        $text | Should -Not -Match 'srv1'
+
+        Set-VaultSshKeyHost -Path $script:vault -Name deploy -HostName @() 6>$null
+        Test-Path -LiteralPath $config | Should -BeFalse
+    }
+
+    It 'adds and removes the Include line of ~/.ssh/config, keeping the rest' {
+        $config = Join-Path $env:USERPROFILE '.ssh\config'
+        New-Item -ItemType Directory -Path (Split-Path $config) -Force | Out-Null
+        [IO.File]::WriteAllText($config, "Host srv1`n    User admin`n")
+
+        (Set-VaultSshInclude -Enabled $true).Enabled | Should -BeTrue
+        [IO.File]::ReadAllText($config) | Should -Be "Include ~/.ssh/*/lv.config`nHost srv1`n    User admin`n"
+        (Get-Content -LiteralPath (Join-Path $env:LOCALAPPDATA 'LocalVault\settings.json') -Raw | ConvertFrom-Json).sshInclude | Should -BeTrue
+
+        Push-Location $script:repo
+        try { $off = 'ssh-key', 'include', 'off'; lv @off | Should -Match 'Removed' }
+        finally { Pop-Location }
+        [IO.File]::ReadAllText($config) | Should -Be "Host srv1`n    User admin`n"
+    }
+
     It 'names the key file after the entry name' {
         $info = New-VaultSshKey -Path $script:vault -Name common/deploy -Shared 6>$null 3>$null
         Split-Path -Leaf $info.Path | Should -Be 'common.deploy'

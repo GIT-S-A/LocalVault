@@ -457,6 +457,7 @@ public sealed class ImportVaultFromStoreCommand : StoreSyncCmdletBase
         FillMissingValues(access, present);
         AdoptNewerSshKeys(present);
         WritePersonalFiles(present);
+        RetireReplacedSshKeys(present);
         WriteUserSecrets(present);
         WriteObject(new StoreLoadSummary(totals.Added, totals.Updated, totals.Kept, totals.Removed));
     }

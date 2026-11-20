@@ -38,6 +38,27 @@ public static class ToolProcess
         });
     }
 
+    public static int RunAttached(string executable, IEnumerable<string> arguments, string workingDirectory)
+    {
+        ArgumentNullException.ThrowIfNull(arguments);
+        var start = new ProcessStartInfo(executable) { UseShellExecute = false, WorkingDirectory = workingDirectory };
+        foreach (var argument in arguments)
+        {
+            start.ArgumentList.Add(argument);
+        }
+
+        try
+        {
+            using var process = Process.Start(start) ?? throw new VaultException($"'{executable}' did not start.");
+            process.WaitForExit();
+            return process.ExitCode;
+        }
+        catch (Win32Exception ex)
+        {
+            throw new VaultException($"'{executable}' could not be started: {ex.Message}", ex);
+        }
+    }
+
     private static ToolResult Run(string executable, IEnumerable<string> arguments, Action<Process> wait)
     {
         ArgumentNullException.ThrowIfNull(arguments);

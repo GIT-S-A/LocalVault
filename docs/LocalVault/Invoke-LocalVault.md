@@ -85,6 +85,9 @@ it says that the vault is missing or empty.
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
+| `ssh-key include` | `on\|off` | `Set-VaultSshInclude` |
+| `ssh` | `<name> [<user@host>] [-- <ssh arguments>]` | `Invoke-VaultSsh`: the second word is `-Target` when it holds `@` or is one of the key's hosts; the other words are `-ArgumentList` |
+| `scp` | `<name> -- <scp arguments>` | `Invoke-VaultScp` (`-ArgumentList`) |
 | `user-secrets` | `[list] [<id\|project>]` | `Get-VaultUserSecretList` |
 | `user-secrets set` | `<id\|project> <key> [--entry <name[#part]>] [--personal]` | `Set-VaultUserSecret`; the value is asked, or read from redirected input |
 | `user-secrets get` | `<id\|project> <key> [--show]` | `Get-VaultUserSecret`, with the output rules of `get` |

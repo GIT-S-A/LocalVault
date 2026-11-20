@@ -33,6 +33,8 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Import-Vault](#import-vault): Merges entries from an export, a backup or a `secrets.local.clixml` file into a vault.
 - [Import-VaultFromStore](#import-vaultfromstore): Loads the shared entries of the repository's vaults from their stores.
 - [Invoke-LocalVault](#invoke-localvault): Runs a LocalVault command from a short command line.
+- [Invoke-VaultScp](#invoke-vaultscp): Runs scp with the key of an SSH key entry.
+- [Invoke-VaultSsh](#invoke-vaultssh): Runs ssh with the key of an SSH key entry.
 - [New-VaultSshKey](#new-vaultsshkey): Creates an SSH key pair for the hosts of a project and stores it in the vault.
 - [Register-VaultStore](#register-vaultstore): Defines a store on this PC or in the project.
 - [Remove-VaultEntry](#remove-vaultentry): Deletes one entry from a vault.
@@ -42,6 +44,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Restore-VaultFile](#restore-vaultfile): Writes file entries of a vault back to disk.
 - [Set-VaultEntry](#set-vaultentry): Adds or replaces a secret, a credential or a file in a vault.
 - [Set-VaultProjectStore](#set-vaultprojectstore): Names the project's primary store.
+- [Set-VaultSshInclude](#set-vaultsshinclude): Adds or removes the line of `~/.ssh/config` that gives other OpenSSH tools the repository keys.
 - [Set-VaultSshKeyHost](#set-vaultsshkeyhost): Sets the hosts an SSH key of the vault is for.
 - [Set-VaultSshTools](#set-vaultsshtools): Sets or shows the OpenSSH folder that LocalVault uses on this PC.
 - [Set-VaultStore](#set-vaultstore): Changes one setting of a store without defining it again.
@@ -2942,6 +2945,9 @@ it says that the vault is missing or empty.
 | `ssh-key hosts` | `<name> [<user@host> ...]` | `Set-VaultSshKeyHost`; no host removes them |
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
+| `ssh-key include` | `on\|off` | `Set-VaultSshInclude` |
+| `ssh` | `<name> [<user@host>] [-- <ssh arguments>]` | `Invoke-VaultSsh`: the second word is `-Target` when it holds `@` or is one of the key's hosts; the other words are `-ArgumentList` |
+| `scp` | `<name> -- <scp arguments>` | `Invoke-VaultScp` (`-ArgumentList`) |
 | `user-secrets` | `[list] [<id\|project>]` | `Get-VaultUserSecretList` |
 | `user-secrets set` | `<id\|project> <key> [--entry <name[#part]>] [--personal]` | `Set-VaultUserSecret`; the value is asked, or read from redirected input |
 | `user-secrets get` | `<id\|project> <key> [--show]` | `Get-VaultUserSecret`, with the output rules of `get` |
@@ -3029,6 +3035,209 @@ formatted tables.
 ### Notes
 
 The function reads its words and `--` options as typed; options with one dash are PowerShell's common parameters.
+
+## Invoke-VaultScp
+
+Runs scp with the key of an SSH key entry.
+
+### Syntax
+
+```text
+Invoke-VaultScp [-Name] <string> -ArgumentList <string[]> [-Path <string>] [<CommonParameters>]
+```
+
+### Description
+
+The `Invoke-VaultScp` cmdlet runs `scp.exe` from the OpenSSH folder that `Set-VaultSshTools` shows,
+with the key file of an SSH key entry:
+
+`scp -i <key file> [-i <old key file>] -o IdentitiesOnly=yes <arguments>`
+
+The key files, the missing-key prompt and the exit code follow the rules of
+[Invoke-VaultSsh](#invoke-vaultssh). The arguments name the files and the hosts; a port is given
+with `-P <port>`. The cmdlet fails when the OpenSSH folder has no `scp.exe`.
+
+### Examples
+
+#### Example 1 - Copy a file to a host
+
+```powershell
+Invoke-VaultScp -Name deploy -ArgumentList 'backup.tar', 'deploy@srv1.example.com:/srv/backup/'
+```
+
+### Parameters
+
+#### -ArgumentList
+
+Specifies the scp arguments: options, sources and destination.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String[] |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Name
+
+Specifies the name of the SSH key entry.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file. A relative path is resolved from the current location. If
+you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
+`secrets.local.lv` at the root of the git repository that contains the current location.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output. scp writes to the console, and `$LASTEXITCODE` holds its exit code.
+
+### Notes
+
+`lv scp <name> -- <scp arguments>` runs this cmdlet.
+
+## Invoke-VaultSsh
+
+Runs ssh with the key of an SSH key entry.
+
+### Syntax
+
+```text
+Invoke-VaultSsh [-Name] <string> [[-Target] <string>] [-ArgumentList <string[]>] [-Path <string>]
+ [<CommonParameters>]
+```
+
+### Description
+
+The `Invoke-VaultSsh` cmdlet runs `ssh.exe` from the OpenSSH folder that `Set-VaultSshTools` shows,
+with the key file of an SSH key entry. The command line is:
+
+`ssh -i <key file> [-i <old key file>] -o IdentitiesOnly=yes [-p <port>] <user@host> <arguments>`
+
+- The old key file is given while the entry keeps a replaced key, so a host that doesn't have the
+  new public key yet still accepts the connection.
+- For a key held by an SSH agent, the key file is its `.pub` file; the agent signs.
+- The host is **Target**, else the only host of the entry. An entry with several hosts and no
+  **Target** gives an error that lists them. A host that the entry doesn't list is allowed.
+- ssh reads and writes the console directly: standard input, output and error aren't redirected
+  by the cmdlet. `$LASTEXITCODE` is ssh's exit code.
+
+When the key file is missing, the cmdlet writes it first. In an interactive console, a personal key
+not set on this PC is asked for, as `Import-VaultFromStore` does. The cmdlet never prints the path
+of a private key.
+
+### Examples
+
+#### Example 1 - Open a session on the key's host
+
+```powershell
+Invoke-VaultSsh -Name deploy
+```
+
+#### Example 2 - Run a command on one of the key's hosts
+
+```powershell
+Invoke-VaultSsh -Name deploy -Target deploy@srv2.example.com -ArgumentList 'systemctl', 'status', 'nginx'
+```
+
+### Parameters
+
+#### -ArgumentList
+
+Specifies the arguments placed after the host: ssh options, then the remote command.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String[] |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Name
+
+Specifies the name of the SSH key entry.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file. A relative path is resolved from the current location. If
+you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
+`secrets.local.lv` at the root of the git repository that contains the current location.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -Target
+
+Specifies the host as `[user@]host[:port]`. A port becomes `-p <port>`.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | 1 |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output. ssh writes to the console, and `$LASTEXITCODE` holds its exit code.
+
+### Notes
+
+`lv ssh <name> [<user@host>] [-- <ssh arguments>]` runs this cmdlet. PowerShell removes the `--`, so the second word is the host when it holds `@` or is one of the key's hosts; the other words go to ssh.
 
 ## New-VaultSshKey
 
@@ -4835,6 +5044,100 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 ### Notes
 
 `lv store use <name> [--path <vault>]` runs this cmdlet.
+
+## Set-VaultSshInclude
+
+Adds or removes the line of `~/.ssh/config` that gives other OpenSSH tools the repository keys.
+
+### Syntax
+
+```text
+Set-VaultSshInclude [-Enabled] <bool> [-WhatIf] [-Confirm] [<CommonParameters>]
+```
+
+### Description
+
+Each folder `~/.ssh/<repository>/` that holds SSH keys of LocalVault also holds `lv.config`, written
+again with every key file. For each host of each key, it has a `Match host <host> [user <user>]`
+block with the key file, the old key file while one is kept, and `IdentitiesOnly yes`.
+
+The `Set-VaultSshInclude` cmdlet adds `Include ~/.ssh/*/lv.config` as the first line of
+`~/.ssh/config`, so `ssh`, `scp` and other OpenSSH tools use these keys without `-i`. It creates the
+file when it is missing, and keeps the access rules of an existing file. With `-Enabled $false`, it
+removes the line. The choice is kept as `sshInclude` in `%LOCALAPPDATA%\LocalVault\settings.json`.
+
+The first time a key file is written on a PC without that setting, LocalVault asks the question in
+a console; the default answer is yes. Without a console, it asks nothing and adds nothing.
+
+### Examples
+
+#### Example 1 - Let other OpenSSH tools use the keys
+
+```powershell
+Set-VaultSshInclude -Enabled $true
+```
+
+#### Example 2 - Remove the line
+
+```powershell
+Set-VaultSshInclude -Enabled $false
+```
+
+### Parameters
+
+#### -Confirm
+
+Prompts you for confirmation before running the cmdlet.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | cf |
+
+#### -Enabled
+
+Specifies whether `~/.ssh/config` has the `Include` line.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Boolean |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -WhatIf
+
+Shows what would happen if the cmdlet runs. The cmdlet isn't run.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | wi |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**LocalVault.PowerShell.VaultSshIncludeInfo**: This cmdlet returns whether the line is **Enabled**, and the **ConfigPath** of `~/.ssh/config`.
+
+### Notes
+
+`lv ssh-key include on|off` runs this cmdlet.
 
 ## Set-VaultSshKeyHost
 

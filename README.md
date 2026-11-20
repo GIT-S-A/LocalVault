@@ -224,7 +224,7 @@ LocalVault assembly. `LocalVault.Engine` and each store assembly reference Core 
 | `src/LocalVault.Engine/Transfer` | export, import, `.clixml` migration |
 | `src/LocalVault.Engine/Stores` | store registry and resolution, sync |
 | `src/LocalVault.Engine/Hello` | Windows Hello keys and sealing |
-| `src/LocalVault.Engine/Ssh` | SSH key files, generation, adoption |
+| `src/LocalVault.Engine/Ssh` | SSH key files, generation, adoption, SSH agent keys, ssh and scp command lines, `lv.config` |
 | `src/LocalVault.Engine/Processes` | git and other external programs |
 | `src/LocalVault.KeePass` | KeePass store over KeePassLib |
 | `src/LocalVault.PowerShell/Cmdlets` | cmdlets, one file per area |

@@ -70,6 +70,10 @@ public static class SshKeyFiles
             else
             {
                 folder.AddUser(fileName, origin, vaultPath);
+                if (plan.State == SshKeyWriteState.Identical && !entry.HasPrevious)
+                {
+                    DeleteOldKeys(target);
+                }
             }
 
             folder.PruneUsers(File.Exists);
@@ -86,12 +90,17 @@ public static class SshKeyFiles
 
     private static byte[] PublicKeyFileBytes(SshKeyInfo ssh) => Encoding.UTF8.GetBytes(ssh.PublicKey + "\n");
 
+    public static void DeleteOldKeys(string target)
+    {
+        File.Delete(OldKeyOf(target));
+        File.Delete(OldPublicKeyOf(target));
+    }
+
     private static void WriteOldKey(string target, byte[]? previous)
     {
         if (previous is null)
         {
-            File.Delete(OldKeyOf(target));
-            File.Delete(OldPublicKeyOf(target));
+            DeleteOldKeys(target);
             return;
         }
 
