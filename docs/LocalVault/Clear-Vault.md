@@ -47,6 +47,19 @@ The .NET user secrets tracked for this vault hold its values in plain text too. 
 cmdlet asks whether to remove them, as `Clear-VaultUserSecret` does; without a console, it removes
 them. Values changed in `secrets.json` stay.
 
+For each SSH key of the vault, the cmdlet removes the vault from the clones that the key folder's
+marker lists:
+
+| Case | Result |
+| --- | --- |
+| Another clone on this PC still uses the key | The key files stay; the cmdlet names the clones. |
+| No clone uses it, and the file is the one LocalVault wrote | The key file, its `.pub` and its `.old` files are deleted. |
+| No clone uses it, and the file was changed | The files stay, with a warning. |
+
+A key folder left without keys loses its marker and `lv.config`, and is deleted when empty. Files
+that the marker doesn't list stay, and `~/.ssh` itself stays. Last, the cmdlet warns about orphaned
+SSH keys, as `Get-VaultEntryList` does.
+
 ## EXAMPLES
 
 ### Example 1 - Delete the vault of the current repository

@@ -352,6 +352,55 @@ public sealed class InvokeVaultScpCommand : SshRunCmdletBase
     }
 }
 
+public sealed record VaultSshOrphanInfo(string Repository, string Key, DateTimeOffset LastWrite, string Action);
+
+[Cmdlet(VerbsCommon.Remove, "VaultSshOrphan", SupportsShouldProcess = true, ConfirmImpact = ConfirmImpact.High)]
+[OutputType(typeof(VaultSshOrphanInfo))]
+public sealed class RemoveVaultSshOrphanCommand : PSCmdlet
+{
+    protected override void ProcessRecord()
+    {
+        try
+        {
+            var orphans = SshKeyCleanup.FindOrphans(VaultCmdletBase.SshDirectory);
+            if (orphans.Count == 0)
+            {
+                return;
+            }
+
+            var list = string.Join(Environment.NewLine, orphans.Select(o => $"  {o.Repository}/{o.File}, last written {o.WrittenAt.ToLocalTime():yyyy-MM-dd HH:mm}"));
+            if (!ShouldProcess(
+                $"{orphans.Count} orphaned SSH keys:{Environment.NewLine}{list}",
+                $"Delete {orphans.Count} SSH keys whose clones no longer exist:{Environment.NewLine}{list}{Environment.NewLine}",
+                "Delete orphaned SSH keys"))
+            {
+                return;
+            }
+
+            var removed = SshKeyCleanup.RemoveOrphans(orphans).ToDictionary(r => r.Path, StringComparer.OrdinalIgnoreCase);
+            foreach (var orphan in orphans)
+            {
+                var path = System.IO.Path.Combine(orphan.Folder, orphan.File);
+                var action = removed.TryGetValue(path, out var result) && result.State == SshKeyReleaseState.Deleted ? "Deleted" : "Kept";
+                if (action == "Kept")
+                {
+                    WriteWarning($"Kept the SSH key {path}: it differs from the key LocalVault wrote there, or a clone uses it again.");
+                }
+
+                WriteObject(new VaultSshOrphanInfo(orphan.Repository, orphan.File, orphan.WrittenAt, action));
+            }
+        }
+        catch (VaultException ex)
+        {
+            ThrowTerminatingError(new ErrorRecord(ex, "LocalVault", ErrorCategory.InvalidOperation, null));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            ThrowTerminatingError(new ErrorRecord(ex, "LocalVault.File", ErrorCategory.WriteError, null));
+        }
+    }
+}
+
 public sealed record VaultSshIncludeInfo(bool Enabled, string ConfigPath);
 
 [Cmdlet(VerbsCommon.Set, "VaultSshInclude", SupportsShouldProcess = true)]

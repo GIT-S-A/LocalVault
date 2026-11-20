@@ -347,6 +347,60 @@ Describe 'SSH keys' {
         [IO.File]::ReadAllText($config) | Should -Be "Host srv1`n    User admin`n"
     }
 
+    It 'deletes the keys of a cleared vault that no other clone uses, with their folder' {
+        New-VaultSshKey -Path $script:vault -Name deploy -HostName deploy@srv1.example.com -Shared 6>$null 3>$null | Out-Null
+
+        Clear-Vault -Path $script:vault -Confirm:$false -InformationVariable said 6>$null 3>$null
+
+        ($said -join "`n") | Should -Match ([regex]::Escape("Deleted the SSH key $(Join-Path $script:keyFolder 'deploy')"))
+        Test-Path -LiteralPath $script:keyFolder | Should -BeFalse
+        Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.ssh') | Should -BeTrue
+    }
+
+    It 'keeps a key that another clone uses, and one changed by hand, when a vault is cleared' {
+        New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+        New-VaultSshKey -Path $script:vault -Name edited -Shared 6>$null 3>$null | Out-Null
+        $other = Initialize-TestRepository
+        $otherVault = Join-Path $other 'secrets.local.lv'
+        try {
+            Copy-Item -LiteralPath $script:vault -Destination $otherVault
+            Restore-VaultFile -Path $otherVault -Name deploy 6>$null | Out-Null
+            Set-Content -LiteralPath (Join-Path $script:keyFolder 'edited') -Value 'changed by hand'
+
+            Clear-Vault -Path $script:vault -Confirm:$false -InformationVariable said -WarningVariable warned 6>$null 3>$null
+
+            ($said -join "`n") | Should -Match 'Kept the SSH key .*deploy: other clones use it'
+            ($warned -join "`n") | Should -Match 'Kept the SSH key .*edited: it differs'
+            Test-Path -LiteralPath (Join-Path $script:keyFolder 'deploy') | Should -BeTrue
+            Test-Path -LiteralPath (Join-Path $script:keyFolder 'edited') | Should -BeTrue
+            $marker = Get-Content -LiteralPath (Join-Path $script:keyFolder '.localvault') -Raw | ConvertFrom-Json
+            @($marker.keys.deploy.users) | Should -Be @((Resolve-Path $otherVault).Path)
+        }
+        finally { Clear-TestFolder -Folder (Split-Path $other) }
+    }
+
+    It 'reports and removes the keys of deleted clones only after a confirmation' {
+        New-VaultSshKey -Path $script:vault -Name deploy -Shared 6>$null 3>$null | Out-Null
+        $other = Initialize-TestRepository -Origin 'https://example.com/team/other.git' -Leaf 'other'
+        try {
+            Set-VaultEntry -Path (Join-Path $other 'secrets.local.lv') -Name x -Value (ConvertTo-TestSecret 'x') 6>$null
+            Remove-Item -LiteralPath $script:vault
+
+            Get-VaultEntryList -Path (Join-Path $other 'secrets.local.lv') -WarningVariable warned 3>$null | Out-Null
+            ($warned -join "`n") | Should -Match '1 orphaned SSH keys: lv ssh-key clean'
+            Remove-VaultSshOrphan -WhatIf 6>$null | Should -BeNullOrEmpty
+            Test-Path -LiteralPath (Join-Path $script:keyFolder 'deploy') | Should -BeTrue
+
+            $removed = Remove-VaultSshOrphan -Confirm:$false
+            $removed.Repository | Should -Be 'proj'
+            $removed.Key | Should -Be 'deploy'
+            $removed.Action | Should -Be 'Deleted'
+            Test-Path -LiteralPath $script:keyFolder | Should -BeFalse
+            Remove-VaultSshOrphan -Confirm:$false | Should -BeNullOrEmpty
+        }
+        finally { Clear-TestFolder -Folder (Split-Path $other) }
+    }
+
     It 'names the key file after the entry name' {
         $info = New-VaultSshKey -Path $script:vault -Name common/deploy -Shared 6>$null 3>$null
         Split-Path -Leaf $info.Path | Should -Be 'common.deploy'

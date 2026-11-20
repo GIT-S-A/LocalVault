@@ -7,21 +7,68 @@ public abstract partial class VaultCmdletBase
 {
     private static readonly TimeSpan ProbeTimeout = TimeSpan.FromSeconds(30);
 
-    internal void RefreshSshConfig(VaultLocation location, string folder)
+    internal static string SshDirectory => System.IO.Path.Combine(StoredPathRules.HomeDirectory, SshKeyPath.SshFolder);
+
+    internal void WarnOrphanedSshKeys()
     {
-        ArgumentNullException.ThrowIfNull(location);
+        try
+        {
+            var count = SshKeyCleanup.FindOrphans(SshDirectory).Count;
+            if (count > 0)
+            {
+                WriteWarning($"{count} orphaned SSH keys: lv ssh-key clean");
+            }
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            WriteVerbose($"Orphaned SSH keys not checked: {ex.Message}");
+        }
+    }
+
+    internal void ReportReleasedSshKeys(IReadOnlyList<SshKeyRelease> released)
+    {
+        ArgumentNullException.ThrowIfNull(released);
+        foreach (var key in released)
+        {
+            switch (key.State)
+            {
+                case SshKeyReleaseState.Deleted:
+                    Say($"Deleted the SSH key {key.Path}");
+                    break;
+                case SshKeyReleaseState.KeptForOthers:
+                    Say($"Kept the SSH key {key.Path}: other clones use it ({string.Join(", ", key.OtherUsers)}).");
+                    break;
+                default:
+                    WriteWarning($"Kept the SSH key {key.Path}: it differs from the key LocalVault wrote there.");
+                    break;
+            }
+        }
+
+        foreach (var folder in released.Where(key => key.State != SshKeyReleaseState.Deleted)
+            .Select(key => System.IO.Path.GetDirectoryName(key.Path)!).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            RefreshSshConfig(null, folder);
+        }
+    }
+
+    internal void RefreshSshConfig(VaultLocation? location, string folder)
+    {
         ArgumentNullException.ThrowIfNull(folder);
         try
         {
             var entries = new Dictionary<string, VaultEntry>(StringComparer.OrdinalIgnoreCase);
-            AddSshEntries(entries, RepositoryVaults.StoreFor(location).Read().Body, folder);
+            if (location is not null)
+            {
+                AddSshEntries(entries, RepositoryVaults.StoreFor(location).Read().Body, folder);
+            }
+
             List<string> users;
             using (var marker = SshKeyFolder.Open(folder))
             {
                 users = [.. marker.Keys.Values.SelectMany(record => record.Users).Distinct(StringComparer.OrdinalIgnoreCase)];
             }
 
-            foreach (var user in users.Where(user => File.Exists(user) && !string.Equals(System.IO.Path.GetFullPath(user), System.IO.Path.GetFullPath(location.Path), StringComparison.OrdinalIgnoreCase)))
+            foreach (var user in users.Where(user => File.Exists(user) && (location is null || !string.Equals(System.IO.Path.GetFullPath(user), System.IO.Path.GetFullPath(location.Path), StringComparison.OrdinalIgnoreCase))))
             {
                 var other = VaultLocation.Resolve(user, null, System.IO.Path.GetDirectoryName(user)!);
                 AddSshEntries(entries, RepositoryVaults.StoreFor(other).Read().Body, folder);

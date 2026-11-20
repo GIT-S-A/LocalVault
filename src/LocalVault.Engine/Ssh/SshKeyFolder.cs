@@ -180,6 +180,26 @@ public sealed class SshKeyFolder : IDisposable
         }
     }
 
+    public static IReadOnlyDictionary<string, SshKeyRecord> Peek(string directory)
+    {
+        ArgumentNullException.ThrowIfNull(directory);
+        var marker = ReadMarker(Path.Combine(directory, SshKeyPath.MarkerFileName));
+        return ((JsonObject)marker[KeysField]!).ToDictionary(pair => pair.Key, pair => ToRecord((JsonObject)pair.Value!), StringComparer.OrdinalIgnoreCase);
+    }
+
+    public void RemoveUser(string fileName, string vaultPath)
+    {
+        if (KeysNode[fileName] is JsonObject record && record[UsersField] is JsonArray users)
+        {
+            foreach (var user in users.Where(user => SameVault(user!.GetValue<string>(), vaultPath)).ToList())
+            {
+                users.Remove(user);
+            }
+        }
+    }
+
+    public void RemoveKey(string fileName) => KeysNode.Remove(fileName);
+
     public IReadOnlyList<string> PruneUsers(Func<string, bool> vaultExists)
     {
         ArgumentNullException.ThrowIfNull(vaultExists);

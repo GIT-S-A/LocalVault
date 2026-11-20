@@ -23,7 +23,7 @@ $script:LvSyntax = @{
     update  = @{ Usage = 'lv update [<tag>] [--downgrade]'; Min = 0; Max = 1; Options = @('downgrade') }
     template = @{ Usage = 'lv template [add <file> [--capture KEY,...] | update [<file>] [--accept] | render [<file>] | clear [<file>] | rm <file>]'; Min = 0; Max = 2; Options = @('capture', 'accept') }
     run     = @{ Usage = 'lv run [<VARIABLE>=<name> ...] [--stdin <name>] [--] <command> [<arguments> ...]'; Min = 0; Max = [int]::MaxValue; Options = @('stdin') }
-    'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] [--replace] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default] | include on|off]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace', 'default') }
+    'ssh-key' = @{ Usage = 'lv ssh-key [list | new <name> [--host <user@host>]... [--shared] [--type ed25519|rsa|ecdsa] [--comment <text>] [--overwrite] [--replace] | hosts <name> [<user@host> ...] | path <name> | tools [<dir> | --default] | include on|off | clean]'; Min = 0; Max = [int]::MaxValue; Options = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace', 'default') }
     ssh     = @{ Usage = 'lv ssh <name> [<user@host>] [-- <ssh arguments>]   (the host: a word with @, or one of the key''s hosts)'; Min = 1; Max = [int]::MaxValue; Options = @() }
     scp     = @{ Usage = 'lv scp <name> -- <scp arguments>'; Min = 1; Max = [int]::MaxValue; Options = @() }
     'user-secrets' = @{ Usage = 'lv user-secrets [list [<id|project>] | set <id|project> <key> [--entry <name[#part]>] [--personal] | get <id|project> <key> [--show] | pick | untrack <id|project> <key> | load [<id|project>] [--overwrite] | clear [<id|project>]]'; Min = 0; Max = 3; Options = @('entry', 'personal', 'show', 'overwrite') }
@@ -34,7 +34,7 @@ $script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'l
 $script:LvSubcommands = @{
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
-    'ssh-key' = @('list', 'new', 'hosts', 'path', 'tools', 'include')
+    'ssh-key' = @('list', 'new', 'hosts', 'path', 'tools', 'include', 'clean')
     'user-secrets' = @('list', 'set', 'get', 'pick', 'untrack', 'load', 'clear')
 }
 $script:LvEntryCommands = @('get', 'clip', 'rm', 'mark', 'set', 'restore')
@@ -184,6 +184,7 @@ SSH keys (for SSH to hosts; files in ~/.ssh/<repository>/)
   ssh-key hosts <name> [<user@host> ...]   the hosts a key is for; none clears them
   ssh-key path <name>                  the key file, for tools that take -i
   ssh-key tools [<dir> | --default]    the OpenSSH folder in use; <dir> replaces Windows OpenSSH on this PC
+  ssh-key clean                        deletes the keys of clones that no longer exist, after one confirmation
   ssh-key include on|off               adds or removes 'Include ~/.ssh/*/lv.config' in ~/.ssh/config, so other
                                        OpenSSH tools use the keys for their hosts
   ssh <name> [<user@host>] [-- <args>] connects with the key; the host may be left out when the key has one.
@@ -389,6 +390,8 @@ Details: Get-Help Invoke-LocalVault -Full
                 foreach ($other in $others) {
                     if ($listed -notcontains [IO.Path]::GetFullPath((Join-Path $here $other))) { $next.Add("lv start --path $other   another vault of this repository") }
                 }
+                $orphans = @([LocalVault.Engine.SshKeyCleanup]::FindOrphans((Join-Path ([LocalVault.Core.StoredPathRules]::HomeDirectory) '.ssh')))
+                if ($orphans.Count -gt 0) { $next.Add("lv ssh-key clean   $($orphans.Count) orphaned SSH keys: their clones were deleted") }
                 $next.Add('lv   all commands')
                 $suffix = if ($options.ContainsKey('path')) { " --path $($options.path)" } else { '' }
                 $vaultCommands = 'lv list', 'lv set <name>'
@@ -626,12 +629,12 @@ Details: Get-Help Invoke-LocalVault -Full
             'ssh-key' {
                 $sub = if ($words.Count -eq 0) { 'list' } else { $words[0] }
                 $rest = @($words | Select-Object -Skip 1)
-                $allowed = @{ list = @(); new = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace'); hosts = @(); path = @(); tools = @('default'); include = @() }
+                $allowed = @{ list = @(); new = @('host', 'shared', 'type', 'comment', 'overwrite', 'replace'); hosts = @(); path = @(); tools = @('default'); include = @(); clean = @() }
                 if (-not $allowed.ContainsKey($sub)) { & $fail "Unknown ssh-key command '$sub'." }
                 foreach ($name in $options.Keys) {
                     if ($name -notin 'path', 'help' -and $allowed[$sub] -notcontains $name) { & $fail "lv ssh-key $sub doesn't take --$name." }
                 }
-                $expected = @{ list = 0; new = 1; path = 1; include = 1 }
+                $expected = @{ list = 0; new = 1; path = 1; include = 1; clean = 0 }
                 if ($expected.ContainsKey($sub) -and $rest.Count -ne $expected[$sub]) { & $fail "lv ssh-key $sub takes $($expected[$sub]) word(s) after '$sub'." }
                 if ($sub -eq 'hosts' -and $rest.Count -lt 1) { & $fail 'lv ssh-key hosts needs the key name.' }
                 if ($sub -eq 'tools' -and ($rest.Count -gt 1 -or ($rest.Count -eq 1 -and $options['default']))) { & $fail 'lv ssh-key tools takes a folder or --default, not both.' }
@@ -654,6 +657,11 @@ Details: Get-Help Invoke-LocalVault -Full
                         $choice = if ($rest.Count -eq 1) { @{ Directory = $rest[0] } } elseif ($options['default']) { @{ Default = $true } } else { @{} }
                         $tools = Set-VaultSshTools @choice
                         "OpenSSH: $($tools.Directory)$(if ($tools.IsDefault) { ' (Windows OpenSSH)' } else { " (from $($tools.Settings))" })"
+                    }
+                    'clean' {
+                        $removed = @(Remove-VaultSshOrphan)
+                        if ($removed.Count -eq 0) { 'No orphaned SSH keys.' }
+                        else { $removed | Format-Table Repository, Key, LastWrite, Action -AutoSize }
                     }
                     'include' {
                         if ($rest[0] -notin 'on', 'off') { & $fail 'lv ssh-key include takes on or off.' }

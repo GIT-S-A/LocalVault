@@ -224,9 +224,15 @@ public sealed class ClearVaultCommand : VaultCmdletBase
     protected override void Run()
     {
         BackupSettings? backup = null;
+        IReadOnlyList<VaultEntry> sshKeys = [];
         try
         {
-            backup = File.Exists(Location.Path) ? ReadVault(ignoreLegacy: true).Body.Backup : null;
+            if (File.Exists(Location.Path))
+            {
+                var body = ReadVault(ignoreLegacy: true).Body;
+                backup = body.Backup;
+                sshKeys = [.. body.Entries.Where(e => e is { IsMissing: false, Ssh: not null })];
+            }
         }
         catch (VaultException ex)
         {
@@ -263,6 +269,7 @@ public sealed class ClearVaultCommand : VaultCmdletBase
         ClearUserSecrets();
         VaultFile.Delete();
         Say($"Deleted {Location.Path}");
+        ReleaseSshKeys(sshKeys);
         DeleteLeftoverBackups(leftovers);
         if (rendered.Count > 0 && (!IsInteractive || Confirm($"Also delete the files written from its templates ({string.Join(", ", rendered.Select(t => t.Display))})? They hold its values in plain text.")))
         {
@@ -273,6 +280,20 @@ public sealed class ClearVaultCommand : VaultCmdletBase
 
             Say($"Deleted {string.Join(", ", rendered.Select(t => t.Display))}");
         }
+    }
+
+    private void ReleaseSshKeys(IReadOnlyList<VaultEntry> sshKeys)
+    {
+        try
+        {
+            ReportReleasedSshKeys(SshKeyCleanup.Release(Location.Path, sshKeys));
+        }
+        catch (Exception ex) when (ex is VaultException or IOException or UnauthorizedAccessException)
+        {
+            WriteWarning($"SSH keys of {Location.Path} not cleaned up: {ex.Message}");
+        }
+
+        WarnOrphanedSshKeys();
     }
 
     private void ClearUserSecrets()

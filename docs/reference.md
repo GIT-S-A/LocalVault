@@ -38,6 +38,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [New-VaultSshKey](#new-vaultsshkey): Creates an SSH key pair for the hosts of a project and stores it in the vault.
 - [Register-VaultStore](#register-vaultstore): Defines a store on this PC or in the project.
 - [Remove-VaultEntry](#remove-vaultentry): Deletes one entry from a vault.
+- [Remove-VaultSshOrphan](#remove-vaultsshorphan): Deletes the SSH keys of clones that no longer exist on this PC.
 - [Remove-VaultTemplate](#remove-vaulttemplate): Stops managing a templated file.
 - [Remove-VaultUserSecret](#remove-vaultusersecret): Stops tracking a .NET user secret.
 - [Resolve-VaultEntry](#resolve-vaultentry): Gets a secret for a scope, or the shared secret when the scope has none.
@@ -666,6 +667,19 @@ a console, it deletes them. The templates stay.
 The .NET user secrets tracked for this vault hold its values in plain text too. In a console, the
 cmdlet asks whether to remove them, as `Clear-VaultUserSecret` does; without a console, it removes
 them. Values changed in `secrets.json` stay.
+
+For each SSH key of the vault, the cmdlet removes the vault from the clones that the key folder's
+marker lists:
+
+| Case | Result |
+| --- | --- |
+| Another clone on this PC still uses the key | The key files stay; the cmdlet names the clones. |
+| No clone uses it, and the file is the one LocalVault wrote | The key file, its `.pub` and its `.old` files are deleted. |
+| No clone uses it, and the file was changed | The files stay, with a warning. |
+
+A key folder left without keys loses its marker and `lv.config`, and is deleted when empty. Files
+that the marker doesn't list stay, and `~/.ssh` itself stays. Last, the cmdlet warns about orphaned
+SSH keys, as `Get-VaultEntryList` does.
 
 ### Examples
 
@@ -1719,6 +1733,8 @@ the store, `Changed` when it changed since the last save or load, and `Saved` ot
 The cmdlet writes a warning when the vault has a store and shared entries aren't saved to it. It
 also warns about the entries that exist only on this machine when the vault wasn't exported in the
 last 30 days: local entries and personal values, or every entry when the vault has no store.
+Orphaned SSH keys on this PC, whose clones were all deleted, give the warning
+`N orphaned SSH keys: lv ssh-key clean`. No store is opened for these checks.
 
 When the vault file doesn't exist and the same folder contains `secrets.local.clixml`, the cmdlet
 reads that file.
@@ -2946,6 +2962,7 @@ it says that the vault is missing or empty.
 | `ssh-key path` | `<name>` | `Get-VaultSshKeyPath` |
 | `ssh-key tools` | `[<dir> \| --default]` | `Set-VaultSshTools` |
 | `ssh-key include` | `on\|off` | `Set-VaultSshInclude` |
+| `ssh-key clean` | | `Remove-VaultSshOrphan` (asks one confirmation) |
 | `ssh` | `<name> [<user@host>] [-- <ssh arguments>]` | `Invoke-VaultSsh`: the second word is `-Target` when it holds `@` or is one of the key's hosts; the other words are `-ArgumentList` |
 | `scp` | `<name> -- <scp arguments>` | `Invoke-VaultScp` (`-ArgumentList`) |
 | `user-secrets` | `[list] [<id\|project>]` | `Get-VaultUserSecretList` |
@@ -3914,6 +3931,87 @@ Shows what would happen if the cmdlet runs. The cmdlet isn't run.
 ### Notes
 
 `lv rm <name>` runs this cmdlet.
+
+## Remove-VaultSshOrphan
+
+Deletes the SSH keys of clones that no longer exist on this PC.
+
+### Syntax
+
+```text
+Remove-VaultSshOrphan [-WhatIf] [-Confirm] [<CommonParameters>]
+```
+
+### Description
+
+Each folder `~/.ssh/<repository>/` that holds SSH keys of LocalVault has a marker that lists, for
+each key, the vaults that use it. A key is orphaned when none of these vault files exists any more,
+for example after a clone was deleted without `Clear-Vault`.
+
+The `Remove-VaultSshOrphan` cmdlet lists the orphaned keys of every such folder, with the repository,
+the key and the time it was last written, and asks one confirmation for all of them. It then removes
+the missing vaults from the markers and deletes each orphaned key with the rules of `Clear-Vault`:
+a key file changed since LocalVault wrote it stays, with a warning. A folder left without keys is
+deleted. Nothing is deleted without the confirmation.
+
+`Get-VaultEntryList`, `lv start` and `Clear-Vault` report orphaned keys; they never delete them.
+
+### Examples
+
+#### Example 1 - Delete orphaned keys after a confirmation
+
+```powershell
+Remove-VaultSshOrphan
+```
+
+#### Example 2 - List orphaned keys without deleting them
+
+```powershell
+Remove-VaultSshOrphan -WhatIf
+```
+
+### Parameters
+
+#### -Confirm
+
+Prompts you for confirmation before running the cmdlet.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | cf |
+
+#### -WhatIf
+
+Shows what would happen if the cmdlet runs. The cmdlet isn't run.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | wi |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**LocalVault.PowerShell.VaultSshOrphanInfo**: This cmdlet returns one object per orphaned key: the **Repository** folder, the **Key** file name,
+the **LastWrite** time and the **Action** taken, `Deleted` or `Kept`.
+
+### Notes
+
+`lv ssh-key clean` runs this cmdlet.
 
 ## Remove-VaultTemplate
 

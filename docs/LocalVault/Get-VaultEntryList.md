@@ -38,6 +38,8 @@ the store, `Changed` when it changed since the last save or load, and `Saved` ot
 The cmdlet writes a warning when the vault has a store and shared entries aren't saved to it. It
 also warns about the entries that exist only on this machine when the vault wasn't exported in the
 last 30 days: local entries and personal values, or every entry when the vault has no store.
+Orphaned SSH keys on this PC, whose clones were all deleted, give the warning
+`N orphaned SSH keys: lv ssh-key clean`. No store is opened for these checks.
 
 When the vault file doesn't exist and the same folder contains `secrets.local.clixml`, the cmdlet
 reads that file.

@@ -132,6 +132,10 @@ Defines a store on this PC or in the project.
 
 Deletes one entry from a vault.
 
+### [Remove-VaultSshOrphan](Remove-VaultSshOrphan.md)
+
+Deletes the SSH keys of clones that no longer exist on this PC.
+
 ### [Remove-VaultTemplate](Remove-VaultTemplate.md)
 
 Stops managing a templated file.
