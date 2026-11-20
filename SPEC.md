@@ -105,7 +105,7 @@ body  := { schema: 5|6, exported?: ISO-8601 UTC, lastExported?: ISO-8601 UTC, en
 - marker `~/.ssh/<repo>/.localvault` (⊥ secret, UTF-8 JSON) `{ schema: 1, origin, keys: { <file>: { hash: hex SHA-256 of file bytes, writtenAt: ISO-8601 UTC, writtenBy: <vault path>, users: [<vault path>...] } } }`; lock `.localvault.lock` (V3 rules).
 - `~/.ssh/<repo>/lv.config` (V134): one block per host of each entry.
 - KeePass: attachment `<file>` (value), `<file>.old` (previous); `LocalVault.SshType`, `LocalVault.SshPublicKey`, `LocalVault.SshHosts` (one per line), `LocalVault.SshAgent` = `true`, `LocalVault.ReplacedAt`; personal value → `LocalVault.Personal` = `true` (V142). Content hash of ssh-key entry covers value, previous & hosts; declaration hash (V118) covers hosts.
-- orphan := marker user whose vault file ⊥ exists (V133).
+- orphan := key in a marker whose users' vault files all ⊥ exist (users ∅ included: writes drop dead users per V126) (V133).
 
 ### Hello
 
@@ -577,7 +577,7 @@ T85|x|personal store (`stores.json` `personal`, `-Personal`/`--personal`), perso
 T87|x|ssh-key entries: `New-VaultSshKey`, hosts, list, path, OpenSSH lookup & `settings.json`, marker (adopt, refuse, users), replacement w/ `previous`, body schema 5, C6 & `__SshPrivateKey` message|C6,I.SSH keys,I.PC settings,V122-V124,V126,V127,V135,V138-V143
 T88|x|`lv load` prompt for missing personal key (adopt, agent, KeePass reference, new pair); personal store offer when none|V115,V125
 T89|x|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, Include opt-in & `lv.config`|V128,V129,V134,V136
-T90|.|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
+T90|x|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
 T91|x|references resolved by module (`LocalVault.Ref`, kind `reference`), any PC store for personal values, shared refs into vault store | project `source` stores; `-ReferenceStore`/`--ref-store`, `-Source`/`--source`|I.References,V131,V132
 T92|.|`Reset-VaultEntry` / `lv reset`|V137
 T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset, .NET user secrets; beta19|C11
