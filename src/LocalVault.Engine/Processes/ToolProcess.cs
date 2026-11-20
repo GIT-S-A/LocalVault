@@ -7,7 +7,38 @@ public sealed record ToolResult(int ExitCode, string Output, string Error);
 
 public static class ToolProcess
 {
-    public static ToolResult Run(string executable, IEnumerable<string> arguments, TimeSpan timeout)
+    private static readonly TimeSpan TickInterval = TimeSpan.FromMilliseconds(120);
+
+    public static ToolResult Run(string executable, IEnumerable<string> arguments, TimeSpan timeout) =>
+        Run(executable, arguments, process =>
+        {
+            if (!process.WaitForExit(timeout))
+            {
+                process.Kill(entireProcessTree: true);
+                throw new VaultException($"'{Path.GetFileName(executable)}' did not finish within {timeout.TotalSeconds} s.");
+            }
+        });
+
+    public static ToolResult Run(string executable, IEnumerable<string> arguments, Action tick, Func<bool> cancelled)
+    {
+        ArgumentNullException.ThrowIfNull(tick);
+        ArgumentNullException.ThrowIfNull(cancelled);
+        return Run(executable, arguments, process =>
+        {
+            while (!process.WaitForExit(TickInterval))
+            {
+                if (cancelled())
+                {
+                    process.Kill(entireProcessTree: true);
+                    throw new OperationCanceledException($"'{Path.GetFileName(executable)}' was cancelled.");
+                }
+
+                tick();
+            }
+        });
+    }
+
+    private static ToolResult Run(string executable, IEnumerable<string> arguments, Action<Process> wait)
     {
         ArgumentNullException.ThrowIfNull(arguments);
         var start = new ProcessStartInfo(executable)
@@ -38,12 +69,7 @@ public static class ToolProcess
             process.StandardInput.Close();
             var output = process.StandardOutput.ReadToEndAsync();
             var error = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(timeout))
-            {
-                process.Kill(entireProcessTree: true);
-                throw new VaultException($"'{Path.GetFileName(executable)}' did not finish within {timeout.TotalSeconds} s.");
-            }
-
+            wait(process);
             process.WaitForExit();
             return new ToolResult(process.ExitCode, output.Result, error.Result);
         }

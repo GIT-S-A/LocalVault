@@ -7,7 +7,7 @@ using LocalVault.Engine;
 
 namespace LocalVault.PowerShell;
 
-public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
+public abstract partial class VaultCmdletBase : PSCmdlet, IVaultHost
 {
     private VaultLocation? location;
     private VaultFile? store;
@@ -164,19 +164,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     protected string? OriginUrl => Location.ReadOrigin()?.Url;
 
-    internal void WriteKeyFile(VaultEntry entry, bool overwrite)
-    {
-        ArgumentNullException.ThrowIfNull(entry);
-        var plan = SshKeyFiles.Write(entry, Location.Path, OriginUrl, overwrite, Now);
-        if (plan.Refused)
-        {
-            WriteWarning(SshKeyFiles.Describe(plan, entry.Name));
-        }
-        else if (plan.State == SshKeyWriteState.Write)
-        {
-            Say(SshKeyFiles.Describe(plan, entry.Name));
-        }
-    }
+    internal void WriteKeyFile(VaultEntry entry, bool overwrite) => WriteKeyFile(Location, entry, overwrite);
 
     internal void AdoptNewerSshKeys(IReadOnlyList<VaultLocation> vaults)
     {
@@ -221,15 +209,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
             var entries = RepositoryVaults.StoreFor(location).Read().Body.Entries;
             foreach (var key in entries.Where(e => e.Ssh is not null && !e.IsMissing))
             {
-                var plan = SshKeyFiles.Write(key, location.Path, location.ReadOrigin()?.Url, overwrite: false, Now);
-                if (plan.Refused)
-                {
-                    WriteWarning(SshKeyFiles.Describe(plan, key.Name));
-                }
-                else if (plan.State == SshKeyWriteState.Write)
-                {
-                    Say(SshKeyFiles.Describe(plan, key.Name));
-                }
+                WriteKeyFile(location, key, overwrite: false);
             }
 
             foreach (var entry in entries.Where(e => e.IsRequired && e.IsFile && e.IsUnderHome && e.Ssh is null && !e.IsHello))
@@ -260,6 +240,7 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
     {
         ArgumentNullException.ThrowIfNull(access);
         ArgumentNullException.ThrowIfNull(vaults);
+        AdoptMissingSshKeys(vaults, only);
         var missing = vaults
             .Select(location => (Location: location, Entries: RepositoryVaults.StoreFor(location).Read().Body.Entries
                 .Where(entry => entry.IsMissing && (only is null || only.Contains(entry.Name)))
@@ -282,10 +263,23 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
         }
 
         var typed = new List<(VaultLocation Location, VaultEntry Value)>();
+        var written = new List<VaultLocation>();
+        var keys = 0;
         foreach (var (location, entries) in missing)
         {
             foreach (var entry in entries)
             {
+                if (entry.IsSshKeyShape)
+                {
+                    if (AskSshKey(access, location, entry))
+                    {
+                        keys++;
+                        written.Add(location);
+                    }
+
+                    continue;
+                }
+
                 Say($"{RepositoryVaults.Label(location)}: {entry.Name} is required{(entry.RequiredNote is { } note ? $" ({note})" : string.Empty)}. Empty skips it.");
                 if (AskRequiredValue(location, entry) is { } value)
                 {
@@ -294,12 +288,6 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
             }
         }
 
-        if (typed.Count == 0)
-        {
-            return;
-        }
-
-        var written = new List<VaultLocation>();
         foreach (var group in typed.GroupBy(item => item.Location))
         {
             Report(RepositoryVaults.StoreFor(group.Key).Update(body =>
@@ -312,14 +300,22 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
             written.Add(group.Key);
         }
 
-        Say($"Stored {typed.Count} value(s) in the vault.");
-        if (access.Registry.Personal is not { } personal)
+        var count = typed.Count + keys;
+        if (count == 0)
         {
-            WriteWarning("These values are only on this PC: no personal store is defined. Name one with lv store set <name> --personal, then run lv save.");
             return;
         }
 
-        if (Confirm($"Save the {typed.Count} value(s) to your personal store '{personal.Name}' too?", defaultYes: true))
+        Say($"Stored {count} value(s) in the vault.");
+        written = [.. written.Distinct()];
+        if (access.Registry.Personal is { } personal)
+        {
+            if (Confirm($"Save the {count} value(s) to your personal store '{personal.Name}' too?", defaultYes: true))
+            {
+                VaultSync.Save(this, access, written, (_, _) => false, personalOnly: true);
+            }
+        }
+        else if (OfferPersonalStore(access) is not null)
         {
             VaultSync.Save(this, access, written, (_, _) => false, personalOnly: true);
         }
@@ -327,12 +323,6 @@ public abstract class VaultCmdletBase : PSCmdlet, IVaultHost
 
     private VaultEntry? AskRequiredValue(VaultLocation location, VaultEntry entry)
     {
-        if (entry.IsSshKeyShape)
-        {
-            Say($"{entry.Name} is an SSH key: create yours with lv ssh-key new {entry.Name}.");
-            return null;
-        }
-
         if (entry.IsFileShape)
         {
             var declared = entry.RequiredPath is { } path ? StoredPathRules.Resolve(location.Directory, path) : null;

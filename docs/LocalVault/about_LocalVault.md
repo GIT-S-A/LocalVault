@@ -284,9 +284,11 @@ rules as shared entries. `lv load` reads them back. A personal store that is
 also a mirror holds a copy of the shared entries as well.
 
 After it loads, `lv load` asks in a console for each required value still
-missing on this PC, showing its note; an empty answer skips it. It then
-offers to save the values typed to the personal store, or warns that they
-stay on this PC when there is none. A command that reads a missing required
+missing on this PC, showing its note; an empty answer skips it. A missing
+SSH key is taken from a file that another clone wrote, or chosen from the SSH
+agent, a KeePass entry or a new key pair. `lv load` then offers to save the
+values to the personal store. Without one, it offers to make one of this
+PC's stores the personal store, or warns that the values stay on this PC. A command that reads a missing required
 value asks for it the same way. Without a console, the missing names are
 listed and nothing is asked.
 

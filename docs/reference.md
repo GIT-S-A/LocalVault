@@ -324,9 +324,11 @@ rules as shared entries. `lv load` reads them back. A personal store that is
 also a mirror holds a copy of the shared entries as well.
 
 After it loads, `lv load` asks in a console for each required value still
-missing on this PC, showing its note; an empty answer skips it. It then
-offers to save the values typed to the personal store, or warns that they
-stay on this PC when there is none. A command that reads a missing required
+missing on this PC, showing its note; an empty answer skips it. A missing
+SSH key is taken from a file that another clone wrote, or chosen from the SSH
+agent, a KeePass entry or a new key pair. `lv load` then offers to save the
+values to the personal store. Without one, it offers to make one of this
+PC's stores the personal store, or warns that the values stay on this PC. A command that reads a missing required
 value asks for it the same way. Without a console, the missing names are
 listed and nothing is asked.
 
@@ -2736,12 +2738,25 @@ vault's group there and fills in the values of the vault's required entries, wit
 shared entries. It takes nothing else from that group. A personal store that can't be opened gives a
 warning and the load goes on.
 
+A missing personal SSH key whose file another clone of the same repository already wrote, and whose
+marker lists it, is taken from that file without a question. The cmdlet reports the path and the
+vault that wrote it.
+
 Last, in a console, the cmdlet asks for each required value still missing, showing its note: a user
 name and a password for a credential declaration, a hidden value otherwise. An empty answer skips it.
-It then offers to save the values typed to the personal store, or warns that they stay on this PC
-when there is none. Without a console, it lists the missing names and asks nothing. For a file
-declaration, it asks for the path of the file; an empty answer takes the declared path when that
-file exists.
+For a file declaration, it asks for the path of the file; an empty answer takes the declared path
+when that file exists. For an SSH key, it asks the SSH agent for its keys, then offers these choices:
+
+| Choice | Value |
+| --- | --- |
+| A key from the SSH agent | The public key of the chosen agent key; shown only when the agent holds keys. |
+| A private key in a KeePass entry | A reference to the entry, as `Set-VaultEntry -Reference`. |
+| A new key pair | A new ed25519 key, as `New-VaultSshKey`. |
+| Skip | Nothing; asked again at the next load. |
+
+The cmdlet then offers to save the values to the personal store. Without a personal store, it offers
+to make one of this PC's stores the personal store, then saves the values there. Otherwise it warns
+that they stay on this PC. Without a console, it lists the missing names and asks nothing.
 
 Then the cmdlet writes each required file whose path is under the user's profile (`~/`), such as an
 SSH private key, when the file doesn't exist yet, readable by the current user, SYSTEM and

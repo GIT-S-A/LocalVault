@@ -7,6 +7,39 @@ public sealed record AdoptedSshKey(VaultEntry Entry, string WrittenBy);
 
 public static class SshKeyAdoption
 {
+    public static AdoptedSshKey? FindForMissing(VaultEntry declaration, string? origin, DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(declaration);
+        var target = SshKeyFiles.TargetOf(declaration);
+        var directory = Path.GetDirectoryName(target)!;
+        if (!File.Exists(Path.Combine(directory, SshKeyPath.MarkerFileName)) || !File.Exists(target))
+        {
+            return null;
+        }
+
+        using var folder = SshKeyFolder.Open(directory);
+        if (!folder.BelongsTo(origin) || !folder.Keys.TryGetValue(Path.GetFileName(target), out var record))
+        {
+            return null;
+        }
+
+        var key = File.ReadAllBytes(target);
+        try
+        {
+            var publicKey = OpenSshPrivateKey.PublicKeyOf(key);
+            var ssh = new SshKeyInfo(SshKeyInfo.TypeOf(publicKey), publicKey, []);
+            return new AdoptedSshKey(VaultEntry.NewSshKey(declaration.Name, key, declaration.RequiredPath!, ssh, [], now), record.WrittenBy);
+        }
+        catch (VaultException)
+        {
+            return null;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
+    }
+
     public static IReadOnlyList<AdoptedSshKey> FindNewer(VaultBody body, string? origin, DateTimeOffset now)
     {
         ArgumentNullException.ThrowIfNull(body);

@@ -18,15 +18,7 @@ public abstract class SshKeyCmdletBase : VaultCmdletBase
     public const string MissingSource = "missing";
     public const string ReferenceSource = "reference";
 
-    protected string RepositoryName
-    {
-        get
-        {
-            var origin = Location.ReadOrigin();
-            var root = Location.GitRoot ?? Location.Directory;
-            return SshKeyPath.RepositoryNameOf(origin?.Url, origin?.Folder ?? System.IO.Path.GetFileName(System.IO.Path.TrimEndingDirectorySeparator(root)));
-        }
-    }
+    protected string RepositoryName => RepositoryNameOf(Location);
 
     protected static SshTools Tools => SshTools.Find(new PcSettings(PcSettings.DefaultPath));
 
@@ -62,8 +54,6 @@ public abstract class SshKeyCmdletBase : VaultCmdletBase
 [OutputType(typeof(VaultSshKeyInfo))]
 public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
 {
-    private static readonly TimeSpan ClipboardTime = TimeSpan.FromMinutes(2);
-
     [Parameter(Mandatory = true, Position = 0)]
     public string Name { get; set; } = string.Empty;
 
@@ -162,11 +152,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             Say($"{name}: the old key stays as a fallback until every host accepts the new one.");
         }
 
-        var info = Describe(stored);
-        Say($"Public key of {name} ({info.Fingerprint}):");
-        Say(info.PublicKey!);
-        CopyToClipboard(info.PublicKey!);
-        WriteWarning($"{name} is unusable until someone with access adds this public key to {(hosts.Count > 0 ? string.Join(", ", hosts) : "the hosts it is for")}.");
+        AnnouncePublicKey(name, stored.Ssh!, hosts);
         if (!personal)
         {
             WriteWarning($"{name} is shared: its private key is readable by everyone with access to {StoreLabel()}.");
@@ -176,7 +162,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             WriteWarning($"{name} is only on this PC: no personal store is defined. Name one with lv store set <name> --personal, then run lv save.");
         }
 
-        WriteObject(info);
+        WriteObject(Describe(stored));
     }
 
     private void RefuseReplacementWithoutStore(EntryName name, bool personal)
@@ -264,19 +250,6 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
         catch (VaultException)
         {
             return "the project's store";
-        }
-    }
-
-    private void CopyToClipboard(string publicKey)
-    {
-        try
-        {
-            SecureClipboard.SetText(publicKey, ClipboardTime);
-            Say($"The public key is on the clipboard for {ClipboardTime.TotalMinutes} minutes.");
-        }
-        catch (Exception ex) when (ex is VaultException or System.ComponentModel.Win32Exception)
-        {
-            WriteVerbose($"Clipboard not available: {ex.Message}");
         }
     }
 }

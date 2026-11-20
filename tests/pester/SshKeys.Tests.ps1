@@ -204,6 +204,32 @@ Describe 'SSH keys' {
         finally { Clear-TestFolder -Folder (Split-Path $other) }
     }
 
+    It 'uses the personal key another clone wrote when lv load finds it missing' {
+        Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+        Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+        $mine = New-VaultSshKey -Path $script:vault -Name me -HostName me@srv1.example.com 6>$null 3>$null
+        $other = Initialize-TestRepository
+        $otherVault = Join-Path $other 'secrets.local.lv'
+        $module = Join-Path $env:LOCALVAULT_MODULE_PATH 'LocalVault.psd1'
+        try {
+            $saved = 'pester master 1' | pwsh -NoProfile -NonInteractive -Command "Import-Module '$module'; Export-VaultToStore -Path '$script:vault'" 2>&1 | Out-String
+            $LASTEXITCODE | Should -Be 0 -Because $saved
+
+            $loaded = 'pester master 1' | pwsh -NoProfile -NonInteractive -Command "Import-Module '$module'; Import-VaultFromStore -Path '$otherVault' 6>&1" 2>&1 | Out-String
+            $LASTEXITCODE | Should -Be 0 -Because $loaded
+
+            $key = Join-Path $script:keyFolder 'me'
+            $loaded | Should -Match ([regex]::Escape("me: using the key in $key, written there by $((Resolve-Path $script:vault).Path)"))
+            $loaded | Should -Not -Match 'required values not set'
+            $adopted = Get-VaultSshKey -Path $otherVault -Name me
+            $adopted.Source | Should -Be 'file'
+            $adopted.Fingerprint | Should -Be $mine.Fingerprint
+            $marker = Get-Content -LiteralPath (Join-Path $script:keyFolder '.localvault') -Raw | ConvertFrom-Json
+            $marker.keys.me.users | Should -Contain (Resolve-Path $otherVault).Path
+        }
+        finally { Clear-TestFolder -Folder (Split-Path $other) }
+    }
+
     Context 'a clone whose key another clone replaced' {
         BeforeEach {
             Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
