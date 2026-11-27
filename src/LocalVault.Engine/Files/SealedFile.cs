@@ -10,7 +10,7 @@ public static class SealedFile
         var full = Path.GetFullPath(destination);
         if (File.Exists(full) && !overwrite)
         {
-            throw new VaultException($"'{full}' already exists. Nothing was written; use -Overwrite (--overwrite) to replace it.");
+            throw new VaultException($"'{full}' already exists. Nothing was written; use -Overwrite to replace it.");
         }
 
         var directory = Path.GetDirectoryName(full)!;

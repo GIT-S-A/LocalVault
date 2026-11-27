@@ -55,7 +55,7 @@ public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
     }
 
     internal const string PersonalOnPcOnly =
-        "The personal store belongs to this PC: give -Personal without -Project (lv store add|set <name> --personal).";
+        "The personal store belongs to this PC: give -Personal without -Project (lv store add|set ... -Personal).";
 
     internal void SayPersonal(StoreDefinition store)
     {
@@ -67,7 +67,7 @@ public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
     }
 
     internal const string SourceInProjectOnly =
-        "-Source marks a project store whose entries shared values may point to: give it with -Project (lv store add|set <name> --project --source).";
+        "-Source marks a project store whose entries shared values may point to: give it with -Project (lv store add|set ... -Project -Source).";
 
     internal string OpenForId(StoreDefinition store)
     {
@@ -79,7 +79,7 @@ public abstract class StoreDefinitionCmdletBase : VaultCmdletBase
 
     internal void SaySource(string name, bool source) =>
         Say(source
-            ? $"Shared entries of this project may take their values from store '{name}': lv set <name> --ref \"<group/title>\" --ref-store {name}."
+            ? $"Shared entries of this project may take their values from store '{name}': lv set <name> -Reference \"<group/title>\" -ReferenceStore {name}."
             : $"Shared entries of this project no longer take values from store '{name}'; lv load skips the ones that still point there.");
 
     internal string Rooted(string path) =>
@@ -156,7 +156,7 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         if (KeyFile is not null || UnlockWith is not null)
         {
             throw new VaultException(
-                "A project store can't name a key file or an unlocking store: those are personal. Add the same target on this PC with lv store add <name> <target> [<keyfile>] [--unlock-with <store>].");
+                "A project store can't name a key file or an unlocking store: those are personal. Add the same target on this PC with lv store add <target> -Name <name> [-KeyFile <file>] [-UnlockWith <store>].");
         }
 
         var project = RequireProject();
@@ -171,7 +171,7 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         if (Source)
         {
             id ??= OpenForId(target is null
-                ? Registry.FindByName(name) ?? throw new VaultException($"No store named '{name}' on this PC: add it with lv store add {name} <path to .kdbx> first, so that its database id is known. Nothing was changed.")
+                ? Registry.FindByName(name) ?? throw new VaultException($"No store named '{name}' on this PC: add it with lv store add <path to .kdbx> -Name {name} first, so that its database id is known. Nothing was changed.")
                 : new StoreDefinition(name, StoreTypes.Of(target), target, null, StoreScope.Project));
         }
 
@@ -188,7 +188,7 @@ public sealed class RegisterVaultStoreCommand : StoreDefinitionCmdletBase
         }
         if (target is null && Registry.FindByName(name) is null)
         {
-            WriteWarning($"No store named '{name}' on this PC yet. Add it with lv store add {name} <target>.");
+            WriteWarning($"No store named '{name}' on this PC yet. Add it with lv store add <target> -Name {name}.");
         }
 
         WriteObject(ProjectEntries(project).Single(info => string.Equals(info.Name, name, StringComparison.OrdinalIgnoreCase)));
@@ -297,7 +297,7 @@ public sealed class SetVaultStoreCommand : StoreDefinitionCmdletBase
         if (source == true && ProjectFile.ReadEntries(project).FirstOrDefault(entry => string.Equals(entry.Name, Name, StringComparison.OrdinalIgnoreCase)) is { Id: null } entry)
         {
             var definition = StoreResolver.Find(Name, project, Registry)
-                ?? throw new VaultException($"No store named '{Name}' on this PC: add it with lv store add {Name} <path to .kdbx> first, so that its database id is known. Nothing was changed.");
+                ?? throw new VaultException($"No store named '{Name}' on this PC: add it with lv store add <path to .kdbx> -Name {Name} first, so that its database id is known. Nothing was changed.");
             ProjectFile.RecordStoreId(project, entry.Name, definition.Id ?? OpenForId(definition));
         }
 

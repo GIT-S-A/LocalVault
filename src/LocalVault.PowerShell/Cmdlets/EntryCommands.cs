@@ -444,7 +444,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
                     },
                     WriteOptions()));
                 var what = Credential ? ", a user name and a password" : StoredPath is not null ? $", a file restored to {StoredPathRules.Normalize(StoredPath)}" : string.Empty;
-                var how = StoredPath is not null ? $"lv set {name} --file <path>" : $"lv set {name}";
+                var how = StoredPath is not null ? $"lv set {name} -FilePath <path>" : $"lv set {name}";
                 Say($"{name} is required and personal{what}: each person sets their own value with {how}; lv save shares the declaration, never the value.");
             }
 
@@ -466,7 +466,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         if (ParameterSetName == SecretSet && Value is null && ReadVault().Body.Find(name) is { IsFileShape: true } fileShaped)
         {
             throw new VaultException(
-                $"'{name}' is declared as a file{(fileShaped.RequiredPath is { } path ? $", restored to {path}" : string.Empty)}. Give it with lv set {name} --file <path> (Set-VaultEntry -FilePath).");
+                $"'{name}' is declared as a file{(fileShaped.RequiredPath is { } path ? $", restored to {path}" : string.Empty)}. Give it with lv set {name} -FilePath <path>.");
         }
 
         var before = ReadVault().Body;
@@ -562,7 +562,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
             if (!new ReferenceStores(access, Location, vaultStoreId).MayHoldSharedValues(keePass.DatabaseId))
             {
                 throw new VaultException(
-                    $"Shared values can only come from the project's own stores, and store '{store.Name}' isn't one of them. Mark it as a source with lv store set {store.Name} --project --source, or use lv require {name} for a personal value. Nothing was changed.");
+                    $"Shared values can only come from the project's own stores, and store '{store.Name}' isn't one of them. Mark it as a source with lv store set {store.Name} -Project -Source, or use lv require {name} for a personal value. Nothing was changed.");
             }
         }
 
@@ -609,7 +609,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         if (personal)
         {
             return access.Registry.Personal
-                ?? throw new VaultException("No personal store is defined on this PC: name one with lv store set <name> --personal, or give the store holding the entry with --ref-store <store>. Nothing was changed.");
+                ?? throw new VaultException("No personal store is defined on this PC: name one with lv store set <name> -Personal, or give the store holding the entry with -ReferenceStore <store>. Nothing was changed.");
         }
 
         var primary = access.Resolve(Location);
@@ -722,7 +722,7 @@ public sealed class SetVaultEntryCommand : VaultCmdletBase
         {
             throw new VaultException(key.IsMissing
                 ? $"'{name}' is declared as an SSH key. Create yours with lv ssh-key new {name} (New-VaultSshKey). Nothing was changed."
-                : $"'{name}' is an SSH key. Replace it with lv ssh-key new {name} --replace (New-VaultSshKey -Replace). Nothing was changed.");
+                : $"'{name}' is an SSH key. Replace it with lv ssh-key new {name} -Replace (New-VaultSshKey -Replace). Nothing was changed.");
         }
     }
 

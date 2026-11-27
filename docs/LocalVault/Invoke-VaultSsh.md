@@ -170,7 +170,7 @@ This cmdlet returns no output. ssh writes to the console, and `$LASTEXITCODE` ho
 
 ## NOTES
 
-`lv ssh <name> [<user@host>] [-- <ssh arguments>]` runs this cmdlet. PowerShell removes the `--`, so the second word is the host when it holds `@` or is one of the key's hosts; the other words go to ssh.
+`lv ssh <name> [<user@host>] [<ssh arguments>]` runs this cmdlet. The second word is the host when it holds `@` or is one of the key's hosts; the other words go to ssh.
 
 ## RELATED LINKS
 

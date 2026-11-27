@@ -213,7 +213,7 @@ public abstract partial class VaultCmdletBase
         var stores = access.Registry.Load();
         if (stores.Count == 0)
         {
-            throw new VaultException("no store is defined on this PC. Add the KeePass database that holds the key with lv store add <name> <path to .kdbx>.");
+            throw new VaultException("no store is defined on this PC. Add the KeePass database that holds the key with lv store add <path to .kdbx> -Name <name>.");
         }
 
         var definition = stores.Count == 1 ? stores[0] : ChooseStore(stores, access.Registry.Personal);
@@ -324,7 +324,7 @@ public abstract partial class VaultCmdletBase
 
         if (chosen is null)
         {
-            WriteWarning("These values are only on this PC: no personal store is defined. Name one with lv store set <name> --personal, then run lv save.");
+            WriteWarning("These values are only on this PC: no personal store is defined. Name one with lv store set <name> -Personal, then run lv save.");
             return null;
         }
 

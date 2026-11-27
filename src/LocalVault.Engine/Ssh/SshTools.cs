@@ -34,7 +34,7 @@ public sealed record SshTools(string Directory, bool IsDefault)
             var missing = Required.Where(tool => !File.Exists(Path.Combine(configured, tool))).ToList();
             if (missing.Count > 0)
             {
-                throw new VaultException($"sshDir '{configured}' in {settings.SettingsPath} has no {string.Join(", ", missing)}. Fix it with lv ssh-key tools <dir>, or lv ssh-key tools --default.");
+                throw new VaultException($"sshDir '{configured}' in {settings.SettingsPath} has no {string.Join(", ", missing)}. Fix it with lv ssh-key tools <dir>, or lv ssh-key tools -Default.");
             }
 
             return new SshTools(configured, IsDefault: false);

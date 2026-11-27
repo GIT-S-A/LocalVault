@@ -330,8 +330,8 @@ This cmdlet returns the store after the change: **Name**, **Scope**, **Type**, *
 
 ## NOTES
 
-`lv store set <name> [--mirror | --no-mirror] [--unlock-with <store> | --no-unlock] [--default]
-[--personal | --no-personal] [--project]` runs this cmdlet.
+`lv store set <name> [-Mirror[:$false]] [-UnlockWith <store> | -NoUnlock] [-Default]
+[-Personal[:$false]] [-Project] [-Source[:$false]]` runs this cmdlet.
 
 ## RELATED LINKS
 

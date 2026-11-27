@@ -202,7 +202,7 @@ the file is **Rendered**, and **UpToDate**, which is empty here.
 
 ## NOTES
 
-`lv template add <file> [--capture KEY,...]` runs this cmdlet.
+`lv template add <file> [-Capture KEY,...]` runs this cmdlet.
 
 ## RELATED LINKS
 

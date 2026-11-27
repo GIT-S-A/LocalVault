@@ -250,7 +250,7 @@ the number **Skipped**.
 If KeePass 2 has the same database open, reload it there before saving, or it may overwrite these
 changes.
 
-`lv save [--store <name>] [--replace a,b | --replace-all]` runs this cmdlet.
+`lv save [-Store <name>] [-Replace a,b | -ReplaceAll]` runs this cmdlet.
 
 ## RELATED LINKS
 

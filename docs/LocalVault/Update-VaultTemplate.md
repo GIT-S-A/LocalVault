@@ -190,7 +190,7 @@ This cmdlet writes messages only.
 
 ## NOTES
 
-`lv template update [<file>] [--accept]` runs this cmdlet.
+`lv template update [<file>] [-AcceptChanges]` runs this cmdlet.
 
 ## RELATED LINKS
 

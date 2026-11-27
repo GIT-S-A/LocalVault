@@ -207,7 +207,7 @@ For a file entry, this cmdlet returns the content of the file.
 ## NOTES
 
 `lv get <name>` runs this cmdlet with **AsPlainText**. It fails when its output isn't a pipeline
-or a redirection, unless you add `--show`, or the name ends with `#user` or `#url`.
+or a redirection, unless you add `-Show`, or the name ends with `#user` or `#url`.
 
 ## RELATED LINKS
 

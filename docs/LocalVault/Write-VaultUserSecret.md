@@ -135,7 +135,7 @@ This cmdlet returns no output. It reports the keys it writes.
 
 ## NOTES
 
-`lv user-secrets load [<id|project>] [--overwrite]` runs this cmdlet.
+`lv user-secrets load [<id|project>] [-Overwrite]` runs this cmdlet.
 
 ## RELATED LINKS
 

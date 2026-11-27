@@ -68,9 +68,9 @@ Describe 'Personal values taken from KeePass references' {
         Set-VaultEntry -Path $script:vault -Name 'shared' -Value (ConvertTo-TestSecret 's-1') 6>$null
         Push-Location $script:repository
         try {
-            lv @('store', 'add', 'proj', $script:projectDb, '--project', '--default') 6>$null | Out-Null
-            lv @('store', 'add', 'mine', $script:personalDb, '--personal') 6>$null | Out-Null
-            lv @('require', 'os', '--note', 'your token') 6>$null
+            lv @('store', 'add', $script:projectDb, '-Name', 'proj', '-Project', '-Default') 6>$null | Out-Null
+            lv @('store', 'add', $script:personalDb, '-Name', 'mine', '-Personal') 6>$null | Out-Null
+            lv @('require', 'os', '-Note', 'your token') 6>$null
         }
         finally { Pop-Location }
         $script:uuid = Add-TestKeePassEntry -Path $script:personalDb -Group 'Internet' -Title 'GitHub' -Value 'token-1'
@@ -82,7 +82,7 @@ Describe 'Personal values taken from KeePass references' {
     }
 
     It 'takes the value from the personal store and saves only a reference to it' {
-        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set os --ref Internet/GitHub"
+        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set os -Reference Internet/GitHub"
         $set.ExitCode | Should -Be 0 -Because $set.Output
         $set.Output | Should -Match "os comes from KeePass entry 'Internet/GitHub' in store 'mine'. lv save writes the reference to your personal store"
         Get-VaultEntry -Path $script:vault -Name 'os' -AsPlainText | Should -Be 'token-1'
@@ -101,7 +101,7 @@ Describe 'Personal values taken from KeePass references' {
     }
 
     It 'keeps a local change on this PC and refuses to save it' {
-        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set os --ref GitHub"
+        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set os -Reference GitHub"
         $set.ExitCode | Should -Be 0 -Because $set.Output
         & $script:runInChild "Set-Location '$($script:repository)'; lv save" "$($script:master)`n$($script:master)" | Out-Null
 
@@ -117,7 +117,7 @@ Describe 'Personal values taken from KeePass references' {
     }
 
     It 'refuses a shared value from a store that is not one of the project''s' {
-        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set shared --ref GitHub --ref-store mine" "$($script:master)`n$($script:master)"
+        $set = & $script:runInChild "Set-Location '$($script:repository)'; lv set shared -Reference GitHub -ReferenceStore mine" "$($script:master)`n$($script:master)"
         $set.ExitCode | Should -Not -Be 0
         $set.Output | Should -Match "store 'mine' isn't one of them"
         Get-VaultEntry -Path $script:vault -Name 'shared' -AsPlainText | Should -Be 's-1'
@@ -128,7 +128,7 @@ Describe 'Personal values taken from KeePass references' {
         Initialize-TestKeePass -Path $it -Master $script:master
         Add-TestKeePassEntry -Path $it -Group 'AD' -Title 'svc-mgmt' -Value 'ad-1' | Out-Null
         $answers = (1..4 | ForEach-Object { $script:master }) -join "`n"
-        $setup = & $script:runInChild "Set-Location '$($script:repository)'; lv store add it '$it'; lv store add it --project --source; lv set adm --ref AD/svc-mgmt --ref-store it; lv save" $answers
+        $setup = & $script:runInChild "Set-Location '$($script:repository)'; lv store add '$it' -Name it; lv store add -Name it -Project -Source; lv set adm -Reference AD/svc-mgmt -ReferenceStore it; lv save" $answers
         $setup.ExitCode | Should -Be 0 -Because $setup.Output
         Get-TestKeePassField -Path $script:projectDb -Title 'adm' -Field 'LocalVault.Kind' | Should -Be 'reference'
         Get-TestKeePassField -Path $script:projectDb -Title 'adm' -Field 'Password' | Should -BeNullOrEmpty
@@ -145,7 +145,7 @@ Describe 'Personal values taken from KeePass references' {
         Initialize-TestKeePass -Path $it -Master $script:master
         Add-TestKeePassEntry -Path $it -Group 'AD' -Title 'svc-mgmt' -Value 'ad-1' | Out-Null
         $answers = (1..4 | ForEach-Object { $script:master }) -join "`n"
-        (& $script:runInChild "Set-Location '$($script:repository)'; lv store add it '$it'; lv store add it --project --source; lv set adm --ref AD/svc-mgmt --ref-store it; lv save" $answers).ExitCode | Should -Be 0
+        (& $script:runInChild "Set-Location '$($script:repository)'; lv store add '$it' -Name it; lv store add -Name it -Project -Source; lv set adm -Reference AD/svc-mgmt -ReferenceStore it; lv save" $answers).ExitCode | Should -Be 0
 
         Unregister-VaultStore -Name 'it' | Out-Null
         Remove-Item -LiteralPath $script:vault

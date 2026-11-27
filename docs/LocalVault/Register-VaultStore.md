@@ -442,8 +442,8 @@ This cmdlet returns the store, as `Get-VaultStore` does.
 
 ## NOTES
 
-`lv store add [<name>] <target> [<keyfile>] [--default] [--unlock-with <store>] [--mirror] [--personal]` and
-`lv store add <name> [<target>] --project [--default] [--mirror]` run this cmdlet.
+`lv store add [<target>] [-Name <name>] [-KeyFile <file>] [-Default] [-UnlockWith <store>] [-Mirror]
+[-Personal] [-Project] [-Source]` runs this cmdlet.
 
 ## RELATED LINKS
 

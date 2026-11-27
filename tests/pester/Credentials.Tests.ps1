@@ -41,7 +41,7 @@ Describe 'Credential entries' {
     }
 
     It 'asks for every part on redirected input, one line each' {
-        $result = & $runChild "lv set gh --credential --path '$vault'" "jdoe`npa55word`n$seed`nhttps://one`nhttps://two`n"
+        $result = & $runChild "lv set gh -Credential -Path '$vault'" "jdoe`npa55word`n$seed`nhttps://one`nhttps://two`n"
 
         $result.ExitCode | Should -Be 0 -Because $result.Output
         Get-VaultEntry -Path $vault -Name 'gh#user' | Should -Be 'jdoe'
@@ -53,8 +53,8 @@ Describe 'Credential entries' {
     It 'turns a secret into a credential, keeping its value, and changes one part at a time' {
         Set-VaultEntry -Path $vault -Name 'gh' -Value (ConvertTo-TestSecret 'kept-1')
 
-        (& $runChild "lv set gh#user --path '$vault'" 'jdoe').ExitCode | Should -Be 0
-        (& $runChild "lv set gh#url --path '$vault'" 'https://one').ExitCode | Should -Be 0
+        (& $runChild "lv set gh#user -Path '$vault'" 'jdoe').ExitCode | Should -Be 0
+        (& $runChild "lv set gh#url -Path '$vault'" 'https://one').ExitCode | Should -Be 0
         Set-VaultEntry -Path $vault -Name 'gh' -Value (ConvertTo-TestSecret 'new-2') 6>$null
 
         $entry = Get-VaultEntryList -Path $vault -WarningAction SilentlyContinue
@@ -63,7 +63,7 @@ Describe 'Credential entries' {
         Get-VaultEntry -Path $vault -Name 'gh' -AsPlainText | Should -Be 'new-2'
         Get-VaultEntry -Path $vault -Name 'gh#url' | Should -Be 'https://one'
 
-        (& $runChild "lv set gh#user --path '$vault'" '').ExitCode | Should -Be 0
+        (& $runChild "lv set gh#user -Path '$vault'" '').ExitCode | Should -Be 0
         { Get-VaultEntry -Path $vault -Name 'gh#user' } | Should -Throw '*no user name*'
     }
 
@@ -78,9 +78,9 @@ Describe 'Credential entries' {
     It 'prints a user name and a URL with lv get' {
         Set-VaultEntry -Path $vault -Name 'gh' -Credential -UserName 'jdoe' -Password (ConvertTo-TestSecret 'pa55word') -Url 'https://one' 6>$null
 
-        $arguments = 'get', 'gh#user', '--path', $vault
+        $arguments = 'get', 'gh#user', '-Path', $vault
         lv @arguments | Should -Be 'jdoe'
-        $arguments = 'get', 'gh#url', '--path', $vault
+        $arguments = 'get', 'gh#url', '-Path', $vault
         lv @arguments | Should -Be 'https://one'
     }
 
@@ -165,8 +165,8 @@ Describe 'Credentials in a store' {
     It 'saves a credential and a teammate loads every part' {
         Set-VaultEntry -Path $mine -Name 'gh' -Credential -UserName 'jdoe' -Password (ConvertTo-TestSecret 'pa55word') -Totp (ConvertTo-TestSecret $seed) -Url 'https://github.com' 6>$null
 
-        (& $runChild "lv save --path '$mine'" $master).ExitCode | Should -Be 0
-        $loaded = & $runChild "lv load --path '$theirs'" $master
+        (& $runChild "lv save -Path '$mine'" $master).ExitCode | Should -Be 0
+        $loaded = & $runChild "lv load -Path '$theirs'" $master
         $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
 
         Get-VaultEntry -Path $theirs -Name 'gh#user' | Should -Be 'jdoe'

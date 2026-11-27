@@ -248,7 +248,7 @@ This cmdlet returns no output.
 
 ## NOTES
 
-`lv user-secrets set <id|project> <key> [--entry <name[#part]>] [--personal]` runs this cmdlet. `lv user-secrets pick` runs it with **FromFile** or with a new key. Commit `localvault.json` so that `lv load` writes the key on every clone.
+`lv user-secrets set <id|project> <key> [-Entry <name[#part]>] [-Personal]` runs this cmdlet. `lv user-secrets pick` runs it with **FromFile** or with a new key. Commit `localvault.json` so that `lv load` writes the key on every clone.
 
 ## RELATED LINKS
 

@@ -28,7 +28,7 @@ public sealed partial class KeePassStore
         ReferenceFields.Any(key => entry.Strings.ReadSafe(key).Contains(ReferenceMarker, StringComparison.OrdinalIgnoreCase));
 
     private static string FieldReferenceRefusal(EntryName name) =>
-        $"its KeePass entry uses a {{REF:}} field. Use lv set {name} --ref \"<group/title>\" instead.";
+        $"its KeePass entry uses a {{REF:}} field. Use lv set {name} -Reference \"<group/title>\" instead.";
 
     private static ItemLink ReadLink(PwEntry entry, EntryName name, bool personal)
     {

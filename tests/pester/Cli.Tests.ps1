@@ -24,7 +24,7 @@ Describe 'lv' {
     }
 
     It 'lists names without values' {
-        $arguments = 'list', '--path', $vault
+        $arguments = 'list', '-Path', $vault
         $text = lv @arguments 3>$null | Out-String
 
         $text | Should -Match '\ba\b'
@@ -33,23 +33,23 @@ Describe 'lv' {
     }
 
     It 'reads a value from redirected input' {
-        $result = & $runChild "lv set b --path '$vault'" 'from-stdin'
+        $result = & $runChild "lv set b -Path '$vault'" 'from-stdin'
 
         $result.ExitCode | Should -Be 0 -Because $result.Output
         Get-VaultEntry -Path $vault -Name 'b' -AsPlainText | Should -Be 'from-stdin'
     }
 
     It 'prints a value only into a pipe' {
-        $arguments = 'get', 'a', '--path', $vault
+        $arguments = 'get', 'a', '-Path', $vault
         lv @arguments | ForEach-Object { $_ } | Should -Be 'cli-1'
 
-        $result = & $runChild "lv get a --path '$vault'" ''
+        $result = & $runChild "lv get a -Path '$vault'" ''
         $result.Output | Should -Match 'cli-1'
     }
 
     It 'sets environment variables for the window' {
         try {
-            $arguments = 'env', 'LV_CLI_A=a', '--path', $vault
+            $arguments = 'env', 'LV_CLI_A=a', '-Path', $vault
             lv @arguments
             $env:LV_CLI_A | Should -Be 'cli-1'
         }
@@ -57,7 +57,7 @@ Describe 'lv' {
     }
 
     It 'removes an entry' {
-        $arguments = 'rm', 'a', '--path', $vault
+        $arguments = 'rm', 'a', '-Path', $vault
         lv @arguments
 
         { Get-VaultEntry -Path $vault -Name 'a' } | Should -Throw
@@ -68,19 +68,19 @@ Describe 'lv' {
         Export-Vault -Path $vault -Destination $export -Passphrase (ConvertTo-TestSecret 'cli passphrase')
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret 'changed')
 
-        $conflict = & $runChild "lv import '$export' --path '$vault'" 'cli passphrase'
+        $conflict = & $runChild "lv import '$export' -Path '$vault'" 'cli passphrase'
         $conflict.ExitCode | Should -Be 2 -Because $conflict.Output
 
-        $replaced = & $runChild "lv import '$export' --path '$vault' --replace a" 'cli passphrase'
+        $replaced = & $runChild "lv import '$export' -Path '$vault' -Replace a" 'cli passphrase'
         $replaced.ExitCode | Should -Be 0 -Because $replaced.Output
         Get-VaultEntry -Path $vault -Name 'a' -AsPlainText | Should -Be 'cli-1'
 
         (& $runChild "lv nonsense" '').ExitCode | Should -Be 1
-        (& $runChild "lv rm 'bad name!' --path '$vault'" '').ExitCode | Should -Be 1
+        (& $runChild "lv rm 'bad name!' -Path '$vault'" '').ExitCode | Should -Be 1
     }
 
     It 'refuses extra words, such as a value typed after the name' {
-        $result = & $runChild "lv set b typed-value --path '$vault'" 'from-stdin'
+        $result = & $runChild "lv set b typed-value -Path '$vault'" 'from-stdin'
 
         $result.ExitCode | Should -Be 1
         $result.Output | Should -Match 'Too many words'
@@ -90,43 +90,43 @@ Describe 'lv' {
     It 'prints the commands and the vault when run alone' {
         $text = lv | Out-String
         $LASTEXITCODE | Should -Be 0
-        $text | Should -Match 'set <name> \[--file <path>\] \[--local\]'
+        $text | Should -Match 'set <name> \[-FilePath <path>\] \[-Local\]'
         $text | Should -Not -Match 'kp-catalog|recover|unshare'
 
-        $arguments = '--path', $vault
+        $arguments = '-Path', $vault
         lv @arguments | Out-String | Should -Match ([regex]::Escape("Vault: $vault (exists)"))
 
         $missing = Join-Path $folder 'none.lv'
-        $arguments = '--help', '--path', $missing
+        $arguments = 'help', '-Path', $missing
         lv @arguments | Out-String | Should -Match ([regex]::Escape("Vault: $missing (not created yet)"))
         Test-Path -LiteralPath $missing | Should -BeFalse
     }
 
     It 'says when there is nothing to list' {
         $missing = Join-Path $folder 'none.lv'
-        $arguments = 'list', '--path', $missing
+        $arguments = 'list', '-Path', $missing
         $output = lv @arguments 6>&1 3>$null
         "$output" | Should -Be "No vault at $missing."
 
-        $arguments = 'list', 'prod', '--path', $vault
+        $arguments = 'list', 'prod', '-Path', $vault
         "$(lv @arguments 6>&1 3>$null)" | Should -Be "No entries in scope 'prod' of $vault."
 
         Remove-VaultEntry -Path $vault -Name 'a'
-        $arguments = 'list', '--path', $vault
+        $arguments = 'list', '-Path', $vault
         "$(lv @arguments 6>&1 3>$null)" | Should -Be "No entries in $vault."
     }
 
     It 'prints the usage of a command used with a wrong syntax' -ForEach @(
-        @{ Line = @('store', 'add'); Usage = 'lv store \[list \| add \[<name>\] <target>' }
-        @{ Line = @('set'); Usage = 'lv set <name> \[--file <path> \| --credential\] \[--local\]' }
-        @{ Line = @('list', '--overwrite'); Usage = 'lv list \[<scope>\]' }
-        @{ Line = @('store', 'copy'); Usage = 'lv store .*copy <target \| name>' }
-        @{ Line = @('store', 'use', 'a', '--project'); Usage = 'lv store ' }
+        @{ Line = @('store', 'add'); Usage = 'lv store add \[<target>\] \[-Name <name>\]' }
+        @{ Line = @('set'); Usage = 'lv set <name> \[-FilePath <path> \| -Credential\] \[-Local\]' }
+        @{ Line = @('list', '-Overwrite'); Usage = 'lv list \[<scope>\]' }
+        @{ Line = @('store', 'copy'); Usage = 'lv store copy \[<target \| store name>\]' }
+        @{ Line = @('store', 'use', 'a', '-Project'); Usage = 'lv store use <name>' }
         @{ Line = @('store', 'bogus'); Usage = 'lv store ' }
         @{ Line = @('mark', 'a', 'public'); Usage = 'lv mark <name> shared\|local' }
-        @{ Line = @('export'); Usage = 'lv export <file> \[--overwrite\]' }
-        @{ Line = @('restore', '--force'); Usage = 'lv restore ' }
-        @{ Line = @('import', 'a', '--store'); Usage = 'lv import <file>' }
+        @{ Line = @('export'); Usage = 'lv export <file> \[-Overwrite\]' }
+        @{ Line = @('restore', '-Force'); Usage = 'lv restore ' }
+        @{ Line = @('import', 'a', '-Store'); Usage = 'lv import <file>' }
     ) {
         $text = "$(lv @Line 2>&1)"
         $LASTEXITCODE | Should -Be 1
@@ -136,18 +136,18 @@ Describe 'lv' {
     It 'defines a store from its target alone' {
         $database = Join-Path $folder 'it.kdbx'
         Set-Content -LiteralPath $database -Value 'x'
-        $arguments = 'store', 'add', $database, '--default', '--path', $vault
+        $arguments = 'store', 'add', $database, '-Default', '-Path', $vault
         lv @arguments | Out-Null
 
         $registered = Get-VaultStore -Path $vault
         $registered.Name | Should -Be 'it'
         $registered.Scope | Should -Be 'Computer'
         $registered.Default | Should -BeTrue
-        $arguments = 'store', 'rm', 'it', '--path', $vault
+        $arguments = 'store', 'rm', 'it', '-Path', $vault
         lv @arguments
         Get-VaultStore -Path $vault | Should -BeNullOrEmpty
 
-        $arguments = 'store', 'add', 'az', 'azkv:git-saas-prod', '--path', $vault
+        $arguments = 'store', 'add', 'azkv:git-saas-prod', '-Name', 'az', '-Path', $vault
         "$(lv @arguments 2>&1)" | Should -Match "type 'azkv' are not supported yet"
     }
     It 'completes commands, subcommands, options and entry names' {
@@ -155,25 +155,25 @@ Describe 'lv' {
 
         & $complete 'lv s' | Should -Be @('save', 'scp', 'set', 'ssh', 'ssh-key', 'start', 'store')
         & $complete 'lv store ' | Should -Be @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
-        & $complete 'lv export --' | Should -Be @('--overwrite', '--path')
-        & $complete "lv mark --path '$vault' a " | Should -Be @('shared', 'local', 'hello', 'nohello')
-        & $complete "lv get --path '$vault' " | Should -Be @('a')
+        & $complete 'lv export -' | Should -Be @('-Destination', '-Overwrite', '-Path')
+        & $complete "lv mark -Path '$vault' a " | Should -Be @('shared', 'local', 'hello', 'nohello')
+        & $complete "lv get -Path '$vault' " | Should -Be @('a')
     }
     It 'says where the project stands and what to run next' {
-        $arguments = 'start', '--path', $vault
+        $arguments = 'start', '-Path', $vault
         $text = lv @arguments | Out-String
         $text | Should -Match 'Stores:  none'
-        $text | Should -Match ([regex]::Escape("lv store add <name> <path to the team .kdbx> --default"))
-        $text | Should -Match ([regex]::Escape("lv list --path $vault"))
+        $text | Should -Match ([regex]::Escape("lv store add <path to the team .kdbx> -Name <name> -Default"))
+        $text | Should -Match ([regex]::Escape("lv list -Path $vault"))
 
         $database = Join-Path $folder 'team.kdbx'
         Set-Content -LiteralPath $database -Value 'x'
         Register-VaultStore -Target $database -Default | Out-Null
-        $arguments = 'start', '--path', $vault
+        $arguments = 'start', '-Path', $vault
         $text = lv @arguments | Out-String
         $text | Should -Match 'lv save +send 1 change'
         $text | Should -Match "store 'team' \(Computer\)"
-        $text | Should -Not -Match '--unlock-with'
+        $text | Should -Not -Match '-UnlockWith'
         Unregister-VaultStore -Name 'team'
     }
 
@@ -184,7 +184,7 @@ Describe 'lv' {
         $run = { param($Arguments) pwsh -NoProfile -NonInteractive -Command "Import-Module '$(Join-Path $copy 'LocalVault.psd1')'; lv $Arguments" 2>&1 | Out-String }
 
         & $run 'update' | Should -Match 'called latest=True version= downgrade=False'
-        & $run 'update v1.0.0-beta5 --downgrade' | Should -Match 'called latest=False version=v1.0.0-beta5 downgrade=True'
+        & $run 'update v1.0.0-beta5 -Downgrade' | Should -Match 'called latest=False version=v1.0.0-beta5 downgrade=True'
 
         Remove-Item -LiteralPath (Join-Path $copy 'install.ps1')
         & $run 'update' | Should -Match 'has no installer'
@@ -193,14 +193,45 @@ Describe 'lv' {
     It 'prints its version' {
         $manifest = Import-PowerShellDataFile -LiteralPath (Join-Path $env:LOCALVAULT_MODULE_PATH 'LocalVault.psd1')
         $release = "$($manifest.ModuleVersion)-$($manifest.PrivateData.PSData['Prerelease'])"
-        lv --version | Should -Be "LocalVault $release"
+        lv -Version | Should -Be "LocalVault $release"
         (lv | Out-String) | Should -Match ([regex]::Escape("LocalVault $release"))
-        (lv --help | Out-String) | Should -Match ([regex]::Escape("LocalVault $release"))
+        (lv help | Out-String) | Should -Match ([regex]::Escape("LocalVault $release"))
     }
 
-    It 'rejects unknown options' {
-        $arguments = 'list', '--bogus', '--path', $vault
-        "$(lv @arguments 2>&1)" | Should -BeLike '*Unknown option --bogus*'
+    It 'rejects unknown parameters and names the new form of old options' {
+        $arguments = 'list', '-Bogus', '-Path', $vault
+        "$(lv @arguments 2>&1)" | Should -BeLike "*lv list doesn't take -Bogus.*"
         $LASTEXITCODE | Should -Be 1
+
+        $arguments = 'store', 'set', 'team', '--no-mirror', '--unlock-with', 'mine', '--path', $vault
+        $text = "$(lv @arguments 2>&1)"
+        $LASTEXITCODE | Should -Be 1
+        $text | Should -BeLike '*--no-mirror is now -Mirror:$false; --unlock-with is now -UnlockWith; --path is now -Path.*'
+        $text | Should -BeLike '*Usage: lv store set <name>*'
+
+        $arguments = 'require', 'id', '--file', '~/.ssh/id'
+        "$(lv @arguments 2>&1)" | Should -BeLike '*--file is now -StoredPath*'
+    }
+
+    It 'takes PowerShell parameters: prefixes, named positionals, switch values and lists' {
+        $arguments = 'store', 'add', 'C:\x.kdbx', '-P', '-Path', $vault
+        "$(lv @arguments 2>&1)" | Should -BeLike '*-P is ambiguous: -Path, -Personal, -Project.*'
+
+        $database = Join-Path $folder 'named.kdbx'
+        Set-Content -LiteralPath $database -Value 'x'
+        lv store add -Target $database -Na team -Mir -Path $vault | Out-Null
+        (Get-VaultStore -Path $vault -Name team).Mirror | Should -BeTrue
+        $arguments = 'store', 'set', 'team', '-Mirror:', $false, '-Path', $vault
+        lv @arguments | Out-Null
+        (Get-VaultStore -Path $vault -Name team).Mirror | Should -BeFalse
+        Unregister-VaultStore -Name team
+
+        lv get -Name a -Path $vault | Should -Not -BeNullOrEmpty
+        $LASTEXITCODE | Should -Be 0
+    }
+
+    It 'passes the words after the command of lv run as they are' {
+        lv run -Path $vault pwsh -NoProfile -c 'exit 3'
+        $LASTEXITCODE | Should -Be 3
     }
 }

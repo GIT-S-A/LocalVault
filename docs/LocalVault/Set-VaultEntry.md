@@ -762,8 +762,8 @@ This cmdlet returns no output. It writes the entry name to the information strea
 
 ## NOTES
 
-`lv set <name> [--file <path> | --credential] [--local]`, `lv set <name>#<part>`,
-`lv require <name> [--credential | --file <path>] [--note <text>]` and
+`lv set <name> [-FilePath <path> | -Credential] [-Local]`, `lv set <name>#<part>`,
+`lv require <name> [-Credential | -StoredPath <path>] [-Note <text>]` and
 `lv mark <name> shared|local` run this cmdlet.
 
 ## RELATED LINKS

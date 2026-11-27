@@ -125,7 +125,7 @@ exports.
 ### Windows Hello
 
 An entry can also be sealed with Windows Hello: `Set-VaultEntry -Hello`,
-`lv set <name> --hello`, or `lv mark <name> hello` for an existing entry.
+`lv set <name> -Hello`, or `lv mark <name> hello` for an existing entry.
 Reading its value then needs a Windows Hello gesture. Secrets, credentials
 and files can be sealed; SSH keys can't.
 
@@ -155,13 +155,13 @@ key; the ones that the store doesn't hold stay `Missing` and are reported.
 | `lv save`, `lv store copy` | One per vault, when a sealed entry is written to the store |
 | `lv export` | One, when the vault holds a sealed entry |
 | `lv get`, `lv clip`, `lv env`, `lv restore`, `lv template render` | One per command |
-| `lv run` | One each for the variables, the templated files and `--stdin`, when they read a sealed entry |
+| `lv run` | One each for the variables, the templated files and `-Stdin`, when they read a sealed entry |
 
 A store holds a sealed entry as an ordinary KeePass entry of its kind, with
 the custom string `LocalVault.Hello` set to `true`. `lv load` seals every
 entry that carries it. An entry sealed on this PC stays sealed when the store
 lacks the flag; `lv save` then sets it. `lv mark <name> nohello` removes the
-flag at the next `lv save`. A declaration made with `--hello` carries
+flag at the next `lv save`. A declaration made with `-Hello` carries
 `LocalVault.RequiredHello`, and each person's value is then sealed.
 
 An export holds sealed entries in plain form, marked; `Import-Vault` seals
@@ -217,7 +217,7 @@ LocalVault reads the common stores first, then the project's; a name defined
 at both levels takes the project's target. The project names one primary
 store, which `lv load` reads.
 
-Any store, at either level, can be a mirror (`-Mirror`, `--mirror`): every
+Any store, at either level, can be a mirror (`-Mirror`): every
 `lv save` also writes it, after the primary store. A mirror of this PC
 receives every vault saved on this PC, such as a private copy of all your
 projects; a mirror of the project receives the project's vaults on every PC
@@ -225,13 +225,13 @@ that defines it. In a mirror, the vault's value always wins; changes made
 directly in a mirror are overwritten and reported, entries found only there
 are left and reported. A mirror that can't be reached gives a warning and the
 save goes on. `lv load` never reads mirrors, unless one is named with
-`--store`. Each KeePass file is opened and saved at most once per run, and
+`-Store`. Each KeePass file is opened and saved at most once per run, and
 each vault written once.
 
 ```powershell
-Register-VaultStore -Name team -Target D:\KeePass\team.kdbx -Default   # lv store add team <kdbx> --default
-Register-VaultStore -Name mine -Target D:\KeePass\mine.kdbx -Mirror   # lv store add mine <kdbx> --mirror
-Register-VaultStore -Name team -Project -Default                        # lv store add team --project --default
+Register-VaultStore -Name team -Target D:\KeePass\team.kdbx -Default   # lv store add <kdbx> -Name team -Default
+Register-VaultStore -Name mine -Target D:\KeePass\mine.kdbx -Mirror   # lv store add <kdbx> -Name mine -Mirror
+Register-VaultStore -Name team -Project -Default                        # lv store add -Name team -Project -Default
 Set-VaultProjectStore team                                              # lv store use team
 Export-VaultToStore                                                     # lv save
 Import-VaultFromStore                                                   # lv load, on another machine or for a teammate
@@ -255,7 +255,7 @@ PC doesn't have, LocalVault loads the repository's vaults from their stores
 first, after asking for the password. Without a console, it doesn't.
 
 Each store asks for its own password, unless it names the store that holds
-it: `Register-VaultStore -UnlockWith <store>` (`lv store add ... --unlock-with
+it: `Register-VaultStore -UnlockWith <store>` (`lv store add ... -UnlockWith
 <store>`). LocalVault then opens that store first and takes the password from
 its `AutoOpen` group, the convention that KeePassXC and KeePass 2's
 KeeAutoExec plugin use. The unlocking store can be unlocked by another one in
@@ -271,8 +271,8 @@ module. No other KeePass program is needed.
 
 `Set-VaultEntry -Required` (`lv require <name>`) declares an entry whose
 value each person sets: the store gets the declaration and its note, never a
-value. With `-Credential` (`--credential`), the value is a user name and a
-password. With `-StoredPath <path>` (`--file <path>`), the value is a file,
+value. With `-Credential`, the value is a user name and a
+password. With `-StoredPath <path>`, the value is a file,
 such as an SSH private key, and the path says where it goes; `~/` is the
 user's profile, as in `~/.ssh/id_ed25519`. Only these personal values can be
 written under the profile. `lv load` writes them there when the file is
@@ -280,7 +280,7 @@ missing, readable by the user, SYSTEM and Administrators only, and never
 replaces an existing file.
 
 A PC can name one personal store (`Register-VaultStore -Personal`,
-`lv store set <name> --personal`), usually the person's own KeePass
+`lv store set <name> -Personal`), usually the person's own KeePass
 database. `lv save` then writes each value of a required entry set on this
 PC to that store, in the same group as in the project store, with the same
 rules as shared entries. `lv load` reads them back. A personal store that is
@@ -305,13 +305,13 @@ A vault with a credential declaration needs 1.0.0-beta16 or later.
 `Reset-VaultEntry` (`lv reset <name>`) removes a personal value from the
 vault and keeps the declaration. `lv load` doesn't load the old value back,
 and the next `lv save` deletes it from the personal store. In a console, the
-cmdlet asks for the new value at once; `-NoPrompt` (`--no-ask`) leaves it
+cmdlet asks for the new value at once; `-NoPrompt` leaves it
 to the next `lv load`.
 
 ### References
 
 A value can stay in a KeePass entry outside the `LocalVault/` groups:
-`Set-VaultEntry -Reference <group/title>` (`lv set <name> --ref
+`Set-VaultEntry -Reference <group/title>` (`lv set <name> -Reference
 <group/title>`). The vault keeps the value and where it comes from. `lv
 save` writes a reference to the store, never the value, and `lv load`
 reads the KeePass entry again, so a change made there reaches every project
@@ -320,7 +320,7 @@ that refers to it.
 | Value | Stores searched |
 | --- | --- |
 | Personal value | `-ReferenceStore`, else the personal store. Any store of this PC can be named. |
-| Shared value | `-ReferenceStore`, else the vault's store. Project stores added with `-Source` (`--source`) can be named; the personal store can't. |
+| Shared value | `-ReferenceStore`, else the vault's store. Project stores added with `-Source` can be named; the personal store can't. |
 
 A store that unlocks another store is never a source. LocalVault never writes
 outside its `LocalVault/` groups. A referenced value changed on this PC stays
@@ -330,12 +330,12 @@ on this PC with a warning, and `lv save` leaves the KeePass entry alone;
 ### SSH keys
 
 An SSH key entry holds a key for SSH to hosts, never for git.
-`New-VaultSshKey` (`lv ssh-key new <name> [--host <user@host>]...`)
+`New-VaultSshKey` (`lv ssh-key new <name> [-HostName <user@host>]...`)
 creates a key pair with Windows OpenSSH, ed25519 by default, prints the public
 key and copies it to the clipboard for 2 minutes. The key is personal by
 default: the
 store gets the declaration and its hosts, and each person gets a key of their
-own. With `-Shared` (`--shared`), everyone with access to the store reads
+own. With `-Shared`, everyone with access to the store reads
 the same key.
 
 | File | Content |
@@ -355,11 +355,11 @@ keeps only `<name>.pub`.
   otherwise a menu offers a key from the SSH agent, a private key stored in a
   KeePass entry, or a new key pair.
 - A newer key that another clone wrote is taken into the vault.
-- `lv ssh-key new <name> --replace` replaces a key. The old key stays as
+- `lv ssh-key new <name> -Replace` replaces a key. The old key stays as
   `<name>.old` until `lv load` finds that every host of the entry accepts
   the new one.
 - `Invoke-VaultSsh` (`lv ssh <name> [<user@host>]`) and `Invoke-VaultScp`
-  (`lv scp <name> -- <arguments>`) run `ssh` and `scp` with the key, and
+  (`lv scp <name> <arguments>`) run `ssh` and `scp` with the key, and
   the old key while it is kept.
 - `Set-VaultSshInclude -Enabled $true` (`lv ssh-key include on`) adds
   `Include ~/.ssh/*/lv.config` to `~/.ssh/config`, so that `ssh` and `scp`
@@ -382,9 +382,9 @@ template: `<file>.template`, committed beside the real file, holds the
 structure, with a placeholder `{{name}}` (or `{{scope/key}}`) for each secret.
 The real file must be ignored by git.
 
-- `lv template add <file> [--capture KEY,...]` (`Add-VaultTemplate`) makes the
+- `lv template add <file> [-Capture KEY,...]` (`Add-VaultTemplate`) makes the
   template from the working file, replacing every vault value with its
-  placeholder; `--capture` moves the value of a `KEY=value` line into a new
+  placeholder; `-Capture` moves the value of a `KEY=value` line into a new
   vault entry. Without a working file, it starts from `<file>.example`.
 - `lv template render` (`Write-VaultTemplate`) writes the real files from
   their templates and the vault; `lv template clear` (`Clear-VaultTemplate`)
@@ -395,13 +395,13 @@ The real file must be ignored by git.
 - A template never holds a vault value; LocalVault refuses to write one that
   would.
 
-`lv run [VAR=name ...] -- <command>` sets the variables for the command only,
+`lv run [VAR=name ...] <command>` sets the variables for the command only,
 writes every templated file of the repository, runs the command, then deletes
 the written files, even when the command fails. The plain-text files exist
 only while the command runs:
 
 ```powershell
-lv run OS_PASSWORD=OsPassword -- terraform apply
+lv run OS_PASSWORD=OsPassword terraform apply
 ```
 
 Prefer variables when the tool reads them: `docker compose` reads `${VAR}`
@@ -424,9 +424,9 @@ keys of that file in the vault and writes them back to it.
 
 `lv user-secrets set <id|project> <key>` (`Set-VaultUserSecret`) asks for the
 value, keeps it in an entry named after the key, records the key in
-`localvault.json`, and writes it to `secrets.json`. `--entry <name[#part]>`
+`localvault.json`, and writes it to `secrets.json`. `-Entry <name[#part]>`
 uses an existing entry instead. In a console, it asks whether the value is
-shared or personal; `--personal` makes the entry a required entry, filled by
+shared or personal; `-Personal` makes the entry a required entry, filled by
 each person. `lv user-secrets pick` lists the ids with their projects, then
 takes a key already in the chosen `secrets.json` or a new key.
 
@@ -442,7 +442,7 @@ a tracked key holds a value that differs from the vault's:
 | --- | --- |
 | `lv user-secrets load`, in a console | Asks once per id; the default keeps the file. |
 | `lv user-secrets load`, without a console | Writes nothing for that id and fails with exit code 2. |
-| `lv user-secrets load --overwrite` | Writes the vault's values. |
+| `lv user-secrets load -Overwrite` | Writes the vault's values. |
 | `lv load` | Writes nothing for that id and writes a warning. |
 
 `lv user-secrets clear` (`Clear-VaultUserSecret`) and `Clear-Vault` remove the
@@ -527,7 +527,11 @@ A vault outside a git repository doesn't need a `.gitignore` entry.
 
 `lv` is the alias of `Invoke-LocalVault`. It runs the cmdlets from short
 commands, such as `lv list`, `lv set <name>` and `lv env VAR=name`.
-`lv --version` prints the installed release; `lv update` installs the newest
+Its parameters follow the PowerShell syntax and carry the cmdlets' parameter
+names: `lv store add <kdbx> -Name team -Mirror`, `lv store set team -Mirror:$false`,
+`lv load -Replace a,b`. A unique prefix is enough. A word that starts with `--`
+fails and names the new form.
+`lv -Version` prints the installed release; `lv update` installs the newest
 one, and does nothing when it is already installed.
 
 ## See also

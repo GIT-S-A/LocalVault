@@ -30,13 +30,13 @@ public static class StoreResolver
             return new StoreResolution(vault, null, fallback, fallback is not null
                 ? null
                 : stores.Count == 0
-                    ? $"{vault} has no store: none is named in {ProjectFile.FileName} and none is defined on this PC. Define one with lv store add <name> <target> (Register-VaultStore)."
-                    : $"{vault} has no store: none is named in {ProjectFile.FileName}, and this PC has several stores and no default. Run lv store use <name>, or give --store <name>. {Known(location, registry)}");
+                    ? $"{vault} has no store: none is named in {ProjectFile.FileName} and none is defined on this PC. Define one with lv store add <target> -Name <name> (Register-VaultStore)."
+                    : $"{vault} has no store: none is named in {ProjectFile.FileName}, and this PC has several stores and no default. Run lv store use <name>, or give -Store <name>. {Known(location, registry)}");
         }
 
         var definition = Find(reference, location, registry);
         return new StoreResolution(vault, reference, definition, definition is null
-            ? $"{vault} uses store '{reference.Name ?? reference.Id}', which isn't defined on this PC. Define it with lv store add {reference.Name ?? "<name>"} <target> (Register-VaultStore)."
+            ? $"{vault} uses store '{reference.Name ?? reference.Id}', which isn't defined on this PC. Define it with lv store add <target> -Name {reference.Name ?? "<name>"} (Register-VaultStore)."
             : null);
     }
 

@@ -252,7 +252,7 @@ were, and **Removed**.
 
 ## NOTES
 
-`lv load [--store <name>] [--replace a,b | --replace-all]` runs this cmdlet. `lv` exits with code `2`
+`lv load [-Store <name>] [-Replace a,b | -ReplaceAll]` runs this cmdlet. `lv` exits with code `2`
 when entries changed in both places weren't resolved.
 
 In a console, a command that reads an entry or a vault this PC doesn't have yet runs this cmdlet

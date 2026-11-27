@@ -166,7 +166,7 @@ public sealed class RestoreVaultFileCommand : VaultCmdletBase
 
                 if (!Overwrite && !(IsInteractive && Confirm($"'{target}' differs from the vault. Overwrite it?")))
                 {
-                    WriteWarning($"Kept the existing '{target}'; it differs from {entry.Name}. Use -Overwrite (lv restore --overwrite) to replace it.");
+                    WriteWarning($"Kept the existing '{target}'; it differs from {entry.Name}. Use -Overwrite (lv restore -Overwrite) to replace it.");
                     return "Kept";
                 }
             }

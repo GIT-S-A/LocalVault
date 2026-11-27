@@ -23,8 +23,8 @@ run next.
 cd C:\src\webshop
 lv init                             # adds secrets.local.* to .gitignore; commit it
 lv set db/password                  # asks for the value, hidden
-lv set api.token --local            # stays on this PC, never sent to a store
-lv set github --credential          # user name, password, optional TOTP and URLs
+lv set api.token -Local            # stays on this PC, never sent to a store
+lv set github -Credential          # user name, password, optional TOTP and URLs
 lv list                             # names, kinds and ages; never a value
 ```
 
@@ -44,7 +44,7 @@ another PC or under another account.
 lv get db/password | mytool --password-stdin   # into a pipe only; lv get --show prints it
 lv clip github                               # clipboard for 20 s, kept out of its history
 lv env DB_PASSWORD=db/password               # environment variable of this window only
-lv run DB_PASSWORD=db/password -- terraform apply   # for one command only
+lv run DB_PASSWORD=db/password terraform apply   # for one command only
 ```
 
 In a script:
@@ -61,12 +61,12 @@ Files that a tool reads with secrets inside are handled by templates: `lv templa
 ## 4. A team store
 
 A store is a KeePass database that the team shares. Each entry is shared unless it was set with
-`--local`. Defining the store happens once per PC; naming it in the project happens once per
+`-Local`. Defining the store happens once per PC; naming it in the project happens once per
 project.
 
 ```powershell
-lv store add team \\files\it\team.kdbx --default     # this PC: the team database
-lv store add team --project --default                # the project: each PC's "team" store
+lv store add \\files\it\team.kdbx -Default     # this PC: the team database, store "team"
+lv store add -Name team -Project -Default    # the project: each PC's "team" store
 lv save                                              # every vault of the repository -> store
 git add localvault.json; git commit -m "chore: name the LocalVault store"
 ```
@@ -88,8 +88,8 @@ in its `AutoOpen` group, keeps a copy of every shared entry as a mirror, and kee
 values.
 
 ```powershell
-lv store add mine $env:OneDrive\KeePass\mine.kdbx --mirror --personal
-lv store set team --unlock-with mine
+lv store add $env:OneDrive\KeePass\mine.kdbx -Mirror -Personal
+lv store set team -UnlockWith mine
 ```
 
 After this, `lv save` and `lv load` ask for one password: the personal database's. The first time,
@@ -101,40 +101,40 @@ A required entry is declared by the project and filled by each person. The team 
 declaration and its note; the value goes to each person's personal store only.
 
 ```powershell
-lv require db/admin --credential --note "your own database account"
-lv require kube --file ~/.kube/config-webshop --note "your cluster credentials"
+lv require db/admin -Credential -Note "your own database account"
+lv require kube -StoredPath ~/.kube/config-webshop -Note "your cluster credentials"
 lv set db/admin                                # asks for the user name and the password
-lv set kube --file ~/.kube/config-webshop      # reads the file
+lv set kube -FilePath ~/.kube/config-webshop      # reads the file
 lv save
 ```
 
 | Declaration | Value asked for | Written on another PC |
 |---|---|---|
 | `lv require <name>` | a hidden value | into the vault |
-| `lv require <name> --credential` | a user name and a password | into the vault |
-| `lv require <name> --file <path>` | a file | into the vault, and to `<path>` |
+| `lv require <name> -Credential` | a user name and a password | into the vault |
+| `lv require <name> -StoredPath <path>` | a file | into the vault, and to `<path>` |
 
 `~/` is the user's profile. A file written there is readable by the user, SYSTEM and Administrators
 only. `lv load` writes it when it is missing and never replaces an existing file;
-`lv restore <name> --overwrite` replaces it. Only a person's own value can be written under the
+`lv restore <name> -Overwrite` replaces it. Only a person's own value can be written under the
 profile; a file in the team store with such a path is never loaded.
 
 A value already kept in the personal KeePass database can stay there:
 
 ```powershell
-lv set db/admin --ref "Internet/Webshop DB"    # lv save writes where it comes from, never the value
+lv set db/admin -Reference "Internet/Webshop DB"    # lv save writes where it comes from, never the value
 lv reset db/admin                              # drops the value here and, at lv save, in the personal store; asks again
 ```
 
 ## 7. SSH keys
 
 An SSH key entry is a key for SSH to the project's hosts. Each person has their own key unless the key
-is created with `--shared`.
+is created with `-Shared`.
 
 ```powershell
-lv ssh-key new deploy --host deploy@web1.example.com   # prints the public key and copies it
+lv ssh-key new deploy -HostName deploy@web1.example.com   # prints the public key and copies it
 lv ssh deploy                                          # ssh to the key's only host
-lv scp deploy -- site.tar.gz deploy@web1.example.com:/srv/
+lv scp deploy site.tar.gz deploy@web1.example.com:/srv/
 lv ssh-key include on                                  # optional: plain ssh and scp find the key too
 ```
 
@@ -143,7 +143,7 @@ lv ssh-key include on                                  # optional: plain ssh and
 | Key files | `~/.ssh/webshop/deploy` and `deploy.pub`, the same path in every clone |
 | Public key | added to the host by someone with access to it |
 | On another PC | `lv load` asks: a key from the SSH agent, a key in a KeePass entry, or a new key pair |
-| New key | `lv ssh-key new deploy --replace`; the old key stays as `deploy.old` until every host accepts the new one |
+| New key | `lv ssh-key new deploy -Replace`; the old key stays as `deploy.old` until every host accepts the new one |
 | Clones deleted without `lv clear` | `lv ssh-key clean` deletes their keys |
 
 ## 8. .NET user secrets
@@ -161,7 +161,7 @@ git add localvault.json; git commit -m "chore: track user secrets"
 | Command | Effect |
 |---|---|
 | `lv load` | writes the tracked keys into each `secrets.json`; a key set by hand to another value is kept, with a warning |
-| `lv user-secrets load --overwrite` | replaces such values with the vault's |
+| `lv user-secrets load -Overwrite` | replaces such values with the vault's |
 | `lv user-secrets clear` | removes the tracked keys still equal to the vault's |
 
 Other keys of `secrets.json` are never changed.
@@ -171,8 +171,8 @@ Other keys of `secrets.json` are never changed.
 ```powershell
 # 1. installation, as in step 1
 git clone https://dev.example/org/webshop.git; cd webshop
-lv store add mine $env:OneDrive\KeePass\mine.kdbx --mirror --personal   # once per PC
-lv store add team \\files\it\team.kdbx --unlock-with mine               # once per PC
+lv store add $env:OneDrive\KeePass\mine.kdbx -Mirror -Personal   # once per PC
+lv store add \\files\it\team.kdbx -UnlockWith mine                # once per PC
 lv load
 ```
 

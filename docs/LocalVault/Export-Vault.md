@@ -179,7 +179,7 @@ The passphrase can't be recovered.
 
 The cmdlet fails when the vault is empty.
 
-`lv export <file> [--overwrite]` runs this cmdlet.
+`lv export <file> [-Overwrite]` runs this cmdlet.
 
 ## RELATED LINKS
 

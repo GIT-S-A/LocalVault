@@ -23,7 +23,7 @@ Describe 'Templated files' {
     }
 
     It 'turns a file into a template, then writes and clears it' {
-        $arguments = 'template', 'add', '.env', '--capture', 'TOKEN'
+        $arguments = 'template', 'add', '.env', '-Capture', 'TOKEN'
         lv @arguments 6>$null
 
         Get-Content -LiteralPath "$env.template" -Raw | Should -Be "OS_AUTH_URL=https://api`nOS_PASSWORD={{OS_PASSWORD}}`nTOKEN={{TOKEN}}"
@@ -121,9 +121,9 @@ Describe 'Changing one setting of a store' {
     }
 
     It 'flips the mirror flag and the unlocker without touching the rest' {
-        $arguments = 'store', 'set', 'mine', '--mirror', '--default', '--path', $vault
+        $arguments = 'store', 'set', 'mine', '-Mirror', '-Default', '-Path', $vault
         lv @arguments | Out-Null
-        $arguments = 'store', 'set', 'team', '--unlock-with', 'mine', '--path', $vault
+        $arguments = 'store', 'set', 'team', '-UnlockWith', 'mine', '-Path', $vault
         lv @arguments | Out-Null
 
         $mine = Get-VaultStore -Name 'mine'
@@ -138,7 +138,7 @@ Describe 'Changing one setting of a store' {
         (Get-VaultStore -Name 'mine').KeyFile | Should -Be $key
         (Get-VaultStore -Name 'team').UnlockWith | Should -BeNullOrEmpty
 
-        $arguments = 'store', '--path', $vault
+        $arguments = 'store', '-Path', $vault
         (lv @arguments | Out-String) | Should -Match 'Stores: mine \(Computer, default\), team \(Computer\)'
     }
 }
@@ -161,7 +161,7 @@ Describe 'A value on the standard input of a program' {
         $text = 'p' + [char]0xE4 + 'ssword-1'
         Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret $text) 6>$null
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'db', '--', 'pwsh', '-NoProfile', '-Command', $reader
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'db', '--', 'pwsh', '-NoProfile', '-Command', $reader
         lv @arguments 6>$null
 
         $LASTEXITCODE | Should -Be 4
@@ -173,7 +173,7 @@ Describe 'A value on the standard input of a program' {
         [IO.File]::WriteAllBytes((Join-Path $folder 'blob.bin'), $bytes)
         Set-VaultEntry -Path $vault -Name 'blob' -FilePath (Join-Path $folder 'blob.bin') 6>$null
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'blob', 'pwsh', '-NoProfile', '-Command', $reader
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'blob', 'pwsh', '-NoProfile', '-Command', $reader
         lv @arguments 6>$null
 
         [IO.File]::ReadAllBytes($received) | Should -Be $bytes
@@ -182,7 +182,7 @@ Describe 'A value on the standard input of a program' {
     It 'sends the password of a credential' {
         Set-VaultEntry -Path $vault -Name 'svc' -Credential -UserName 'deploy' -Password (ConvertTo-TestSecret 'cred-pw-2') 6>$null
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'svc', 'pwsh', '-NoProfile', '-Command', $reader
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'svc', 'pwsh', '-NoProfile', '-Command', $reader
         lv @arguments 6>$null
 
         [Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes($received)) | Should -Be 'cred-pw-2'
@@ -193,7 +193,7 @@ Describe 'A value on the standard input of a program' {
         Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'hello-pw') -Hello 6>$null
         $before = $key.Prompts
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'db', 'pwsh', '-NoProfile', '-Command', $reader
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'db', 'pwsh', '-NoProfile', '-Command', $reader
         lv @arguments 6>$null
 
         $key.Prompts | Should -Be ($before + 1)
@@ -203,7 +203,7 @@ Describe 'A value on the standard input of a program' {
     It 'fails before the program starts when the name is not in the vault' {
         Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'x') 6>$null
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'nope', 'pwsh', '-NoProfile', '-Command', $reader
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'nope', 'pwsh', '-NoProfile', '-Command', $reader
         lv @arguments 2>$null 6>$null
 
         $LASTEXITCODE | Should -Be 1
@@ -213,7 +213,7 @@ Describe 'A value on the standard input of a program' {
     It 'refuses a command that is not a program' {
         Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'x') 6>$null
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'db', 'Get-ChildItem'
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'db', 'Get-ChildItem'
         $errors = lv @arguments 2>&1 6>$null | Out-String
 
         $LASTEXITCODE | Should -Be 1
@@ -223,7 +223,7 @@ Describe 'A value on the standard input of a program' {
     It 'never shows the value in any stream' {
         Set-VaultEntry -Path $vault -Name 'db' -Value (ConvertTo-TestSecret 'leak-check-stdin') 6>$null
 
-        $arguments = 'run', '--path', $vault, '--stdin', 'db', 'pwsh', '-NoProfile', '-Command', $reader
+        $arguments = 'run', '-Path', $vault, '-Stdin', 'db', 'pwsh', '-NoProfile', '-Command', $reader
         lv @arguments 6>&1 5>&1 4>&1 3>&1 2>&1 | Out-String | Should -Not -Match 'leak-check-stdin'
     }
 }

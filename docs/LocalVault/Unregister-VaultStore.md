@@ -189,7 +189,7 @@ This cmdlet returns no output.
 
 ## NOTES
 
-`lv store rm <name> [--project]` runs this cmdlet.
+`lv store rm <name> [-Project]` runs this cmdlet.
 
 ## RELATED LINKS
 

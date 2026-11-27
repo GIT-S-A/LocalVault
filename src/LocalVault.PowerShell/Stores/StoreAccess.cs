@@ -65,7 +65,7 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
             vault.Dispose();
             throw new VaultException(
                 $"'{store.ExpandedTarget}' isn't the KeePass database that store '{store.Name}' was added with: another database replaced it. " +
-                $"If that is intended, add the store again: lv store add {store.Name} \"{store.Target}\"{(store.Scope == StoreScope.Project ? " --project" : string.Empty)}");
+                $"If that is intended, add the store again: lv store add \"{store.Target}\" -Name {store.Name}{(store.Scope == StoreScope.Project ? " -Project" : string.Empty)}");
         }
 
         var pair = (vault, store);
@@ -90,14 +90,14 @@ internal sealed class StoreAccess(IVaultHost host, string? storeName) : IDisposa
 
         if (depth >= MaxUnlockChain)
         {
-            throw new VaultException($"Store '{store.Name}' is unlocked through more than {MaxUnlockChain} stores. Check --unlock-with in lv store list.");
+            throw new VaultException($"Store '{store.Name}' is unlocked through more than {MaxUnlockChain} stores. Check UnlockWith in lv store list.");
         }
 
         var unlockerStore = registry.FindByName(store.UnlockWith)
-            ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{store.UnlockWith}', which isn't defined on this PC. Add it with lv store add {store.UnlockWith} <target>.");
+            ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{store.UnlockWith}', which isn't defined on this PC. Add it with lv store add <target> -Name {store.UnlockWith}.");
         var (unlocking, _) = OpenStore(unlockerStore, unlockerStore.Id, depth + 1);
         var unlocker = unlocking as IUnlockingStore
-            ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{unlockerStore.Name}', a {unlockerStore.Type} store, which can't keep other stores' passwords. Remove it with lv store set {store.Name} --no-unlock.");
+            ?? throw new VaultException($"Store '{store.Name}' is unlocked with '{unlockerStore.Name}', a {unlockerStore.Type} store, which can't keep other stores' passwords. Remove it with lv store set {store.Name} -NoUnlock.");
         registry.RecordId(unlockerStore, unlocker.DatabaseId);
         if (unlocker.FindAutoOpen(id ?? store.Id, [store.ExpandedTarget], Environment.MachineName) is { } target)
         {

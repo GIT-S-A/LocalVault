@@ -313,7 +313,7 @@ Describe 'SSH keys' {
         $other = Join-Path $env:USERPROFILE 'other-key'
         Set-Content -LiteralPath $other -Value 'OTHER'
 
-        { Set-VaultEntry -Path $script:vault -Name deploy -FilePath $other -StoredPath '~/.ssh/proj/deploy' } | Should -Throw '*lv ssh-key new deploy --replace*'
+        { Set-VaultEntry -Path $script:vault -Name deploy -FilePath $other -StoredPath '~/.ssh/proj/deploy' } | Should -Throw '*lv ssh-key new deploy -Replace*'
         { Set-VaultEntry -Path $script:vault -Name deploy -Value (ConvertTo-TestSecret 'x') } | Should -Throw '*is an SSH key*'
         { Set-VaultEntry -Path $script:vault -Name 'deploy#user' -Value (ConvertTo-TestSecret 'x') } | Should -Throw '*is an SSH key*'
         { Set-VaultEntry -Path $script:vault -Name deploy -Required } | Should -Throw '*is an SSH key*'
@@ -451,7 +451,7 @@ Describe 'SSH keys' {
     It 'creates and lists keys through lv' {
         Push-Location $script:repo
         try {
-            $create = @('ssh-key', 'new', 'deploy', '--host', 'deploy@srv1.example.com', '--host', 'deploy@srv2.example.com', '--shared', '--path', $script:vault)
+            $create = @('ssh-key', 'new', 'deploy', '-HostName', 'deploy@srv1.example.com,deploy@srv2.example.com', '-Shared', '-Path', $script:vault)
             lv @create 6>$null 3>$null
             $LASTEXITCODE | Should -Be 0
             (Get-VaultSshKey -Name deploy).Hosts | Should -Be @('deploy@srv1.example.com', 'deploy@srv2.example.com')
@@ -459,13 +459,13 @@ Describe 'SSH keys' {
             lv @('ssh-key', 'path', 'deploy') | Should -Be (Join-Path $script:keyFolder 'deploy')
             lv @('ssh-key', 'hosts', 'deploy') 6>$null
             (Get-VaultSshKey -Name deploy).Hosts.Count | Should -Be 0
-            lv @('ssh-key', 'new', 'other', '--type', 'dsa') 2>$null
+            lv @('ssh-key', 'new', 'other', '-Type', 'dsa') 2>$null
             $LASTEXITCODE | Should -Be 1
-            lv @('ssh-key', 'new', 'deploy', '--replace') 2>$null
+            lv @('ssh-key', 'new', 'deploy', '-Replace') 2>$null
             $LASTEXITCODE | Should -Be 1
             Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
             Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
-            lv @('ssh-key', 'new', 'deploy', '--replace') 6>$null 3>$null
+            lv @('ssh-key', 'new', 'deploy', '-Replace') 6>$null 3>$null
             $LASTEXITCODE | Should -Be 0
             (Get-VaultSshKey -Name deploy).Previous | Should -BeTrue
         }

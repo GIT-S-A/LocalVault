@@ -150,7 +150,7 @@ public sealed class KeePassReferenceTests : IDisposable
         using var content = keePass.Read(Group);
 
         Assert.Empty(content.Items);
-        Assert.Contains(content.Skipped, s => s.Contains("uses a {REF:} field. Use lv set api --ref", StringComparison.Ordinal));
+        Assert.Contains(content.Skipped, s => s.Contains("uses a {REF:} field. Use lv set api -Reference", StringComparison.Ordinal));
     }
 
     [Fact]

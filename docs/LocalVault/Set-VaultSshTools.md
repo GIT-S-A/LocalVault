@@ -181,7 +181,7 @@ This cmdlet returns the **Directory** in use, whether it's Windows OpenSSH (**Is
 
 ## NOTES
 
-`lv ssh-key tools [<dir> | --default]` runs this cmdlet.
+`lv ssh-key tools [<dir> | -Default]` runs this cmdlet.
 
 ## RELATED LINKS
 

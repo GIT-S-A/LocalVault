@@ -74,7 +74,7 @@ Describe '.NET user secrets' {
 
         (Get-VaultUserSecretList).State | Should -Be 'Differs'
         { Write-VaultUserSecret 6>$null } | Should -Throw '*ConnectionStrings:Default*-Overwrite*'
-        lv user-secrets load -ErrorAction SilentlyContinue 6>$null
+        lv user-secrets load 2>$null 6>$null
         $LASTEXITCODE | Should -Be 2
         (Get-SecretsJson)['ConnectionStrings:Default'] | Should -Be 'changed-by-hand'
 

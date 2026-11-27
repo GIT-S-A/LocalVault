@@ -175,7 +175,7 @@ This cmdlet writes a message only.
 
 ## NOTES
 
-`lv store use <name> [--path <vault>]` runs this cmdlet.
+`lv store use <name> [-Path <vault>]` runs this cmdlet.
 
 ## RELATED LINKS
 

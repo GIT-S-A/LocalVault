@@ -160,7 +160,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
         }
         else if (new StoreRegistry(StoreRegistry.DefaultPath).Personal is null)
         {
-            WriteWarning($"{name} is only on this PC: no personal store is defined. Name one with lv store set <name> --personal, then run lv save.");
+            WriteWarning($"{name} is only on this PC: no personal store is defined. Name one with lv store set <name> -Personal, then run lv save.");
         }
 
         WriteObject(Describe(stored));
@@ -170,7 +170,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
     {
         var registry = new StoreRegistry(StoreRegistry.DefaultPath);
         var problem = personal
-            ? registry.Personal is null ? "no personal store is defined on this PC. Name one with lv store set <name> --personal." : null
+            ? registry.Personal is null ? "no personal store is defined on this PC. Name one with lv store set <name> -Personal." : null
             : StoreResolver.For(Location, null, registry).Problem;
         if (problem is not null)
         {
@@ -182,7 +182,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
     {
         if (!IsInteractive)
         {
-            throw new VaultException($"'{name}' already holds a key. Add -Replace (--replace) to replace it. Nothing was written.");
+            throw new VaultException($"'{name}' already holds a key. Add -Replace to replace it. Nothing was written.");
         }
 
         var question = new List<string> { $"'{name}' already holds a key. Replace it with a new one?" };
@@ -232,7 +232,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             if (plan.Refused)
             {
                 throw new VaultException(plan.State == SshKeyWriteState.NewerElsewhere
-                    ? $"'{target}' already holds {name}, written by {plan.Record!.WrittenBy}. Run lv load to use it, or -Overwrite (--overwrite) to replace it. Nothing was written."
+                    ? $"'{target}' already holds {name}, written by {plan.Record!.WrittenBy}. Run lv load to use it, or -Overwrite to replace it. Nothing was written."
                     : SshKeyFiles.Describe(plan, name) + " Nothing was written.");
             }
         }

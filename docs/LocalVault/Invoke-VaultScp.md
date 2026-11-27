@@ -134,7 +134,7 @@ This cmdlet returns no output. scp writes to the console, and `$LASTEXITCODE` ho
 
 ## NOTES
 
-`lv scp <name> -- <scp arguments>` runs this cmdlet.
+`lv scp <name> <scp arguments>` runs this cmdlet.
 
 ## RELATED LINKS
 

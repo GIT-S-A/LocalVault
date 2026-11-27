@@ -205,7 +205,7 @@ public sealed class UpdateVaultTemplateCommand : TemplateCmdletBase
             var refused = changed.Except(accepted).Select(c => c.Reference.ToString()).ToList();
             if (refused.Count > 0 && !IsInteractive)
             {
-                throw new VaultException($"New values in the file for {string.Join(", ", refused)}. Use -AcceptChanges (lv template update --accept) to store them. Nothing was written.");
+                throw new VaultException($"New values in the file for {string.Join(", ", refused)}. Use -AcceptChanges (lv template update -AcceptChanges) to store them. Nothing was written.");
             }
 
             if (accepted.Count > 0 && ShouldProcess(group.Key, $"Store new values of {string.Join(", ", accepted.Select(c => c.Reference))}"))

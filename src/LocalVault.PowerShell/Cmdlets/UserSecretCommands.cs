@@ -218,7 +218,7 @@ public sealed class SetVaultUserSecretCommand : UserSecretCmdletBase
 
         if (!IsInteractive)
         {
-            throw new VaultException($"'{key}' can't be the vault entry's name: {reason}. Run this in a console to choose a name, or map an existing entry with -Entry (--entry). Nothing was changed.");
+            throw new VaultException($"'{key}' can't be the vault entry's name: {reason}. Run this in a console to choose a name, or map an existing entry with -Entry. Nothing was changed.");
         }
 
         var typed = ReadText($"'{key}' can't be the vault entry's name: {reason}. Name of the new entry");

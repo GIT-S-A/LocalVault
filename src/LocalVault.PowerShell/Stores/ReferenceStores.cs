@@ -16,7 +16,7 @@ internal sealed class ReferenceStores(StoreAccess access, VaultLocation location
         {
             throw new VaultException(name is null
                 ? $"its value is in a KeePass database this PC doesn't know (id {id})."
-                : $"its value is in store '{name}', which isn't defined on this PC. Add it with lv store add {name} <path to .kdbx>.");
+                : $"its value is in store '{name}', which isn't defined on this PC. Add it with lv store add <path to .kdbx> -Name {name}.");
         }
 
         if (!personal && !MayHoldSharedValues(id))

@@ -59,9 +59,9 @@ Describe 'Skill walkthrough: migrating two clixml vaults' {
     }
 
     It '5. applies the per-entry decisions' {
-        $arguments = 'mark', 'Placeholder', 'local', '--path', $infra
+        $arguments = 'mark', 'Placeholder', 'local', '-Path', $infra
         lv @arguments 6>$null
-        $arguments = 'require', 'OsPassword', '--note', 'your own OpenStack account', '--path', $infra
+        $arguments = 'require', 'OsPassword', '-Note', 'your own OpenStack account', '-Path', $infra
         lv @arguments 6>$null
 
         $list = Get-VaultEntryList -Path $infra 3>$null
@@ -74,8 +74,8 @@ Describe 'Skill walkthrough: migrating two clixml vaults' {
         (& $runInChild "Set-Location '$repo'; lv store use mine").ExitCode | Should -Be 0
         Test-Path -LiteralPath (Join-Path $repo 'localvault.json') | Should -BeTrue
 
-        (& $runInChild "lv save --path '$infra'").ExitCode | Should -Be 0
-        (& $runInChild "lv save --path '$migration'").ExitCode | Should -Be 0
+        (& $runInChild "lv save -Path '$infra'").ExitCode | Should -Be 0
+        (& $runInChild "lv save -Path '$migration'").ExitCode | Should -Be 0
 
         $raw = [KeePassLib.PwDatabase]::new()
         $key = [KeePassLib.Keys.CompositeKey]::new(); $key.AddUserKey([KeePassLib.Keys.KcpPassword]::new($master))

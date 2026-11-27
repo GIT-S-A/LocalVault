@@ -134,7 +134,7 @@ internal sealed class UserSecretTracking
                 }
                 else if (lenient)
                 {
-                    host.Warn($"{label}: not written, {string.Join(", ", comparison.Differing)} differ from the vault. Run lv user-secrets load --overwrite to replace them.");
+                    host.Warn($"{label}: not written, {string.Join(", ", comparison.Differing)} differ from the vault. Run lv user-secrets load -Overwrite to replace them.");
                     continue;
                 }
                 else
@@ -162,7 +162,7 @@ internal sealed class UserSecretTracking
         if (conflicts.Count > 0)
         {
             throw new ImportConflictException(
-                $"Keys differ from the vault: {string.Join("; ", conflicts)}. Nothing was written for them. Use -Overwrite (lv user-secrets load --overwrite) to replace them.");
+                $"Keys differ from the vault: {string.Join("; ", conflicts)}. Nothing was written for them. Use -Overwrite (lv user-secrets load -Overwrite) to replace them.");
         }
     }
 

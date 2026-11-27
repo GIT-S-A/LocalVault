@@ -90,7 +90,7 @@ Describe 'Secret entries' {
         Set-VaultEntry -Path $vault -Name 'personal' -Value (ConvertTo-TestSecret 'mine')
         Set-VaultEntry -Path $vault -Name 'shared' -Value (ConvertTo-TestSecret 's')
 
-        $said = lv @('reset', 'personal', '--no-ask', '--path', $vault) 6>&1 | Out-String
+        $said = lv @('reset', 'personal', '-NoPrompt', '-Path', $vault) 6>&1 | Out-String
 
         $said | Should -Match 'personal: your value is removed from this vault\.'
         (Get-VaultEntryList -Path $vault -WarningAction SilentlyContinue | Where-Object Name -EQ 'personal').Sync | Should -Be 'Missing'
@@ -281,11 +281,11 @@ Describe 'Vault location' {
         Set-Content -LiteralPath (Join-Path $repo '.git\info\exclude') -Value 'secrets.local.*'
         $vault = Join-Path $repo 'secrets.local.lv'
 
-        $said = lv @('init', '--path', $vault) 6>&1 | Out-String
+        $said = lv @('init', '-Path', $vault) 6>&1 | Out-String
 
         $said | Should -Match 'Commit \.gitignore\.'
         Get-Content -LiteralPath (Join-Path $repo '.gitignore') | Should -Be @('# LocalVault', 'secrets.local.*')
-        lv @('init', '--path', $vault) 6>&1 | Out-String | Should -Match 'Nothing to add\.'
+        lv @('init', '-Path', $vault) 6>&1 | Out-String | Should -Match 'Nothing to add\.'
     }
 
     It 'names lv init when it refuses to create a vault git does not ignore' {

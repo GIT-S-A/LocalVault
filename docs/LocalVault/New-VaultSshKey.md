@@ -329,7 +329,7 @@ the **PublicKey**.
 
 ## NOTES
 
-`lv ssh-key new <name> [--host <user@host>]... [--shared] [--type <type>] [--comment <text>] [--overwrite] [--replace]`
+`lv ssh-key new <name> [-HostName <user@host>]... [-Shared] [-Type <type>] [-Comment <text>] [-Overwrite] [-Replace]`
 runs this cmdlet.
 
 ## RELATED LINKS

@@ -124,9 +124,9 @@ public static class SshKeyFiles
             SshKeyWriteState.OtherRepository =>
                 $"Not writing {name}: '{Path.GetDirectoryName(plan.Target)}' holds the keys of another repository.",
             SshKeyWriteState.NotWrittenByLocalVault =>
-                $"Not writing {name}: '{plan.Target}' exists and wasn't written by LocalVault. Use --overwrite (-Overwrite) to replace it.",
+                $"Not writing {name}: '{plan.Target}' exists and wasn't written by LocalVault. Use -Overwrite to replace it.",
             SshKeyWriteState.NewerElsewhere =>
-                $"Not writing {name}: newer key written by {plan.Record!.WrittenBy} at {plan.Record.WrittenAt:yyyy-MM-dd HH:mm} UTC. Run lv load, or --overwrite (-Overwrite) to replace it.",
+                $"Not writing {name}: newer key written by {plan.Record!.WrittenBy} at {plan.Record.WrittenAt:yyyy-MM-dd HH:mm} UTC. Run lv load, or -Overwrite to replace it.",
             SshKeyWriteState.Identical => $"{name} is already in {plan.Target}.",
             _ => $"Wrote {name} to {plan.Target}, readable by your account only.",
         };

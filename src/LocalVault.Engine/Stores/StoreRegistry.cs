@@ -254,7 +254,7 @@ public sealed class StoreRegistry
         if (unlocked.Count > 0)
         {
             throw new VaultException(
-                $"Store '{name}' unlocks {string.Join(", ", unlocked)}. Add them again without --unlock-with, or with another store, first. Nothing was changed.");
+                $"Store '{name}' unlocks {string.Join(", ", unlocked)}. Add them again without -UnlockWith, or with another store, first. Nothing was changed.");
         }
 
         ((JsonArray)root[StoresField]!).Remove(node);
@@ -283,7 +283,7 @@ public sealed class StoreRegistry
             }
 
             var unlocker = stores.FirstOrDefault(store => string.Equals(store.Name, current, StringComparison.OrdinalIgnoreCase))
-                ?? throw new VaultException($"No store named '{current}' on this PC. Add it first with lv store add {current} <target>.");
+                ?? throw new VaultException($"No store named '{current}' on this PC. Add it first with lv store add <target> -Name {current}.");
             current = unlocker.UnlockWith;
         }
     }

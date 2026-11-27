@@ -37,7 +37,7 @@ Describe 'Shared entries in KeePass' {
         $saved.Output | Should -Not -Match 'pester master'
         (Get-VaultEntryList -Path $mine | Where-Object Name -EQ 'common/db').Sync | Should -Be 'Saved'
 
-        $loaded = & $runInChild "lv load --path '$theirs'"
+        $loaded = & $runInChild "lv load -Path '$theirs'"
         $loaded.ExitCode | Should -Be 0 -Because $loaded.Output
 
         Get-VaultEntry -Path $theirs -Name 'common/db' -AsPlainText | Should -Be 'kp-1'
@@ -68,13 +68,13 @@ Describe 'Shared entries in KeePass' {
         Remove-Item -LiteralPath $database
         Initialize-TestKeePass -Path $database -Master $script:master
 
-        $refused = & $runInChild "lv save --path '$mine'"
+        $refused = & $runInChild "lv save -Path '$mine'"
         $refused.ExitCode | Should -Not -Be 0
         $refused.Output | Should -Match "isn't the KeePass database that store 'team' was added with"
-        $refused.Output | Should -Match 'lv store add team'
+        $refused.Output | Should -Match 'lv store add .+ -Name team'
 
         Register-VaultStore -Name 'team' -Target $database | Out-Null
-        $saved = & $runInChild "lv save --path '$mine'"
+        $saved = & $runInChild "lv save -Path '$mine'"
         $saved.ExitCode | Should -Be 0 -Because $saved.Output
     }
 
@@ -91,14 +91,14 @@ Describe 'Shared entries in KeePass' {
         Set-VaultEntry -Path $theirs -Name 'common/db' -Value (ConvertTo-TestSecret 'theirs-3')
         (& $runInChild "Export-VaultToStore -Path '$theirs'").ExitCode | Should -Be 0
 
-        $conflict = & $runInChild "lv load --path '$mine'"
+        $conflict = & $runInChild "lv load -Path '$mine'"
         $conflict.ExitCode | Should -Be 2 -Because $conflict.Output
         Get-VaultEntry -Path $mine -Name 'common/db' -AsPlainText | Should -Be 'mine-3'
 
-        $saveConflict = & $runInChild "lv save --path '$mine'"
+        $saveConflict = & $runInChild "lv save -Path '$mine'"
         $saveConflict.Output | Should -Match 'Not saved'
 
-        (& $runInChild "lv load --path '$mine' --replace common/db").ExitCode | Should -Be 0
+        (& $runInChild "lv load -Path '$mine' -Replace common/db").ExitCode | Should -Be 0
         Get-VaultEntry -Path $mine -Name 'common/db' -AsPlainText | Should -Be 'theirs-3'
     }
 
@@ -113,12 +113,12 @@ Describe 'Shared entries in KeePass' {
     }
 
     It 'marks an entry local or shared without retyping it' {
-        $arguments = 'mark', 'common/db', 'local', '--path', $mine
+        $arguments = 'mark', 'common/db', 'local', '-Path', $mine
         lv @arguments 6>$null
         (Get-VaultEntryList -Path $mine | Where-Object Name -EQ 'common/db').Sync | Should -Be 'Local'
         (& $runInChild "Export-VaultToStore -Path '$mine'").Output | Should -Match '0 added'
 
-        $arguments = 'mark', 'mine', 'shared', '--path', $mine
+        $arguments = 'mark', 'mine', 'shared', '-Path', $mine
         lv @arguments 6>$null
         (& $runInChild "Export-VaultToStore -Path '$mine'").Output | Should -Match '1 added'
         Get-VaultEntry -Path $mine -Name 'mine' -AsPlainText | Should -Be 'only here'
@@ -135,7 +135,7 @@ Describe 'Shared entries in KeePass' {
         $status.Pending | Should -Be 1
         $status.Local | Should -Be 1
 
-        $arguments = 'store', '--path', $mine
+        $arguments = 'store', '-Path', $mine
         (lv @arguments | Out-String -Width 400) | Should -Match 'team\s+Computer\s+LocalVault/proj\s+1'
     }
 
@@ -155,7 +155,7 @@ Describe 'Shared entries in KeePass' {
         $other = Join-Path $folder 'other.kdbx'
         Initialize-TestKeePass -Path $other -Master $master
 
-        $copied = & $runInChild "lv store copy '$other' --path '$mine'"
+        $copied = & $runInChild "lv store copy '$other' -Path '$mine'"
         $copied.ExitCode | Should -Be 0 -Because $copied.Output
         $copied.Output | Should -Match 'Copied 1 shared entries'
 
@@ -166,7 +166,7 @@ Describe 'Shared entries in KeePass' {
         (& $runInChild "Compare-VaultWithStore -Path '$mine' -Store team | ForEach-Object { '{0}={1}' -f `$_.Name, `$_.State }").Output | Should -Match 'common/db=Saved'
     }
     It 'shares a required declaration and keeps each value personal' {
-        $arguments = 'require', 'os/password', '--note', 'your own account', '--path', $mine
+        $arguments = 'require', 'os/password', '-Note', 'your own account', '-Path', $mine
         lv @arguments 6>$null
         (Get-VaultEntryList -Path $mine 3>$null | Where-Object Name -EQ 'os/password').Sync | Should -Be 'Missing'
         { Get-VaultEntry -Path $mine -Name 'os/password' } | Should -Throw '*required but not set*your own account*'
@@ -177,7 +177,7 @@ Describe 'Shared entries in KeePass' {
         (& $runInChild "Import-VaultFromStore -Path '$theirs'").ExitCode | Should -Be 0
 
         (Get-VaultEntryList -Path $theirs 3>$null | Where-Object Name -EQ 'os/password').Sync | Should -Be 'Missing'
-        $arguments = 'start', '--path', $theirs
+        $arguments = 'start', '-Path', $theirs
         (lv @arguments | Out-String) | Should -Match 'lv set os/password .*your own account'
     }
 
@@ -197,7 +197,7 @@ Describe 'Shared entries in KeePass' {
         $project = Get-Content -LiteralPath (Join-Path $repository 'localvault.json') -Raw | ConvertFrom-Json
         $project.default.store | Should -Be 'team'
 
-        $saved = & $runInChild "lv save --path '$vault'" "ring master 1`n$master"
+        $saved = & $runInChild "lv save -Path '$vault'" "ring master 1`n$master"
         $saved.ExitCode | Should -Be 0 -Because $saved.Output
         $saved.Output | Should -Match "'ring' doesn't hold its password yet"
 
@@ -209,7 +209,7 @@ Describe 'Shared entries in KeePass' {
         finally { $keyring.Dispose() }
         Set-VaultEntry -Path $vault -Name 'y' -Value (ConvertTo-TestSecret 'y-1')
 
-        $again = & $runInChild "lv save --path '$vault'" 'ring master 1'
+        $again = & $runInChild "lv save -Path '$vault'" 'ring master 1'
         $again.ExitCode | Should -Be 0 -Because $again.Output
         $again.Output | Should -Match "with the password kept in 'ring'"
         $again.Output | Should -Match '1 added'
@@ -217,7 +217,7 @@ Describe 'Shared entries in KeePass' {
         $project.default.id = 'ffffffffffffffffffffffffffffffff'
         $project | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $repository 'localvault.json')
         Register-VaultStore -Name 'other' -Target (Join-Path $folder 'team.kdbx') | Out-Null
-        $wrong = & $runInChild "lv save --path '$vault'" 'ring master 1'
+        $wrong = & $runInChild "lv save -Path '$vault'" 'ring master 1'
         $wrong.ExitCode | Should -Not -Be 0
         $wrong.Output | Should -Match 'is another database'
     }
@@ -287,9 +287,9 @@ Describe 'Stores of the PC and of the project' {
     It 'saves each vault to its own store, opening each store once' {
         Push-Location $repository
         try {
-            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj', '-Project', '-Default'
             lv @arguments 6>$null | Out-Null
-            $arguments = 'store', 'add', 'mine', $personalDb
+            $arguments = 'store', 'add', $personalDb, '-Name', 'mine'
             lv @arguments | Out-Null
         }
         finally { Pop-Location }
@@ -298,7 +298,7 @@ Describe 'Stores of the PC and of the project' {
         $project.stores[0].name | Should -Be 'proj'
         $project.default.store | Should -Be 'proj'
 
-        $used = & $runInChild "lv store use mine --path '$migration'"
+        $used = & $runInChild "lv store use mine -Path '$migration'"
         $used.ExitCode | Should -Be 0 -Because $used.Output
         git -C $repository remote add origin 'https://someone:pat@dev.example/org/_git/repo'
 
@@ -331,13 +331,13 @@ Describe 'Stores of the PC and of the project' {
         Register-VaultStore -Name 'mine' -Target $personalDb -Mirror | Out-Null
         Push-Location $repository
         try {
-            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj', '-Project', '-Default'
             lv @arguments 6>$null | Out-Null
-            $arguments = 'store', 'add', 'offsite', $offsite, '--project', '--mirror'
+            $arguments = 'store', 'add', $offsite, '-Name', 'offsite', '-Project', '-Mirror'
             lv @arguments 6>$null | Out-Null
         }
         finally { Pop-Location }
-        (& $runInChild "lv store use mine --path '$migration'").ExitCode | Should -Be 0
+        (& $runInChild "lv store use mine -Path '$migration'").ExitCode | Should -Be 0
         $before = [IO.File]::ReadAllBytes($infra)
 
         $saved = & $runInChild "Set-Location '$repository'; lv save" "$master`n$master`n$master"
@@ -354,7 +354,7 @@ Describe 'Stores of the PC and of the project' {
 
         Set-VaultEntry -Path $infra -Name 'infra-2' -Value (ConvertTo-TestSecret 'i-2') 6>$null
         Move-Item -LiteralPath $offsite -Destination "$offsite.away"
-        $partial = & $runInChild "Set-Location '$repository'; lv save --path '$infra'" "$master`n$master"
+        $partial = & $runInChild "Set-Location '$repository'; lv save -Path '$infra'" "$master`n$master"
         $partial.ExitCode | Should -Be 0 -Because $partial.Output
         $partial.Output | Should -Match "mirror 'offsite' not saved"
         $partial.Output | Should -Match "-> store 'proj'.*1 added"
@@ -370,12 +370,12 @@ Describe 'Stores of the PC and of the project' {
     It 'a clone without the personal store loads the project store and skips the other vault' {
         Push-Location $repository
         try {
-            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj', '-Project', '-Default'
             lv @arguments 6>$null | Out-Null
             Register-VaultStore -Name 'mine' -Target $personalDb | Out-Null
         }
         finally { Pop-Location }
-        (& $runInChild "lv store use mine --path '$migration'").ExitCode | Should -Be 0
+        (& $runInChild "lv store use mine -Path '$migration'").ExitCode | Should -Be 0
         (& $runInChild "Set-Location '$repository'; lv save" "$master`n$master").ExitCode | Should -Be 0
 
         Unregister-VaultStore -Name 'mine'
@@ -391,7 +391,7 @@ Describe 'Stores of the PC and of the project' {
         $status[0].Store | Should -Be 'mine'
         $status[0].Problem | Should -Match "isn't defined on this PC"
         $start = & $runInChild "Set-Location '$repository'; lv start"
-        $start.Output | Should -Match 'lv store add mine <path to its .kdbx>'
+        $start.Output | Should -Match 'lv store add <path to its .kdbx> -Name mine'
     }
 
     It 'refuses personal details in a project store and removing a store still in use' {
@@ -408,11 +408,11 @@ Describe 'Stores of the PC and of the project' {
     It 'keeps personal values in the personal store and fills them in on another PC' {
         Push-Location $repository
         try {
-            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj', '-Project', '-Default'
             lv @arguments 6>$null | Out-Null
-            $arguments = 'store', 'add', 'mine', $personalDb, '--personal'
+            $arguments = 'store', 'add', $personalDb, '-Name', 'mine', '-Personal'
             (lv @arguments 6>&1 | Out-String) | Should -Match "'mine' is this PC's personal store"
-            $arguments = 'require', 'os', '--credential', '--note', 'domain account', '--path', $infra
+            $arguments = 'require', 'os', '-Credential', '-Note', 'domain account', '-Path', $infra
             lv @arguments 6>$null
         }
         finally { Pop-Location }
@@ -446,14 +446,14 @@ Describe 'Stores of the PC and of the project' {
         [IO.File]::WriteAllText((Join-Path $home1 '.ssh/id_test'), "-----BEGIN OPENSSH PRIVATE KEY-----`nfake`n")
         Push-Location $repository
         try {
-            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj', '-Project', '-Default'
             lv @arguments 6>$null | Out-Null
-            $arguments = 'store', 'add', 'mine', $personalDb, '--personal'
+            $arguments = 'store', 'add', $personalDb, '-Name', 'mine', '-Personal'
             lv @arguments 6>$null | Out-Null
         }
         finally { Pop-Location }
 
-        $declared = & $runInChild "`$env:USERPROFILE = '$home1'; lv require ssh/id --file '~/.ssh/id_test' --note 'your key' --path '$infra'; lv set ssh/id --file '$home1\.ssh\id_test' --path '$infra'; Set-Location '$repository'; lv save" "$master`n$master"
+        $declared = & $runInChild "`$env:USERPROFILE = '$home1'; lv require ssh/id -StoredPath '~/.ssh/id_test' -Note 'your key' -Path '$infra'; lv set ssh/id -FilePath '$home1\.ssh\id_test' -Path '$infra'; Set-Location '$repository'; lv save" "$master`n$master"
         $declared.ExitCode | Should -Be 0 -Because $declared.Output
         $declared.Output | Should -Match "infra/secrets.local.lv -> personal store 'mine'.*1 of your values added"
         $declared.Output | Should -Not -Match 'fake'
@@ -479,18 +479,18 @@ Describe 'Stores of the PC and of the project' {
 
         [IO.File]::WriteAllText($key, 'changed')
         $again = & $runInChild "`$env:USERPROFILE = '$home2'; Set-Location '$repository'; lv load" "$master`n$master"
-        $again.Output | Should -Match 'lv restore ssh/id --overwrite'
+        $again.Output | Should -Match 'lv restore ssh/id -Overwrite'
         [IO.File]::ReadAllText($key) | Should -Be 'changed'
     }
 
     It 'leaves personal values out of a personal store that is also the project store, without a console' {
         Push-Location $repository
         try {
-            $arguments = 'store', 'add', 'proj', $projectDb, '--project', '--default'
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj', '-Project', '-Default'
             lv @arguments 6>$null | Out-Null
-            $arguments = 'store', 'add', 'proj', $projectDb
+            $arguments = 'store', 'add', $projectDb, '-Name', 'proj'
             lv @arguments 6>$null | Out-Null
-            $arguments = 'store', 'set', 'proj', '--personal'
+            $arguments = 'store', 'set', 'proj', '-Personal'
             lv @arguments 6>$null | Out-Null
             { Set-VaultStore -Name 'proj' -Personal -Project } | Should -Throw '*personal store belongs to this PC*'
         }

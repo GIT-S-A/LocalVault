@@ -241,7 +241,7 @@ public abstract partial class VaultCmdletBase : PSCmdlet, IVaultHost
                     }
                     else if (!File.ReadAllBytes(target).AsSpan().SequenceEqual(content))
                     {
-                        WriteWarning($"Kept the existing '{target}'; it differs from your {entry.Name}. Run lv restore {entry.Name} --overwrite to replace it.");
+                        WriteWarning($"Kept the existing '{target}'; it differs from your {entry.Name}. Run lv restore {entry.Name} -Overwrite to replace it.");
                     }
                 }
                 finally

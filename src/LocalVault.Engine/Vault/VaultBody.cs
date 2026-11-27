@@ -218,7 +218,7 @@ public sealed class VaultBody
         if (entry.IsUnderHome && !entry.IsRequired && entry.Ssh is null && existing is not { IsRequired: true })
         {
             throw new VaultException(
-                $"'{entry.Name}' would be restored under your profile ({entry.StoredPath}); only a required entry's personal value can. Declare it with lv require {entry.Name} --file <path> first.");
+                $"'{entry.Name}' would be restored under your profile ({entry.StoredPath}); only a required entry's personal value can. Declare it with lv require {entry.Name} -StoredPath <path> first.");
         }
 
         if (existing is not null)

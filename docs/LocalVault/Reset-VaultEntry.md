@@ -203,7 +203,7 @@ This cmdlet returns no output.
 
 ## NOTES
 
-`lv reset <name> ... [--no-ask]` runs this cmdlet.
+`lv reset <name> ... [-NoPrompt]` runs this cmdlet.
 
 ## RELATED LINKS
 

@@ -196,11 +196,11 @@ internal static class VaultSync
             {
                 StoreSyncState.ChangedInKeePass when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it changed in personal store '{saved.Target.Name}' since your last save or load. Run lv load first.",
                 StoreSyncState.RemovedInKeePass when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it was removed from personal store '{saved.Target.Name}'. Run lv load, then lv save to put it back.",
-                _ when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it changed here and in personal store '{saved.Target.Name}'. Use --replace {skipped.Name} to overwrite it there, or lv load to take it.",
+                _ when saved.Personal => $"{label}: your value of '{skipped.Name}' not saved: it changed here and in personal store '{saved.Target.Name}'. Use -Replace {skipped.Name} to overwrite it there, or lv load to take it.",
                 StoreSyncState.OnlyInKeePass => $"{label}: '{skipped.Name}' exists only in mirror '{saved.Target.Name}'; left as it is.",
                 StoreSyncState.ChangedInKeePass => $"{label}: '{skipped.Name}' not saved: it changed in the store since your last save or load. Run lv load first.",
                 StoreSyncState.RemovedInKeePass => $"{label}: '{skipped.Name}' not saved: it was removed from the store. Run lv load to remove it here or keep it.",
-                _ => $"{label}: '{skipped.Name}' not saved: it changed here and in the store. Use --replace {skipped.Name} to overwrite the store, or lv load to see theirs.",
+                _ => $"{label}: '{skipped.Name}' not saved: it changed here and in the store. Use -Replace {skipped.Name} to overwrite the store, or lv load to see theirs.",
             });
         }
 
@@ -405,7 +405,7 @@ internal static class VaultSync
         $"Its value comes from KeePass entry '{reference.Title}' (store '{store}'); lv save won't change that entry.";
 
     public static string ReferenceAdvice(EntryName name, ItemReference reference, bool personal) =>
-        $"To change it for every project, edit '{reference.Title}' in KeePass. To use another source here: {(personal ? $"lv reset {name}" : $"lv set {name} --ref \"<group/title>\"")}";
+        $"To change it for every project, edit '{reference.Title}' in KeePass. To use another source here: {(personal ? $"lv reset {name}" : $"lv set {name} -Reference \"<group/title>\"")}";
 
     private static void ReportUnresolved(IVaultHost host, VaultLocation location, StoreContent content)
     {

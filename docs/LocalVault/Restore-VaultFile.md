@@ -238,7 +238,7 @@ the file and the **Action**: `Written`, `Identical` or `Kept`.
 
 ## NOTES
 
-`lv restore [<name> ...] [--overwrite]` runs this cmdlet. Without a name, it restores every file
+`lv restore [<name> ...] [-Overwrite]` runs this cmdlet. Without a name, it restores every file
 entry.
 
 ## RELATED LINKS

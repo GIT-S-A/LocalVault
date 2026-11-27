@@ -176,7 +176,7 @@ This cmdlet returns the **Target** path, the **Group**, and the number of entrie
 
 ## NOTES
 
-`lv store copy <target | name> [--keyfile <file>]` runs this cmdlet.
+`lv store copy <target | name> [-KeyFile <file>]` runs this cmdlet.
 
 ## RELATED LINKS
 

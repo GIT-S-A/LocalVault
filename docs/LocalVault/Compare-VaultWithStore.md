@@ -141,7 +141,7 @@ This cmdlet returns one object for each entry, with its **Name**, **Kind** and *
 
 ## NOTES
 
-`lv store diff [--store <name>]` runs this cmdlet.
+`lv store diff [-Store <name>]` runs this cmdlet.
 
 ## RELATED LINKS
 

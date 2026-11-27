@@ -223,19 +223,19 @@ Describe 'Windows Hello entries' {
         $status.Hardware | Should -BeTrue
         $status.KeyId | Should -Be $status.VaultKeyId
         $status.Entries | Should -Be 1
-        $arguments = @('hello', '--path', $vault)
+        $arguments = @('hello', '-Path', $vault)
         $text = lv @arguments | Out-String
         $text | Should -Match 'Windows Hello: Ready, TPM'
         $text | Should -Match '1 Hello entry'
     }
 
-    It 'marks entries through lv mark and seals through lv set --hello' {
+    It 'marks entries through lv mark and seals through lv set -Hello' {
         Set-VaultEntry -Path $vault -Name 'a' -Value (ConvertTo-TestSecret 'one') 6>$null
 
-        $arguments = @('mark', 'a', 'hello', '--path', $vault)
+        $arguments = @('mark', 'a', 'hello', '-Path', $vault)
         lv @arguments 6>$null
         (Get-VaultEntryList -Path $vault -WarningAction SilentlyContinue).Hello | Should -Be 'Ready'
-        $arguments = @('mark', 'a', 'nohello', '--path', $vault)
+        $arguments = @('mark', 'a', 'nohello', '-Path', $vault)
         lv @arguments 6>$null
         (Get-VaultEntryList -Path $vault -WarningAction SilentlyContinue).Hello | Should -Be ''
         $LASTEXITCODE | Should -Be 0
