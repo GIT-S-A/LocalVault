@@ -239,6 +239,7 @@ cmd: Set-VaultStore [-Name] n [-Mirror[:$false]] [-UnlockWith s | -NoUnlock] [-D
                                                         → named settings only (V102); -Personal: ⊥ with -Project, clears it on any other store
 cmd: Get-VaultStore [[-Name] n]                         → {Name, Scope, Type, Target, KeyFile, Default, Personal, UnlockWith, Exists}[]; project stores first
 cmd: Clear-Vault                                        → delete vault, ConfirmImpact High
+cmd: Initialize-Vault [-Path v]                          → .gitignore lines for vaults & template real files ⊥ ignored by a committed rule (V164)
 cmd: Set-VaultEntry -Name n -Reference "<group/title>" [-ReferenceStore s]  → value as reference (V131)
 cmd: Reset-VaultEntry -Name n[] [-NoPrompt]             → personal value removed, asked again (V137)
 cmd: New-VaultSshKey -Name n [-HostName h[]] [-Shared] [-Type ed25519|rsa|ecdsa] [-Comment c] [-Overwrite] [-Replace]
@@ -267,6 +268,7 @@ In-process cmdlet → `lv env` sets current window env directly.
 ```
 cmd: lv | lv help | lv --help | lv -h   commands + resolved vault path & state; vault ⊥ opened
 cmd: lv start [--path v]     project, vaults, stores → "Next:" commands ready to paste (carry --path); ⊥ store opened
+cmd: lv init [--path v]      Initialize-Vault
 cmd: lv list [scope]       no entry → info line: vault missing | empty
 cmd: lv set <name> [--file <path>] [--local] [--hello]   secret: stdin if redirected, else hidden prompt; --file → file entry; --hello → Set-VaultEntry -Hello
 cmd: lv require <name> [--credential] [--note <text>] [--hello]   Set-VaultEntry -Required [-Credential] [-Hello]
@@ -330,7 +332,7 @@ V13: unreadable vault (other user/machine DPAPI, corrupt, unknown magic) → err
 V14: file restore → path resolved under vault dir only; ⊥ `.git` segment, ⊥ `secrets.local.*` target; inside git repo target ! git-ignored unless `-SkipGitIgnoreCheck`; existing file w/ different content → confirm (default no) unless `-Force`; identical → silent.
 V15: export always `LOCALVAULT-2`; ⊥ write `SAAS-VAULT-1`.
 V16: plaintext buffers (BSTR, byte[]) zeroed after use where API allows (`ZeroFreeBSTR`, `Array.Clear`).
-V17: ∀ write creating vault file (new or migration) in git repo → `git check-ignore` ! ignored; not ignored | git fails | git missing → error, nothing written (fail closed). git run from nearest existing dir, timeout.
+V17: ∀ write creating vault file (new or migration) in git repo → `git check-ignore` ! ignored; not ignored & console → "Add <line> to .gitignore? [Y/n]" yes → added per V164, then created; no | non-interactive → error naming `lv init`, nothing written; git fails | git missing → error, nothing written (fail closed). git run from nearest existing dir, timeout.
 V18: `Use-VaultEnv` → current process env only; ⊥ user/machine env, ⊥ profile.
 V19: `Resolve-VaultEntry` → `-Name` must be unscoped key; scoped value wins over fallback; neither → error naming both tried names.
 V20: ∀ rewrite → unknown body/entry/meta fields & unknown kinds kept verbatim. body `schema` > current (4) → read allowed, write refused (newer module wrote it).
@@ -387,7 +389,7 @@ V70: `Copy-VaultToStore` → vault body unchanged (⊥ base, ⊥ tombstone chang
 V71: `lv` ∀ syntax error (word count, option not taken by command, missing option value, unknown subcommand) → message + `Usage: <command syntax>`, exit 1, nothing done.
 V72: `lv` tab completion: commands, subcommands, options taken by the command, vault entry names (names only, ⊥ values), store names after `--store`, `store rm`, `store use`; `shared`/`local` after `mark <name>`; else file paths.
 V73: superseded by V110 (⊥ `-Ref`, ⊥ worktree install).
-V74: `lv start` ⊥ write, ⊥ KeePass open, ⊥ value shown; suggestions: register DB if none; .gitignore if vault not ignored; subfolder vault if default absent; `kp load` (& `kp save` when pending) once DB registered.
+V74: `lv start` ⊥ write, ⊥ KeePass open, ⊥ value shown; suggestions: register DB if none; `lv init` if a vault or template real file ⊥ ignored by a committed rule (V164); subfolder vault if default absent; `kp load` (& `kp save` when pending) once DB registered.
 V75: `Copy-VaultEntry` → secret only; clipboard data marked `ExcludeClipboardContentFromMonitorProcessing`, `CanIncludeInClipboardHistory`=0, `CanUploadToCloudClipboard`=0; cleared after -Seconds (default 20) or at process exit, only if clipboard sequence number unchanged; value ⊥ printed.
 V76: required entry (kind `required` = declared, no value; secret w/ `meta.required` = personal value set): KeePass ⊥ value, gets declaration (`LocalVault.Kind`=required, Notes = note), sync hash over declaration; KeePass entry kind ≠ required → value fields removed; already required → value fields kept (personal store = primary, §I.Personal store); load ⊥ overwrite a personal value; export drops personal value (keeps declaration); read of missing value → error w/ note; `-Sharing` refused.
 V77: project file names DB → ∀ save|load|list refuse another DB (id compare after open), nothing written. Project file ⊥ secret.
@@ -456,7 +458,7 @@ V133: orphans: `lv start`, `lv list`, `Clear-Vault` (after its deletion) → orp
 V134: `settings.json` `sshInclude` true → `~/.ssh/config` starts w/ `Include ~/.ssh/*/lv.config` (added once before any `Host`/`Match`; file created if missing; ACL kept). ∀ ssh-key write → `lv.config` rewritten: ∀ entry, ∀ host → `Match host <host> user <user>` (⊥ user → `Match host <host>`) + `IdentityFile` current (+ old) + `IdentitiesOnly yes`. `Set-VaultSshInclude -Enabled:$false` → line removed. First ssh-key file write on PC & `sshInclude` absent & console → question default yes, answer stored; non-interactive → ⊥ asked.
 V135: `ssh.exe`, `ssh-keygen.exe`, `ssh-add.exe` from `settings.json` `sshDir` (absolute, all 3 present, else error naming missing) > `%SystemRoot%\System32\OpenSSH\` > error "Windows OpenSSH client not installed: Add-WindowsCapability -Online -Name OpenSSH.Client~~~~0.0.1.0". ⊥ PATH, ⊥ `%VAR%` in sshDir. Tests substitute via test-only setting.
 V136: `Invoke-VaultSsh` target: given > sole host > error listing hosts; unlisted target allowed (⊥ retirement test). `[user@]host[:port]` → `-p <port>` + destination (IPv6 `[]` removed); `-ArgumentList` after destination. `lv ssh`: PowerShell removes a typed `--` → 2nd word = target when it holds `@` | = one of the entry's hosts | `--` reached lv (splatted array); other words → ssh. stdin, stdout, stderr passed through; exit code = ssh's. Key missing → V116 prompt in console, else error. Private key path ⊥ printed.
-V137: `Reset-VaultEntry` → personal value only (shared | declaration only | unknown → error, nothing changed); value, `previous` & `meta.ref` removed, declaration kept, removal marker `personal:<db id>` (V78) → next load ⊥ refills, next save deletes | overwrites store copy; ⊥ store opened. Console → V125/V115 prompt at once; `-NoPrompt` skips. ssh-key files untouched; next value = replacement (V124).
+V137: `Reset-VaultEntry` → personal value only (shared | declaration only | unknown → error, nothing changed); value, `previous` & `meta.ref` removed, declaration kept, ∀ personal base → removal marker `personal:<db id>` (V79) → next load ⊥ refills; next save deletes store copy (personal store = project primary → value removed, declaration kept); value set again before that save → marker → base (as V65) → save overwrites store copy; ⊥ store opened. Console → V125/V115 prompt at once; `-NoPrompt` skips. ssh-key: files untouched; `meta.reset` := {publicKey, agent} (this PC only: ⊥ export, ⊥ store) → V125 adoption skips a file whose public key = it; next key (menu | `New-VaultSshKey`) = replacement w/o confirmation: `previous` := reset key (file at path if its public key = it | agent public key), `meta.ssh.replacedAt` set, `.old` | `.old.pub` kept until every host accepts (V129); `meta.reset` dropped when a value is set.
 V138: body schema 5 (`previous`, `meta.ssh`, `meta.ref`, shape `ssh-key`); schema 4 → 5 no-op upgrade on first write; older modules refuse to write (C8).
 V139: `__SshPrivateKey` refusal message (V10) → "`__SshPrivateKey` refused: add the key with lv ssh-key new <name> or choose 'existing KeePass entry' at lv load".
 V140: ssh-key stored path ! `~/.ssh/<dir>/<file>` (exactly 4 segments); `<file>` ∉ {`.localvault`, `.localvault.lock`, `lv.config`} & ⊥ ends `.pub` | `.old`. Else refused; KeePass item w/ ssh fields & other path → skipped. ∴ store ⊥ plants `~/.ssh/authorized_keys` | `~/.ssh/config`.
@@ -483,6 +485,7 @@ V160: user-secrets load: per id one read-modify-write (temp + replace); keys com
 V161: user-secrets clear: tracked key removed only when value = vault value, else kept & named; empty object → file deleted, then folder if empty. `Clear-Vault` → that vault's tracked keys cleared (console: asked, as V101).
 V162: `lv user-secrets pick`: console only (⊥ console → error). Menu 1: ids w/ their projects. Menu 2: untracked keys of that file + "new key". Existing key → its value → vault entry (V159), tracked, file unchanged. New key → key asked, value hidden prompt → entry, tracked, V160 for that key. Values ⊥ shown.
 V163: `Import-VaultFromStore` (`lv load`) → after all vaults loaded, V160 for tracking of loaded vaults; conflict w/o console | declined → that id skipped & reported; load result unaffected.
+V164: `Initialize-Vault` (`lv init`): ⊥ git repo → error. ∀ vault (`-Path`, default path, `localvault.json` vaults) & ∀ template real file: ignored := `git check-ignore -v --no-index` rule from a `.gitignore` inside the repo (core.excludesFile, `.git/info/exclude` ⊥ count). ⊥ ignored → line appended to `<git root>/.gitignore` under `# LocalVault` (block created once, reused): default vault name → `secrets.local.*`; other vault → `/<dir>/<file name>*`; real file → `/<path>`; paths relative to git root, `/` separators. `.gitignore` created if absent; existing lines ⊥ changed; line endings kept; ⊥ commit, ⊥ vault created. Reports each line added + "Commit .gitignore." | "Nothing to add."
 
 ## §T Tasks
 
@@ -580,6 +583,7 @@ T89|x|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, 
 T90|x|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
 T91|x|references resolved by module (`LocalVault.Ref`, kind `reference`), any PC store for personal values, shared refs into vault store | project `source` stores; `-ReferenceStore`/`--ref-store`, `-Source`/`--source`|I.References,V131,V132
 T92|.|`Reset-VaultEntry` / `lv reset`|V137
+T107|.|`Initialize-Vault` / `lv init`, create-time offer, `lv start` suggestion|V17,V74,V164
 T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset, .NET user secrets; beta19|C11
 T94|x|marker origin `""` ≠ URL; `lv start` shows adoption report & warning; `Get-VaultEntry` on ssh-key adopts first; tab completion ⊥ adopts|V126,V127,B30,B31
 T95|x|spike: NGC KSP → create OK (1 prompt); OAEP SHA-1/SHA-256 refused, PKCS#1 OK; AUTH_MANDATORY → 2nd decrypt on same handle prompts; `NgcKeyImplType` 0x21 = hardware; prompt shown w/ foreground hwnd when ⊥ console window|I.Hello
