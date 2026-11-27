@@ -144,6 +144,10 @@ Stops managing a templated file.
 
 Stops tracking a .NET user secret.
 
+### [Reset-VaultEntry](Reset-VaultEntry.md)
+
+Removes the personal value of required entries so that a new one is asked.
+
 ### [Resolve-VaultEntry](Resolve-VaultEntry.md)
 
 Gets a secret for a scope, or the shared secret when the scope has none.

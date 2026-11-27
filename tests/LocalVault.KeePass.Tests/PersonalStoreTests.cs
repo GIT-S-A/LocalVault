@@ -190,6 +190,89 @@ public sealed class PersonalStoreTests : IDisposable
     }
 
     [Fact]
+    public void ResetValueIsNotLoadedBackAndTheNextSaveDeletesIt()
+    {
+        var mine = Declared(null);
+        SetValue(mine, "my-password");
+        SavePersonal(personal, mine);
+
+        mine.ResetPersonalValue(Os);
+
+        Assert.True(mine.Find(Os)!.IsMissing);
+        Assert.Equal(StoreSyncState.RemovalPending, Assert.Single(ComparePersonal(personal, mine)).State);
+        Assert.Equal(0, LoadPersonal(personal, mine).Added);
+        Assert.True(mine.Find(Os)!.IsMissing);
+        Assert.Equal(1, SavePersonal(personal, mine).Deleted);
+        Assert.Empty(mine.KeePassRemovals);
+        using var keePass = KeePassStore.Open(personal, null, Master);
+        using var content = keePass.Read(Group);
+        Assert.Empty(content.Items);
+    }
+
+    [Fact]
+    public void ValueSetAfterAResetReplacesTheStoreCopy()
+    {
+        var mine = Declared(null);
+        SetValue(mine, "old");
+        SavePersonal(personal, mine);
+
+        mine.ResetPersonalValue(Os);
+        SetValue(mine, "new");
+
+        Assert.Empty(mine.KeePassRemovals);
+        Assert.Equal(1, SavePersonal(personal, mine).Updated);
+        Assert.Equal("new", RawField(personal, "os", PwDefs.PasswordField));
+    }
+
+    [Fact]
+    public void ResetWithThePrimaryAsPersonalStoreKeepsTheDeclaration()
+    {
+        var mine = Declared("your own account");
+        SetValue(mine, "my-password");
+        SaveTeam(mine);
+        SavePersonal(team, mine, withDeclaration: true);
+
+        mine.ResetPersonalValue(Os);
+
+        Assert.Equal(1, SavePersonal(team, mine, withDeclaration: true).Deleted);
+        Assert.Equal(VaultEntry.RequiredKind, RawField(team, "os", KeePassStore.KindField));
+        Assert.Equal("your own account", RawField(team, "os", PwDefs.NotesField));
+        Assert.Equal(string.Empty, RawField(team, "os", PwDefs.PasswordField));
+        var otherPc = VaultBody.CreateEmpty();
+        LoadTeam(otherPc);
+        Assert.Equal(0, LoadPersonal(team, otherPc).Added);
+        Assert.True(otherPc.Find(Os)!.IsMissing);
+    }
+
+    [Fact]
+    public void ResetRefusesASharedEntryAMissingValueAndAnUnknownName()
+    {
+        var body = Declared(null);
+        body.Set(VaultEntry.NewSecret(EntryName.Parse("shared"), "s"u8, Now));
+
+        Assert.Contains("not a required entry", Assert.Throws<VaultException>(() => body.ResetPersonalValue(EntryName.Parse("shared"))).Message, StringComparison.Ordinal);
+        Assert.Contains("no personal value", Assert.Throws<VaultException>(() => body.ResetPersonalValue(Os)).Message, StringComparison.Ordinal);
+        Assert.Throws<VaultException>(() => body.ResetPersonalValue(EntryName.Parse("unknown")));
+    }
+
+    [Fact]
+    public void ResetSshKeyIsRememberedOnThisPcOnly()
+    {
+        var body = VaultBody.CreateEmpty();
+        body.Set(VaultEntry.NewRequired(Os, null, Now, VaultEntry.SshKeyShape, "~/.ssh/proj/os"));
+        var publicKey = "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl agent";
+        body.SetPersonalValue(Os, VaultEntry.NewSshKey(Os, Encoding.UTF8.GetBytes(publicKey + "\n"), "~/.ssh/proj/os", new SshKeyInfo(SshKeyInfo.Ed25519, publicKey, [], Agent: true), [], Now));
+
+        body.ResetPersonalValue(Os);
+
+        var reset = body.Find(Os)!.ResetKey!;
+        Assert.True(reset.Agent);
+        Assert.Equal(publicKey, reset.PublicKey);
+        Assert.Null(body.ForExport().Find(Os)!.ResetKey);
+        Assert.Equal(publicKey, body.Clone().Find(Os)!.ResetKey!.PublicKey);
+    }
+
+    [Fact]
     public void EntriesTheVaultDoesNotRequireAreIgnored()
     {
         var mine = VaultBody.CreateEmpty();

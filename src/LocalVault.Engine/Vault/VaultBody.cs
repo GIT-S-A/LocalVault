@@ -224,6 +224,7 @@ public sealed class VaultBody
         if (existing is not null)
         {
             existing.CopyContentFrom(entry);
+            RestorePersonalBases(existing);
             return;
         }
 
@@ -247,6 +248,58 @@ public sealed class VaultBody
         }
 
         existing.CopyContentFrom(value);
+        RestorePersonalBases(existing);
+    }
+
+    public void ResetPersonalValue(EntryName name)
+    {
+        var existing = Find(name) ?? throw new VaultException($"No entry '{name}'.");
+        if (!existing.IsRequired)
+        {
+            throw new VaultException($"'{name}' is not a required entry; only a personal value can be reset.");
+        }
+
+        if (existing.IsMissing)
+        {
+            throw new VaultException($"'{name}' has no personal value on this PC.");
+        }
+
+        foreach (var (database, hash) in existing.KeePassBases.Where(b => b.Database?.StartsWith(VaultEntry.PersonalBasePrefix, StringComparison.Ordinal) == true))
+        {
+            RemovalsArray.Add(new JsonObject { [RemovedNameField] = name.FullName, [RemovedHashField] = hash, [RemovedDatabaseField] = database });
+        }
+
+        existing.ResetPersonalValue();
+    }
+
+    private void RestorePersonalBases(VaultEntry existing)
+    {
+        if (!existing.IsRequired || existing.IsMissing)
+        {
+            return;
+        }
+
+        existing.DropReset();
+        if (root[KeePassRemovedField] is not JsonArray removed)
+        {
+            return;
+        }
+
+        var personal = removed.OfType<JsonObject>()
+            .Where(item => EntryName.Parse(item[RemovedNameField]!.GetValue<string>()).Equals(existing.Name)
+                && item[RemovedDatabaseField]?.GetValue<string>().StartsWith(VaultEntry.PersonalBasePrefix, StringComparison.Ordinal) == true)
+            .ToList();
+        foreach (var node in personal)
+        {
+            removed.Remove(node);
+            var removal = ToRemoval(node);
+            existing.SetKeePassBase(removal.Database, removal.Hash, DateTimeOffset.UtcNow);
+        }
+
+        if (removed.Count == 0)
+        {
+            root.Remove(KeePassRemovedField);
+        }
     }
 
     public bool Remove(EntryName name) => Remove(name, recordForKeePass: true);
@@ -361,6 +414,7 @@ public sealed class VaultBody
         {
             entry.RemoveKeePassBase();
             entry.DropPersonalValue();
+            entry.DropReset();
             if (hello is not null && entry.IsSealable && !entry.IsRequired && hello.Contains(entry.Name))
             {
                 entry.MarkHello();

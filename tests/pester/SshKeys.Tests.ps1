@@ -230,6 +230,32 @@ Describe 'SSH keys' {
         finally { Clear-TestFolder -Folder (Split-Path $other) }
     }
 
+    It 'resets a personal key: its file is not taken back, and the next key keeps it as fallback' {
+        Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'
+        Register-VaultStore -Name team -Target (Join-Path $env:USERPROFILE 'team.kdbx') -Default | Out-Null
+        $first = New-VaultSshKey -Path $script:vault -Name me -HostName me@srv1.example.com 6>$null 3>$null
+        $key = Join-Path $script:keyFolder 'me'
+        $firstKey = Get-Content -LiteralPath $key -Raw
+        $module = Join-Path $env:LOCALVAULT_MODULE_PATH 'LocalVault.psd1'
+        $saved = 'pester master 1' | pwsh -NoProfile -NonInteractive -Command "Import-Module '$module'; Export-VaultToStore -Path '$script:vault'" 2>&1 | Out-String
+        $LASTEXITCODE | Should -Be 0 -Because $saved
+
+        Reset-VaultEntry -Path $script:vault -Name me -NoPrompt 6>$null
+        $loaded = 'pester master 1' | pwsh -NoProfile -NonInteractive -Command "Import-Module '$module'; Import-VaultFromStore -Path '$script:vault' 6>&1" 2>&1 | Out-String
+
+        $LASTEXITCODE | Should -Be 0 -Because $loaded
+        $loaded | Should -Not -Match 'using the key in'
+        (Get-VaultSshKey -Path $script:vault -Name me).Source | Should -Be 'missing'
+        Get-Content -LiteralPath $key -Raw | Should -Be $firstKey
+
+        $second = New-VaultSshKey -Path $script:vault -Name me 6>$null 3>$null
+
+        $second.Previous | Should -BeTrue
+        $second.Fingerprint | Should -Not -Be $first.Fingerprint
+        $second.Hosts | Should -Be @('me@srv1.example.com')
+        Get-Content -LiteralPath "$key.old" -Raw | Should -Be $firstKey
+    }
+
     Context 'a clone whose key another clone replaced' {
         BeforeEach {
             Initialize-TestKeePass -Path (Join-Path $env:USERPROFILE 'team.kdbx') -Master 'pester master 1'

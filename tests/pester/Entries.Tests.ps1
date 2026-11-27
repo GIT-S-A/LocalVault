@@ -85,6 +85,20 @@ Describe 'Secret entries' {
         }
     }
 
+    It 'resets a personal value through lv and refuses a shared or unset one' {
+        Set-VaultEntry -Path $vault -Name 'personal' -Required
+        Set-VaultEntry -Path $vault -Name 'personal' -Value (ConvertTo-TestSecret 'mine')
+        Set-VaultEntry -Path $vault -Name 'shared' -Value (ConvertTo-TestSecret 's')
+
+        $said = lv @('reset', 'personal', '--no-ask', '--path', $vault) 6>&1 | Out-String
+
+        $said | Should -Match 'personal: your value is removed from this vault\.'
+        (Get-VaultEntryList -Path $vault -WarningAction SilentlyContinue | Where-Object Name -EQ 'personal').Sync | Should -Be 'Missing'
+        { Reset-VaultEntry -Path $vault -Name 'shared' } | Should -Throw '*not a required entry*'
+        { Reset-VaultEntry -Path $vault -Name 'personal' } | Should -Throw '*no personal value*'
+        Get-VaultEntry -Path $vault -Name 'shared' -AsPlainText | Should -Be 's'
+    }
+
     It 'rejects an invalid name and writes nothing' {
         { Set-VaultEntry -Path $vault -Name 'a/b/c' -Value (ConvertTo-TestSecret '1') } | Should -Throw '*not a valid name*'
         Test-Path -LiteralPath $vault | Should -BeFalse

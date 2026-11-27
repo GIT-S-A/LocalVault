@@ -251,7 +251,7 @@ public abstract partial class VaultCmdletBase
     {
         var tools = SshTools.Find(new PcSettings(PcSettings.DefaultPath));
         var target = SshKeyFiles.TargetOf(declaration);
-        RefuseOccupiedKeyFile(location, declaration.Name, target);
+        RefuseOccupiedKeyFile(location, declaration, target);
         var comment = $"{Environment.UserName}@{Environment.MachineName} {RepositoryNameOf(location)}/{declaration.Name}";
         using var key = SshKeyGenerator.Generate(tools, System.IO.Path.GetDirectoryName(target)!, SshKeyInfo.Ed25519, comment);
         var ssh = new SshKeyInfo(SshKeyInfo.Ed25519, key.PublicKey, []);
@@ -260,26 +260,44 @@ public abstract partial class VaultCmdletBase
         return true;
     }
 
-    private static void RefuseOccupiedKeyFile(VaultLocation location, EntryName name, string target)
+    private static void RefuseOccupiedKeyFile(VaultLocation location, VaultEntry declaration, string target)
     {
         if (!File.Exists(target))
         {
             return;
         }
 
-        using var folder = SshKeyFolder.Open(System.IO.Path.GetDirectoryName(target)!);
-        var plan = folder.Plan(System.IO.Path.GetFileName(target), location.ReadOrigin()?.Url, location.Path, [], DateTimeOffset.MinValue, overwrite: false);
-        if (plan.Refused)
+        var current = SshKeyReset.PreviousOf(declaration) ?? [];
+        try
         {
-            throw new VaultException(SshKeyFiles.Describe(plan, name) + " Nothing was written.");
+            using var folder = SshKeyFolder.Open(System.IO.Path.GetDirectoryName(target)!);
+            var plan = folder.Plan(System.IO.Path.GetFileName(target), location.ReadOrigin()?.Url, location.Path, current, DateTimeOffset.MinValue, overwrite: false);
+            if (plan.Refused)
+            {
+                throw new VaultException(SshKeyFiles.Describe(plan, declaration.Name) + " Nothing was written.");
+            }
+        }
+        finally
+        {
+            System.Security.Cryptography.CryptographicOperations.ZeroMemory(current);
         }
     }
 
     private void StorePersonalSshKey(VaultLocation location, VaultEntry value)
     {
         var store = RepositoryVaults.StoreFor(location);
+        var declaration = store.Read().Body.Find(value.Name);
+        if (declaration is { IsMissing: true })
+        {
+            value = SshKeyReset.AsReplacement(declaration, value, Now);
+        }
+
         Report(store.Update(body => body.SetPersonalValue(value.Name, value)));
         WriteKeyFile(location, store.Read().Body.Find(value.Name)!, overwrite: false);
+        if (value.HasPrevious)
+        {
+            Say($"{value.Name}: the old key stays as a fallback until every host accepts the new one.");
+        }
     }
 
     private StoreDefinition? OfferPersonalStore(StoreAccess access)

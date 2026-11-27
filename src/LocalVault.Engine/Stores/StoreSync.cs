@@ -97,7 +97,11 @@ public static class StoreSync
             {
                 if (stored is not null)
                 {
-                    result.Add(new StoreComparison(entry.Name, stored.Kind, StoreSyncState.OnlyInKeePass, null, stored.Hash));
+                    var reset = PersonalRemovals(body, key).FirstOrDefault(r => r.Name.Equals(entry.Name));
+                    var state = reset is null
+                        ? StoreSyncState.OnlyInKeePass
+                        : reset.Hash == stored.Hash ? StoreSyncState.RemovalPending : StoreSyncState.ChangedInKeePass;
+                    result.Add(new StoreComparison(entry.Name, stored.Kind, state, null, stored.Hash));
                 }
 
                 continue;
@@ -472,9 +476,8 @@ public static class StoreSync
 
                     break;
                 case StoreSyncState.RemovalPending:
-                    if (!withDeclaration)
+                    if (DeletePersonalValue(target, groupPath, comparison.Name, entry, withDeclaration))
                     {
-                        target.Delete(groupPath, comparison.Name);
                         deleted++;
                     }
 
@@ -501,6 +504,18 @@ public static class StoreSync
             dropped.Add(removal.Name);
         }
 
+        foreach (var removal in PersonalRemovals(body, key)
+            .Where(r => body.Find(r.Name) is { IsMissing: true } && keePass.LinkFor(r.Name, personal: true) is not null && !dropped.Contains(r.Name))
+            .ToList())
+        {
+            if (DeletePersonalValue(target, groupPath, removal.Name, body.Find(removal.Name), withDeclaration))
+            {
+                deleted++;
+            }
+
+            dropped.Add(removal.Name);
+        }
+
         dropped.AddRange(PersonalRemovals(body, key)
             .Where(r => PersonalValueOf(keePass.Find(r.Name)) is null && keePass.LinkFor(r.Name, personal: true) is null)
             .Select(r => r.Name));
@@ -510,6 +525,23 @@ public static class StoreSync
             HelloMissing = missing,
             ReferenceRefused = refused,
         };
+    }
+
+    private static bool DeletePersonalValue(IStore target, IReadOnlyList<string> groupPath, EntryName name, VaultEntry? declaration, bool withDeclaration)
+    {
+        if (!withDeclaration)
+        {
+            target.Delete(groupPath, name);
+            return true;
+        }
+
+        if (declaration is { IsMissing: true })
+        {
+            target.PutPersonalValue(groupPath, declaration, withDeclaration: true);
+            return true;
+        }
+
+        return false;
     }
 
     public static bool MaintainGuides(IStore target, VaultLocation location, RepositoryOrigin? origin)
@@ -555,7 +587,7 @@ public static class StoreSync
 
         foreach (var name in result.DroppedRemovals)
         {
-            if (body.Find(name) is null)
+            if (body.Find(name) is not { } entry || (result.Personal && entry.IsMissing))
             {
                 body.TakeRemovals(name, result.DatabaseId);
             }
@@ -685,7 +717,7 @@ public static class StoreSync
                     }
 
                     break;
-                case StoreSyncState.ChangedInKeePass when body.Find(comparison.Name) is not null:
+                case StoreSyncState.ChangedInKeePass when body.Find(comparison.Name) is { IsMissing: false }:
                 case StoreSyncState.Conflict when stored?.Reference is not null || takeConflict(comparison.Name):
                 case StoreSyncState.Saved when ReferenceMoved(body, stored):
                     if (TakePersonal(body, stored!, key, now, hello, notSealed))

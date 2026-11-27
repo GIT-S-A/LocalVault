@@ -41,6 +41,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Remove-VaultSshOrphan](#remove-vaultsshorphan): Deletes the SSH keys of clones that no longer exist on this PC.
 - [Remove-VaultTemplate](#remove-vaulttemplate): Stops managing a templated file.
 - [Remove-VaultUserSecret](#remove-vaultusersecret): Stops tracking a .NET user secret.
+- [Reset-VaultEntry](#reset-vaultentry): Removes the personal value of required entries so that a new one is asked.
 - [Resolve-VaultEntry](#resolve-vaultentry): Gets a secret for a scope, or the shared secret when the scope has none.
 - [Restore-VaultFile](#restore-vaultfile): Writes file entries of a vault back to disk.
 - [Set-VaultEntry](#set-vaultentry): Adds or replaces a secret, a credential or a file in a vault.
@@ -2932,6 +2933,7 @@ it says that the vault is missing or empty.
 | `mark` | `<name> hello\|nohello` | `Set-VaultEntry -Protection Hello\|Dpapi` |
 | `hello` | | `Get-VaultHelloStatus` |
 | `rm` | `<name>` | `Remove-VaultEntry` |
+| `reset` | `<name> ... [--no-ask]` | `Reset-VaultEntry` |
 | `env` | `<variable>=<name> ...` | `Use-VaultEnv` |
 | `restore` | `[<name> ...] [--overwrite]` | `Restore-VaultFile` |
 | `clear` | | `Clear-Vault` |
@@ -4189,6 +4191,146 @@ Specifies the user secrets by the **UserSecretsId** of a project of the reposito
 ### Notes
 
 `lv user-secrets untrack <id|project> <key>` runs this cmdlet.
+
+## Reset-VaultEntry
+
+Removes the personal value of required entries so that a new one is asked.
+
+### Syntax
+
+```text
+Reset-VaultEntry [-Name] <string[]> [-NoPrompt] [-Path <string>] [-WhatIf] [-Confirm]
+ [<CommonParameters>]
+```
+
+### Description
+
+The `Reset-VaultEntry` cmdlet removes the personal value of each named required entry from the vault.
+The declaration stays, so the entry is missing again. It also removes the value's previous key and
+its KeePass reference. No store is opened.
+
+The cmdlet refuses a shared entry, an entry with no personal value on this PC and an unknown name.
+Nothing is changed when one of the names is refused.
+
+| Step | Result |
+| --- | --- |
+| Next `Export-VaultToStore` (`lv save`) | The value is deleted from the personal store. When the personal store is the project's store, only the value is removed and the declaration stays. |
+| Next `Import-VaultFromStore` (`lv load`) | The value in the personal store isn't loaded back; a console asks for a new one. |
+| New value set before the next save | The save replaces the value in the personal store. |
+
+In a console, the cmdlet asks for the new values at once, as `lv load` does for missing values.
+`-NoPrompt` skips the question.
+
+For an SSH key, the key files under `~/.ssh` stay. The key isn't taken back from its file when the
+vault reads the entry again. The next key, from the menu or from `New-VaultSshKey`, replaces it
+without a confirmation: the old key becomes the fallback key, kept as `<file>.old` until every host
+of the entry accepts the new key.
+
+### Examples
+
+#### Example 1 - Replace a personal password
+
+```powershell
+Reset-VaultEntry -Name db.password
+```
+
+The cmdlet removes the value and asks for a new one. The next `lv save` writes it to the personal
+store.
+
+#### Example 2 - Drop a value without asking for a new one
+
+```powershell
+Reset-VaultEntry -Name deploy-key -NoPrompt
+```
+
+The next `lv load` in a console offers the SSH key menu for `deploy-key`.
+
+### Parameters
+
+#### -Confirm
+
+Prompts you for confirmation before running the cmdlet.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | cf |
+
+#### -Name
+
+Specifies the names of the required entries whose personal value is removed.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String[] |
+| Parameter sets | (All) |
+| Position | 0 |
+| Required | (All) |
+| Pipeline input | by property name |
+| Default value | None |
+| Aliases | None |
+
+#### -NoPrompt
+
+Indicates that the cmdlet doesn't ask for the new values. The next `lv load` in a console asks for
+them.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | None |
+
+#### -Path
+
+Specifies the path to the vault file. A relative path is resolved from the current location. If
+you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
+`secrets.local.lv` at the root of the git repository that contains the current location.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -WhatIf
+
+Shows what would happen if the cmdlet runs. The cmdlet isn't run.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | wi |
+
+### Inputs
+
+**System.String**: You can pipe objects that have a **Name** property to this cmdlet.
+
+### Outputs
+
+**None**: This cmdlet returns no output.
+
+### Notes
+
+`lv reset <name> ... [--no-ask]` runs this cmdlet.
 
 ## Resolve-VaultEntry
 

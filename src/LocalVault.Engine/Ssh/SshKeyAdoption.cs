@@ -27,6 +27,11 @@ public static class SshKeyAdoption
         try
         {
             var publicKey = OpenSshPrivateKey.PublicKeyOf(key);
+            if (SshKeyReset.IsResetKey(declaration, publicKey))
+            {
+                return null;
+            }
+
             var ssh = new SshKeyInfo(SshKeyInfo.TypeOf(publicKey), publicKey, []);
             return new AdoptedSshKey(VaultEntry.NewSshKey(declaration.Name, key, declaration.RequiredPath!, ssh, [], now), record.WrittenBy);
         }

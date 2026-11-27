@@ -113,7 +113,8 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             return;
         }
 
-        RefuseOccupiedTarget(target, name, replaced);
+        var resetKey = existing is { IsMissing: true } ? SshKeyReset.PreviousOf(existing) : null;
+        RefuseOccupiedTarget(target, name, replaced, resetKey);
         if (replaced is not null && !Replace && !ConfirmReplacement(name, target, personal))
         {
             Say($"{name} keeps its key. Nothing was written.");
@@ -121,12 +122,12 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
         }
 
         var comment = Comment ?? $"{Environment.UserName}@{Environment.MachineName} {repository}/{name}";
-        byte[] previous = replaced?.GetValue() ?? [];
+        byte[] previous = replaced?.GetValue() ?? resetKey ?? [];
         VaultEntry stored;
         try
         {
             using var key = SshKeyGenerator.Generate(tools, System.IO.Path.GetDirectoryName(target)!, Type, comment);
-            var ssh = new SshKeyInfo(Type, key.PublicKey, personal ? [] : hosts, ReplacedAt: replaced is null ? null : Now);
+            var ssh = new SshKeyInfo(Type, key.PublicKey, personal ? [] : hosts, ReplacedAt: previous.Length == 0 ? null : Now);
             var value = VaultEntry.NewSshKey(name, key.PrivateKey, storedPath, ssh, previous, Now);
             Report(VaultFile.Update(
                 body =>
@@ -147,7 +148,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
         }
 
         WriteKeyFile(stored, Overwrite);
-        if (replaced is not null)
+        if (stored.HasPrevious)
         {
             Say($"{name}: the old key stays as a fallback until every host accepts the new one.");
         }
@@ -214,7 +215,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             : [];
     }
 
-    private void RefuseOccupiedTarget(string target, EntryName name, VaultEntry? replaced)
+    private void RefuseOccupiedTarget(string target, EntryName name, VaultEntry? replaced, byte[]? resetKey)
     {
         var directory = System.IO.Path.GetDirectoryName(target)!;
         if (!System.IO.Directory.Exists(directory))
@@ -222,7 +223,7 @@ public sealed class NewVaultSshKeyCommand : SshKeyCmdletBase
             return;
         }
 
-        byte[] current = replaced is null ? [] : SshKeyFiles.KeyFileBytesOf(replaced);
+        byte[] current = replaced is null ? [.. resetKey ?? []] : SshKeyFiles.KeyFileBytesOf(replaced);
         try
         {
             using var folder = SshKeyFolder.Open(directory);

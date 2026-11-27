@@ -12,6 +12,7 @@ $script:LvSyntax = @{
     mark    = @{ Usage = 'lv mark <name> shared|local|hello|nohello'; Min = 2; Max = 2; Options = @() }
     hello   = @{ Usage = 'lv hello   (Windows Hello key state on this PC)'; Min = 0; Max = 0; Options = @() }
     rm      = @{ Usage = 'lv rm <name>'; Min = 1; Max = 1; Options = @() }
+    reset   = @{ Usage = 'lv reset <name> ... [--no-ask]'; Min = 1; Max = [int]::MaxValue; Options = @('no-ask') }
     env     = @{ Usage = 'lv env <VARIABLE>=<name> [<VARIABLE>=<name> ...]'; Min = 1; Max = [int]::MaxValue; Options = @() }
     restore = @{ Usage = 'lv restore [<name> ...] [--overwrite]'; Min = 0; Max = [int]::MaxValue; Options = @('overwrite') }
     clear   = @{ Usage = 'lv clear'; Min = 0; Max = 0; Options = @() }
@@ -30,14 +31,14 @@ $script:LvSyntax = @{
 }
 $script:LvValueOptions = @('path', 'file', 'replace', 'store', 'unlock-with', 'keyfile', 'note', 'capture', 'host', 'type', 'comment', 'stdin', 'ref', 'ref-store', 'entry')
 $script:LvListOptions = @('host')
-$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'hello', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared', 'source', 'no-source')
+$script:LvFlagOptions = @('replace-all', 'overwrite', 'downgrade', 'default', 'local', 'hello', 'show', 'credential', 'project', 'mirror', 'no-mirror', 'personal', 'no-personal', 'no-unlock', 'accept', 'version', 'help', 'shared', 'source', 'no-source', 'no-ask')
 $script:LvSubcommands = @{
     store  = @('list', 'add', 'set', 'rm', 'use', 'diff', 'copy')
     template = @('add', 'update', 'render', 'clear', 'rm')
     'ssh-key' = @('list', 'new', 'hosts', 'path', 'tools', 'include', 'clean')
     'user-secrets' = @('list', 'set', 'get', 'pick', 'untrack', 'load', 'clear')
 }
-$script:LvEntryCommands = @('get', 'clip', 'rm', 'mark', 'set', 'restore')
+$script:LvEntryCommands = @('get', 'clip', 'rm', 'mark', 'set', 'restore', 'reset')
 $script:LvTargetPattern = '[\\/]|\.kdbx$|^[A-Za-z][A-Za-z0-9]+:'
 
 function Get-LocalVaultRelease {
@@ -91,7 +92,7 @@ function Get-LocalVaultCompletion {
         elseif (($command -eq 'ssh-key' -and $positional.Count -eq 2 -and $positional[1] -in 'hosts', 'path') -or ($command -in 'ssh', 'scp' -and $positional.Count -eq 1)) {
             [LocalVault.PowerShell.LocalVaultCompletion]::SshKeyNames($vaultPath, (Get-Location -PSProvider FileSystem).ProviderPath)
         }
-        elseif ($script:LvEntryCommands -contains $command -and ($positional.Count -eq 1 -or $command -eq 'restore')) {
+        elseif ($script:LvEntryCommands -contains $command -and ($positional.Count -eq 1 -or $command -in 'restore', 'reset')) {
             [LocalVault.PowerShell.LocalVaultCompletion]::EntryNames($vaultPath, (Get-Location -PSProvider FileSystem).ProviderPath, $command -eq 'restore')
         }
     )
@@ -140,6 +141,8 @@ Entries
   set|require <name> ... --hello       the same, when the value is set
   hello                                Windows Hello on this PC: key, TPM or software, entries not readable here
   rm <name>                            removes an entry
+  reset <name> ... [--no-ask]          drops your personal value here and, at lv save, from your personal store;
+                                       asks for a new one unless --no-ask
   env <VARIABLE>=<name> ...            sets environment variables in this window
   restore [<name> ...] [--overwrite]   writes file entries back to disk
   clear                                deletes the vault
@@ -276,7 +279,7 @@ Details: Get-Help Invoke-LocalVault -Full
         }
         if ($Command -eq '-h') { $Command = 'help' }
         if (-not $syntax.ContainsKey($Command)) {
-            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm env restore clear save load export import store template run ssh-key ssh scp user-secrets hello update. Run lv alone for details."
+            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm reset env restore clear save load export import store template run ssh-key ssh scp user-secrets hello update. Run lv alone for details."
         }
 
         $rule = $syntax[$Command]
@@ -466,6 +469,7 @@ Details: Get-Help Invoke-LocalVault -Full
             }
             'clip' { Copy-VaultEntry @vault -Name $words[0] }
             'rm' { Remove-VaultEntry @vault -Name $words[0] }
+            'reset' { Reset-VaultEntry @vault -Name $words.ToArray() -NoPrompt:([bool]$options['no-ask']) }
             'env' {
                 $map = @{}
                 foreach ($pair in $words) {

@@ -11,7 +11,7 @@
     NestedModules        = @('LocalVault.Cli.psm1')
     FunctionsToExport    = @('Invoke-LocalVault')
     CmdletsToExport      = @(
-        'Get-VaultEntryList', 'Get-VaultEntry', 'Get-VaultHelloStatus', 'Copy-VaultEntry', 'Set-VaultEntry', 'Remove-VaultEntry', 'Resolve-VaultEntry',
+        'Get-VaultEntryList', 'Get-VaultEntry', 'Get-VaultHelloStatus', 'Copy-VaultEntry', 'Set-VaultEntry', 'Remove-VaultEntry', 'Reset-VaultEntry', 'Resolve-VaultEntry',
         'Use-VaultEnv', 'Restore-VaultFile', 'Export-Vault', 'Import-Vault', 'Clear-Vault',
         'Export-VaultToStore', 'Import-VaultFromStore', 'Compare-VaultWithStore', 'Copy-VaultToStore', 'Get-VaultStoreStatus', 'Set-VaultProjectStore',
         'Register-VaultStore', 'Set-VaultStore', 'Unregister-VaultStore', 'Get-VaultStore',

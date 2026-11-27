@@ -56,6 +56,7 @@ it says that the vault is missing or empty.
 | `mark` | `<name> hello\|nohello` | `Set-VaultEntry -Protection Hello\|Dpapi` |
 | `hello` | | `Get-VaultHelloStatus` |
 | `rm` | `<name>` | `Remove-VaultEntry` |
+| `reset` | `<name> ... [--no-ask]` | `Reset-VaultEntry` |
 | `env` | `<variable>=<name> ...` | `Use-VaultEnv` |
 | `restore` | `[<name> ...] [--overwrite]` | `Restore-VaultFile` |
 | `clear` | | `Clear-Vault` |

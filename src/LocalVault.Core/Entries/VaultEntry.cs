@@ -49,6 +49,7 @@ public sealed class VaultEntry
     private const string RefItemField = "item";
     private const string RefAttachmentField = "attachment";
     private const string RefTitleField = "title";
+    private const string ResetField = "reset";
 
     internal VaultEntry(JsonObject node)
     {
@@ -160,6 +161,28 @@ public sealed class VaultEntry
                 ssh[AgentField] is JsonValue agent && agent.TryGetValue<bool>(out var isAgent) && isAgent,
                 replacedAt is null ? null : DateTimeOffset.Parse(replacedAt, CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal));
         }
+    }
+
+    public SshKeyInfo? ResetKey =>
+        Meta?[ResetField] is JsonObject reset
+            ? new SshKeyInfo(
+                SshKeyInfo.TypeOf(reset[PublicKeyField]!.GetValue<string>()),
+                reset[PublicKeyField]!.GetValue<string>(),
+                [],
+                reset[AgentField] is JsonValue agent && agent.TryGetValue<bool>(out var isAgent) && isAgent)
+            : null;
+
+    public VaultEntry WithPreviousKey(ReadOnlySpan<byte> previous, DateTimeOffset replacedAt)
+    {
+        if (Meta?[SshField] is not JsonObject)
+        {
+            throw new VaultException($"'{Name}' is not an SSH key.");
+        }
+
+        var copy = Clone();
+        copy.Node[PreviousField] = Convert.ToBase64String(previous);
+        ((JsonObject)copy.Meta![SshField]!)[ReplacedAtField] = replacedAt.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture);
+        return copy;
     }
 
     public ItemReference? Reference =>
@@ -629,6 +652,29 @@ public sealed class VaultEntry
         }
     }
 
+    internal void ResetPersonalValue()
+    {
+        var ssh = Ssh;
+        DropPersonalValue();
+        foreach (var (database, _) in KeePassBases.Where(b => b.Database?.StartsWith(PersonalBasePrefix, StringComparison.Ordinal) == true).ToList())
+        {
+            SetKeePassBase(database, null, DateTimeOffset.UtcNow);
+        }
+
+        if (ssh is not null)
+        {
+            var reset = new JsonObject { [PublicKeyField] = ssh.PublicKey };
+            if (ssh.Agent)
+            {
+                reset[AgentField] = true;
+            }
+
+            EnsureMeta()[ResetField] = reset;
+        }
+    }
+
+    internal void DropReset() => Meta?.Remove(ResetField);
+
     internal void RetirePrevious()
     {
         Node.Remove(PreviousField);
@@ -883,6 +929,14 @@ public sealed class VaultEntry
                 && IsOptionalString(refFields[RefAttachmentField])))
         {
             throw new VaultException($"Vault entry '{Name}' has KeePass reference data that is damaged.");
+        }
+
+        if (fields[ResetField] is { } resetKey
+            && !(resetKey is JsonObject resetFields
+                && resetFields[PublicKeyField] is JsonValue resetPublicKey && resetPublicKey.TryGetValue<string>(out var resetText) && IsPublicKey(resetText)
+                && (resetFields[AgentField] is null || (resetFields[AgentField] is JsonValue resetAgent && resetAgent.TryGetValue<bool>(out _)))))
+        {
+            throw new VaultException($"Vault entry '{Name}' has SSH reset data that is damaged.");
         }
 
         if (fields[LocalField] is { } local && !(local is JsonValue localValue && localValue.TryGetValue<bool>(out _)))

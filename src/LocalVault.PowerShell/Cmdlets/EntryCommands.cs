@@ -877,6 +877,57 @@ public sealed class RemoveVaultEntryCommand : VaultCmdletBase
     }
 }
 
+[Cmdlet(VerbsCommon.Reset, "VaultEntry", SupportsShouldProcess = true)]
+public sealed class ResetVaultEntryCommand : VaultCmdletBase
+{
+    [Parameter(Mandatory = true, Position = 0, ValueFromPipelineByPropertyName = true)]
+    public string[] Name { get; set; } = [];
+
+    [Parameter]
+    public SwitchParameter NoPrompt { get; set; }
+
+    protected override void Run()
+    {
+        var names = Name.Select(EntryName.Parse).Distinct().ToList();
+        var before = ReadVault().Body;
+        var check = before.Clone();
+        foreach (var name in names)
+        {
+            check.ResetPersonalValue(name);
+        }
+
+        if (!ShouldProcess($"{string.Join(", ", names)} in {Location.Path}", "Reset your personal value"))
+        {
+            return;
+        }
+
+        Report(VaultFile.Update(body =>
+        {
+            foreach (var name in names)
+            {
+                body.ResetPersonalValue(name);
+            }
+        }));
+        foreach (var name in names)
+        {
+            var saved = before.Find(name)!.KeePassBases.Any(b => b.Database?.StartsWith(VaultEntry.PersonalBasePrefix, StringComparison.Ordinal) == true);
+            Say((check.Find(name)!.ResetKey is null
+                    ? $"{name}: your value is removed from this vault."
+                    : $"{name}: your key is removed from this vault. Its file stays, and the next key keeps it as the fallback key until every host accepts the new one.")
+                + (saved ? " lv save removes it from your personal store." : string.Empty));
+        }
+
+        if (NoPrompt || !IsInteractive)
+        {
+            Say("lv load asks for the new value in a console, or set it with lv set <name>.");
+            return;
+        }
+
+        using var access = new StoreAccess(this, null);
+        FillMissingValues(access, [Location], names.ToHashSet());
+    }
+}
+
 [Cmdlet(VerbsDiagnostic.Resolve, "VaultEntry")]
 [OutputType(typeof(SecureString), typeof(string))]
 public sealed class ResolveVaultEntryCommand : VaultCmdletBase
