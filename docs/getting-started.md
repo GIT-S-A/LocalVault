@@ -21,6 +21,7 @@ run next.
 
 ```powershell
 cd C:\src\webshop
+lv init                             # adds secrets.local.* to .gitignore; commit it
 lv set db/password                  # asks for the value, hidden
 lv set api.token --local            # stays on this PC, never sent to a store
 lv set github --credential          # user name, password, optional TOTP and URLs
@@ -31,7 +32,7 @@ lv list                             # names, kinds and ages; never a value
 |---|---|
 | Vault file | `secrets.local.lv` at the root of the git repository |
 | Sealing | Windows DPAPI, current user on this PC |
-| Requirement | git ignores the file: `.gitignore` holds `secrets.local.*` |
+| Requirement | git ignores the file: `lv init` adds `secrets.local.*` to `.gitignore` |
 | Names | `key` or `scope/key`, such as `prod/db.password` |
 
 The vault is created by the first `lv set`, after a confirmation. A copy of the file is unreadable on
@@ -101,9 +102,9 @@ declaration and its note; the value goes to each person's personal store only.
 
 ```powershell
 lv require db/admin --credential --note "your own database account"
-lv require ssh/deploy --file ~/.ssh/id_deploy --note "your deploy key"
+lv require kube --file ~/.kube/config-webshop --note "your cluster credentials"
 lv set db/admin                                # asks for the user name and the password
-lv set ssh/deploy --file ~/.ssh/id_deploy      # reads the key file
+lv set kube --file ~/.kube/config-webshop      # reads the file
 lv save
 ```
 
@@ -111,14 +112,41 @@ lv save
 |---|---|---|
 | `lv require <name>` | a hidden value | into the vault |
 | `lv require <name> --credential` | a user name and a password | into the vault |
-| `lv require <name> --file <path>` | a file, such as an SSH private key | into the vault, and to `<path>` |
+| `lv require <name> --file <path>` | a file | into the vault, and to `<path>` |
 
-`~/` is the user's profile. A file written there, such as `~/.ssh/id_deploy`, is readable by the
-user, SYSTEM and Administrators only, as OpenSSH requires. `lv load` writes it when it is missing and
-never replaces an existing file; `lv restore <name> --overwrite` replaces it. Only a person's own
-value can be written under the profile; a file in the team store with such a path is never loaded.
+`~/` is the user's profile. A file written there is readable by the user, SYSTEM and Administrators
+only. `lv load` writes it when it is missing and never replaces an existing file;
+`lv restore <name> --overwrite` replaces it. Only a person's own value can be written under the
+profile; a file in the team store with such a path is never loaded.
 
-## 7. .NET user secrets
+A value already kept in the personal KeePass database can stay there:
+
+```powershell
+lv set db/admin --ref "Internet/Webshop DB"    # lv save writes where it comes from, never the value
+lv reset db/admin                              # drops the value here and, at lv save, in the personal store; asks again
+```
+
+## 7. SSH keys
+
+An SSH key entry is a key for SSH to the project's hosts. Each person has their own key unless the key
+is created with `--shared`.
+
+```powershell
+lv ssh-key new deploy --host deploy@web1.example.com   # prints the public key and copies it
+lv ssh deploy                                          # ssh to the key's only host
+lv scp deploy -- site.tar.gz deploy@web1.example.com:/srv/
+lv ssh-key include on                                  # optional: plain ssh and scp find the key too
+```
+
+| Item | Value |
+|---|---|
+| Key files | `~/.ssh/webshop/deploy` and `deploy.pub`, the same path in every clone |
+| Public key | added to the host by someone with access to it |
+| On another PC | `lv load` asks: a key from the SSH agent, a key in a KeePass entry, or a new key pair |
+| New key | `lv ssh-key new deploy --replace`; the old key stays as `deploy.old` until every host accepts the new one |
+| Clones deleted without `lv clear` | `lv ssh-key clean` deletes their keys |
+
+## 8. .NET user secrets
 
 A .NET project with a `UserSecretsId` reads `%APPDATA%\Microsoft\UserSecrets\<id>\secrets.json`.
 LocalVault keeps chosen keys of that file in the vault and writes them back on every PC.
@@ -138,7 +166,7 @@ git add localvault.json; git commit -m "chore: track user secrets"
 
 Other keys of `secrets.json` are never changed.
 
-## 8. A new machine
+## 9. A new machine
 
 ```powershell
 # 1. installation, as in step 1
@@ -154,7 +182,7 @@ SSH keys. In a console, it then asks for each required value still missing, show
 offers to save what was typed to the personal store. It then writes the tracked .NET user secrets.
 `lv start` lists anything left to do.
 
-## 9. A copy outside the stores
+## 10. A copy outside the stores
 
 Entries marked local exist on this PC only. `lv list` warns when such entries were not exported in the
 last 30 days.

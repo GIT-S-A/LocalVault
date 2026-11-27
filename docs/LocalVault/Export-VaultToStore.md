@@ -76,7 +76,8 @@ store only, without mirrors.
 
 When this PC has a personal store (`Register-VaultStore -Personal`), the cmdlet also writes there
 each value of a required entry set on this PC, in the vault's group, with the same rules as shared
-entries; the project store and the mirrors get the declaration only. A personal store that is also a
+entries; the project store and the mirrors get the declaration only. A value removed with
+`Reset-VaultEntry` is deleted there; a new value set since then replaces it. A personal store that is also a
 mirror gets the shared entries too. When the personal store is also the vault's primary store, the
 cmdlet warns that everyone who opens it can read the values and asks first; the declaration and the
 value then share one entry. Without a console, it leaves the values out. A personal store that can't

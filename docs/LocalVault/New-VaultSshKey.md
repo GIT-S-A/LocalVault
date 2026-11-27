@@ -52,6 +52,9 @@ a personal key, the project's store for a shared one. The old key becomes the en
 written to `<name>.old`, and replaces any previous key kept before. The old public key stays
 registered on the hosts.
 
+After `Reset-VaultEntry`, the key still in the file becomes the previous key in the same way, without
+a confirmation.
+
 The cmdlet prints the public key and copies it to the clipboard for 2 minutes. The key is usable once
 the public key is added to the hosts it is for.
 

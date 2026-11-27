@@ -43,7 +43,7 @@ Versions install side by side; scripts pin the one they were written for:
 
 - Default: `secrets.local.lv` at the root of the git repository you are in. Elsewhere: `-Path`, or
   `$env:LOCALVAULT_PATH`.
-- Git must ignore it. Add one line to the project's `.gitignore`:
+- Git must ignore it. `lv init` adds one line to the project's `.gitignore`, to commit:
 
   ```gitignore
   secrets.local.*
@@ -66,12 +66,16 @@ when there is no `prod/db`.
 
 | Cmdlet | `lv` | Does |
 |---|---|---|
+| `Initialize-Vault` | `lv init` | adds the repository's vaults and the files written from templates to `.gitignore` |
 | `Get-VaultEntryList [-Scope]` | `lv list [scope]` | names, kind, store state, age; never a value |
 | `Set-VaultEntry -Name n [-Value <SecureString>] [-Local]` | `lv set n [--local]` | asks, or reads one line from redirected input |
 | `Set-VaultEntry -Name n -FilePath p [-StoredPath r]` | `lv set n --file p` | carries a file; restored to `r` beside the vault |
 | `Set-VaultEntry -Name n -Credential [-UserName u] [-Password s] [-Totp s] [-Url a,b]` | `lv set n --credential` | user name, password, TOTP and URLs as one entry; asks for each part |
 | `Set-VaultEntry -Name n#part [-Value s]` | `lv set n#user` | one part: `#user`, `#password`, `#totp`, `#url`, `#url2`...; empty removes it |
-| `Set-VaultEntry -Name n -Required [-Credential \| -StoredPath p] [-Note text]` | `lv require n [--credential \| --file p] [--note text]` | personal value each person sets (a user name and a password with `--credential`, a file such as an SSH key with `--file ~/.ssh/<key>`); the store gets the declaration only |
+| `Set-VaultEntry -Name n -Required [-Credential \| -StoredPath p] [-Note text]` | `lv require n [--credential \| --file p] [--note text]` | personal value each person sets (a user name and a password with `--credential`, a file under the profile with `--file ~/<path>`); the store gets the declaration only |
+| `Set-VaultEntry -Name n -Reference "group/title" [-ReferenceStore s]` | `lv set n --ref "group/title" [--ref-store s]` | the value stays in that KeePass entry; the store gets where it comes from |
+| `Reset-VaultEntry -Name n[] [-NoPrompt]` | `lv reset n... [--no-ask]` | drops a personal value here and, at the next save, in the personal store; asks for a new one |
+| `Set-VaultEntry -Name n -Hello`, `Get-VaultHelloStatus` | `lv set n --hello`, `lv mark n hello\|nohello`, `lv hello` | reads need Windows Hello on top of DPAPI; the state of Windows Hello on this PC |
 | `Set-VaultEntry -Name n -Sharing Shared\|Local` | `lv mark n shared\|local` | send to the store or keep on this PC |
 | `Get-VaultEntry -Name n[#part] [-AsPlainText] \| -AsCredential` | `lv get n[#part] [--show]` | SecureString by default; `lv get` into a pipe, or on screen with `--show`; `#totp` is the current code, `#user` and `#url` print anywhere |
 | `Copy-VaultEntry -Name n [-Seconds 20]` | `lv clip n` | clipboard for 20 s, out of the clipboard history |
@@ -99,7 +103,12 @@ when there is no `prod/db`.
 | `Set-VaultUserSecret [-Target] t [-Key] k [-Entry n[#part] \| -FromFile] [-Personal]` | `lv user-secrets set t k [--entry n] [--personal]`, `lv user-secrets pick` | keeps the value of key `k` in the vault, tracks it in localvault.json and writes it to the id's `secrets.json` |
 | `Get-VaultUserSecret [-Target] t [-Key] k`, `Remove-VaultUserSecret [-Target] t [-Key] k` | `lv user-secrets get t k`, `lv user-secrets untrack t k` | the tracked value; stop tracking a key |
 | `Write-VaultUserSecret [[-Target] t] [-Overwrite]`, `Clear-VaultUserSecret [[-Target] t]` | `lv user-secrets load [t] [--overwrite]`, `lv user-secrets clear [t]` | writes the tracked values, or removes those still equal to the vault's; `lv load` writes them too |
-| `Clear-Vault` | `lv clear` | deletes the vault and its previous version, the files written from its templates and its values in .NET user secrets |
+| `New-VaultSshKey -Name n [-HostName h,...] [-Shared] [-Replace]` | `lv ssh-key new n [--host h]... [--shared] [--replace]` | SSH key pair in `~/.ssh/<repository>/`; personal unless `--shared` |
+| `Get-VaultSshKey`, `Get-VaultSshKeyPath -Name n`, `Set-VaultSshKeyHost -Name n -HostName h,...` | `lv ssh-key list`, `lv ssh-key path n`, `lv ssh-key hosts n h...` | keys and fingerprints, never a private key; the key file to use; the hosts of a key |
+| `Invoke-VaultSsh -Name n [-Target h]`, `Invoke-VaultScp -Name n -ArgumentList ...` | `lv ssh n [h] [-- args]`, `lv scp n -- args` | ssh and scp with the key, and the old key while it is kept |
+| `Set-VaultSshInclude -Enabled $true`, `Set-VaultSshTools [-Directory d]` | `lv ssh-key include on\|off`, `lv ssh-key tools [d]` | `Include ~/.ssh/*/lv.config` in `~/.ssh/config`; the OpenSSH folder |
+| `Remove-VaultSshOrphan` | `lv ssh-key clean` | deletes the keys of clones that no longer exist, after one confirmation |
+| `Clear-Vault` | `lv clear` | deletes the vault and its previous version, the files written from its templates, its values in .NET user secrets and the SSH keys no other clone uses |
 
 `lv` alone shows the installed release, lists its commands and names the vault it would use (`lv --version`: the release only); a command used with a wrong syntax prints its usage. Tab completes commands, options and entry names. Every vault cmdlet takes `-Path`;
 `lv` takes `--path`. `lv` exits 0, 1 on error, 2 when an import
@@ -161,8 +170,8 @@ Required entries (`lv require <name> [--credential]`) share their declaration on
 value goes to their personal store, when the PC names one (`lv store set mine --personal`, usually
 together with `--mirror`): `lv save` writes it there, `lv load` reads it back. After loading, `lv load`
 asks in a console for each required value still missing and offers to save what was typed to the
-personal store. A required file under your profile (`lv require ssh/id --file ~/.ssh/id_ed25519`,
-then `lv set ssh/id --file ~/.ssh/id_ed25519`) is written there by `lv load` when missing, readable
+personal store. A required file under your profile (`lv require kube --file ~/.kube/config-webshop`,
+then `lv set kube --file ~/.kube/config-webshop`) is written there by `lv load` when missing, readable
 by your account only. A new machine then needs `lv load` and one password.
 
 Entries become ordinary KeePass entries in `LocalVault/<repository>[/<folder of the vault>]`, titled
@@ -183,6 +192,19 @@ with `{{OS_PASSWORD}}` where the value was, and moves the value into the vault. 
 git-ignored; `lv template render` writes it, `lv template clear` deletes it, and
 `lv run -- terraform apply` keeps it only while the command runs. Edit the real file and run
 `lv template update` to carry the change into the template.
+
+## SSH keys
+
+`lv ssh-key new deploy --host deploy@web1.example.com` creates a key pair for SSH to the project's
+hosts, never for git. The files are `~/.ssh/<repository>/deploy` and `deploy.pub`, the same path in
+every clone; the public key is printed and copied to the clipboard. A personal key, the default, goes
+to each person's personal store and its declaration to the team store; `lv load` on another PC asks
+for a key from the SSH agent, a private key in a KeePass entry, or a new pair, and uses without a
+question a key that another clone already wrote. A shared key (`--shared`) goes to the team store.
+`lv ssh deploy` and `lv scp deploy -- ...` connect with the key; `lv ssh-key include on` lets plain
+`ssh` find it. `--replace` keeps the old key as `deploy.old` until `lv load` finds that every host
+accepts the new one. `lv clear` deletes the keys no other clone uses; `lv ssh-key clean` deletes the
+keys of clones deleted without it.
 
 ## Old backups
 

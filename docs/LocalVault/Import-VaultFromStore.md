@@ -79,8 +79,8 @@ read a mirror, for example when the primary store can't be reached, name it with
 
 When this PC has a personal store (`Register-VaultStore -Personal`), the cmdlet then reads each
 vault's group there and fills in the values of the vault's required entries, with the same rules as
-shared entries. It takes nothing else from that group. A personal store that can't be opened gives a
-warning and the load goes on.
+shared entries. It takes nothing else from that group. A value removed with `Reset-VaultEntry` isn't
+loaded back. A personal store that can't be opened gives a warning and the load goes on.
 
 A missing personal SSH key whose file another clone of the same repository already wrote, and whose
 marker lists it, is taken from that file without a question. The cmdlet reports the path and the

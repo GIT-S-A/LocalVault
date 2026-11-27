@@ -1,7 +1,7 @@
 ---
 description: Describes the LocalVault vault file, entry names, writes, exports, old backups and use from scripts.
 Locale: en-US
-ms.date: 10/13/2026
+ms.date: 11/27/2026
 title: about_LocalVault
 ---
 
@@ -40,10 +40,13 @@ A relative path is resolved from the current location.
 | `secrets.local.clixml.migrated-<time>` | A `secrets.local.clixml` file after migration. |
 
 Git must ignore these files. The `.gitignore` line `secrets.local.*` covers
-all of them.
+all of them. `Initialize-Vault` (`lv init`) adds the lines that the
+repository's vaults and the files written from templates need, under a
+`# LocalVault` line. Only a rule in a committed `.gitignore` file counts.
 
 A write creates the vault when it doesn't exist. It fails when git doesn't
-ignore the vault file. At the default path, it also fails when the
+ignore the vault file; in a console, it first offers to add the line to
+`.gitignore`. At the default path, it also fails when the
 repository has a vault file in another folder, and asks before it creates
 the vault. A repository can hold several vaults, each created with **Path**.
 Without a console, it fails; pass **Path** to create the vault.
@@ -299,6 +302,78 @@ the values are left out of it.
 
 A vault with a credential declaration needs 1.0.0-beta16 or later.
 
+`Reset-VaultEntry` (`lv reset <name>`) removes a personal value from the
+vault and keeps the declaration. `lv load` doesn't load the old value back,
+and the next `lv save` deletes it from the personal store. In a console, the
+cmdlet asks for the new value at once; `-NoPrompt` (`--no-ask`) leaves it
+to the next `lv load`.
+
+### References
+
+A value can stay in a KeePass entry outside the `LocalVault/` groups:
+`Set-VaultEntry -Reference <group/title>` (`lv set <name> --ref
+<group/title>`). The vault keeps the value and where it comes from. `lv
+save` writes a reference to the store, never the value, and `lv load`
+reads the KeePass entry again, so a change made there reaches every project
+that refers to it.
+
+| Value | Stores searched |
+| --- | --- |
+| Personal value | `-ReferenceStore`, else the personal store. Any store of this PC can be named. |
+| Shared value | `-ReferenceStore`, else the vault's store. Project stores added with `-Source` (`--source`) can be named; the personal store can't. |
+
+A store that unlocks another store is never a source. LocalVault never writes
+outside its `LocalVault/` groups. A referenced value changed on this PC stays
+on this PC with a warning, and `lv save` leaves the KeePass entry alone;
+`lv reset <name>` drops it.
+
+### SSH keys
+
+An SSH key entry holds a key for SSH to hosts, never for git.
+`New-VaultSshKey` (`lv ssh-key new <name> [--host <user@host>]...`)
+creates a key pair with Windows OpenSSH, ed25519 by default, prints the public
+key and copies it to the clipboard for 2 minutes. The key is personal by
+default: the
+store gets the declaration and its hosts, and each person gets a key of their
+own. With `-Shared` (`--shared`), everyone with access to the store reads
+the same key.
+
+| File | Content |
+| --- | --- |
+| `~/.ssh/<repository>/<name>` | The private key, readable by the user, SYSTEM and Administrators only. |
+| `~/.ssh/<repository>/<name>.pub` | The public key. |
+| `~/.ssh/<repository>/<name>.old` | The replaced key, until every host accepts the new one. |
+| `~/.ssh/<repository>/.localvault` | The marker: origin of the repository, and for each key its hash, writer and clones. |
+| `~/.ssh/<repository>/lv.config` | One `Match` block per host, for native tools. |
+
+`<repository>` is the name of the repository's origin, so every clone and
+every teammate uses the same path. A key from an SSH agent, such as KeeAgent,
+keeps only `<name>.pub`.
+
+- `lv load` asks in a console for a personal key missing on this PC. A key
+  that another clone of the repository wrote is used without a question;
+  otherwise a menu offers a key from the SSH agent, a private key stored in a
+  KeePass entry, or a new key pair.
+- A newer key that another clone wrote is taken into the vault.
+- `lv ssh-key new <name> --replace` replaces a key. The old key stays as
+  `<name>.old` until `lv load` finds that every host of the entry accepts
+  the new one.
+- `Invoke-VaultSsh` (`lv ssh <name> [<user@host>]`) and `Invoke-VaultScp`
+  (`lv scp <name> -- <arguments>`) run `ssh` and `scp` with the key, and
+  the old key while it is kept.
+- `Set-VaultSshInclude -Enabled $true` (`lv ssh-key include on`) adds
+  `Include ~/.ssh/*/lv.config` to `~/.ssh/config`, so that `ssh` and `scp`
+  find the keys by host and user.
+- `Clear-Vault` deletes the keys that no other clone uses. Keys of clones
+  deleted without `Clear-Vault` are reported by `lv list` and `lv start`;
+  `Remove-VaultSshOrphan` (`lv ssh-key clean`) deletes them after one
+  confirmation.
+- `Clear-Vault` and `lv ssh-key clean` keep a key file changed by hand.
+- `Reset-VaultEntry` on a personal key keeps its files; the next key keeps
+  the old one as fallback.
+
+A vault with SSH keys needs 1.0.0-beta17 or later.
+
 ### Files that need secrets
 
 Some tools read their secrets from a file: a `.env` file, `clouds.yaml`,
@@ -466,4 +541,8 @@ one, and does nothing when it is already installed.
 - [Export-VaultToStore](Export-VaultToStore.md)
 - [Import-VaultFromStore](Import-VaultFromStore.md)
 - [Register-VaultStore](Register-VaultStore.md)
+- [Initialize-Vault](Initialize-Vault.md)
+- [Reset-VaultEntry](Reset-VaultEntry.md)
+- [New-VaultSshKey](New-VaultSshKey.md)
+- [Invoke-VaultSsh](Invoke-VaultSsh.md)
 - [Invoke-LocalVault](Invoke-LocalVault.md)

@@ -20,8 +20,9 @@ commands; `lv start` in a project prints its state and the commands to run next.
   that other people run.
 - Install with the line below; update with `lv update`. Never run `git checkout`, `pull`, `reset` or
   `clean` in a LocalVault clone: it is someone's working copy.
-- The vault file must be ignored by git (`secrets.local.*` in `.gitignore`) before its first write;
-  the module refuses otherwise.
+- The vault file must be ignored by git before its first write; the module refuses otherwise.
+  `lv init` adds the lines the repository's vaults and templated files need to `.gitignore` (commit
+  it); only a committed rule counts, not a global or `.git/info/exclude` one.
 
 ## Facts that shape a migration
 
@@ -32,17 +33,35 @@ commands; `lv start` in a project prints its state and the commands to run next.
 - **Names.** `key` or `scope/key`, at most one `/`. Characters: letters, digits, `. _ : - @ +`, so an
   email address is a valid key. Case-insensitive, case kept. Not allowed: spaces, `\`, `$`, accents,
   a second `/`. A name that doesn't fit has to be renamed, and the scripts with it.
-- **Kinds.** Secret (text), file (bytes plus the path it is restored to), required (declared by the
-  project, value set by each person, see below).
+- **Kinds.** Secret (text), credential (user name, password, optional TOTP and URLs), file (bytes plus
+  the path it is restored to), SSH key, required (declared by the project, value set by each person,
+  see below).
 - **Who sees what.** Every entry is *shared* by default: `lv save` copies it to the vault's store (a
   KeePass database). `--local` / `-Local` keeps an entry on this PC; `lv mark <name> local|shared`
   changes it later. `lv require <name> [--credential | --file <path>] --note "..."` declares a personal
-  value (a user name and a password with `--credential`; a file such as an SSH private key with
-  `--file ~/.ssh/<key>`, written there by `lv load` with an owner-only ACL): the store gets the
-  declaration, never the value; until
-  set, the entry is `Missing`. A PC's personal store (`lv store set <name> --personal`) keeps each
-  person's values: `lv save` writes them there, `lv load` fills them in, then asks in a console for
-  those still missing.
+  value (a user name and a password with `--credential`; a file under the profile with
+  `--file ~/<path>`, written there by `lv load` with an owner-only ACL): the store gets the
+  declaration, never the value; until set, the entry is `Missing`. A PC's personal store
+  (`lv store set <name> --personal`) keeps each person's values: `lv save` writes them there,
+  `lv load` fills them in, then asks in a console for those still missing. `lv reset <name>
+  [--no-ask]` drops a personal value here and, at the next `lv save`, in the personal store, then
+  asks for a new one.
+- **References.** `lv set <name> --ref "<group/title>" [--ref-store <store>]` keeps a value that
+  already lives in a KeePass entry outside `LocalVault/`: the store gets where it comes from, never
+  the value, and `lv load` reads the entry again. Personal values: any store of the PC, default the
+  personal store. Shared values: the vault's store, or a project store added with `--source`.
+- **SSH keys.** For SSH to hosts, never for git. `lv ssh-key new <name> [--host user@host]...
+  [--shared]` creates a pair in `~/.ssh/<repository>/<name>` (same path in every clone) and prints the
+  public key, which someone with access must add to the hosts. Personal by default: declaration to
+  the team store, key to the person's personal store; `--shared` puts the key in the team store. On
+  another PC `lv load` asks, in a console, for an agent key, a KeePass-held key or a new pair, and
+  takes a key another clone already wrote without asking. Scripts connect with `lv ssh <name>
+  [user@host] [-- args]` / `lv scp <name> -- args` (exit code of ssh); `lv ssh-key include on` lets
+  plain `ssh` find the keys. `--replace` keeps the old key as `<name>.old` until every host accepts
+  the new one. `__SshPrivateKey` entries of old exports stay refused: create or pick the key instead.
+- **.NET user secrets.** `lv user-secrets set <id|project> <key> [--personal]` keeps a key of a
+  project's `secrets.json` in the vault and tracks it in `localvault.json`; `lv load` writes the
+  tracked keys back, never touching other keys. `lv user-secrets` lists ids, projects and keys.
 - **Stores.** A store is a KeePass `.kdbx` file. *Common* stores belong to the PC (`lv store add <name>
   <kdbx> [--default] [--unlock-with <store>] [--mirror]`, in `%LOCALAPPDATA%\LocalVault\stores.json`), read
   first; *project* stores belong to the repository (`lv store add <name> [<kdbx>] --project [--mirror]`,
@@ -102,7 +121,8 @@ Check: `Get-Module LocalVault -ListAvailable | Select-Object Version, Path`. The
    Remove-Item -Recurse -Force $t
    ```
 2. **Check the names** against the rules above; list the ones that need renaming, and the keys that
-   start with `__` (`__File:<name>` becomes a file entry; SSH keys stay out of the vault).
+   start with `__` (`__File:<name>` becomes a file entry; `__SshPrivateKey` is refused: the person
+   creates or picks the key with `lv ssh-key new` or `lv load`).
 3. **Decide with the person**, per old file: which vault it becomes (one vault per old file, with an
    explicit path), and per entry: shared (default), local, or required personal value.
 4. **Rehearse** steps 5 and 6 on a copy of the repository folder, never on the real one.
@@ -158,7 +178,8 @@ Writes merge: several scripts can share one vault. A script never rebuilds a who
 3. `lv load` (every vault of the repository); the person types the KeePass password, then, in their
    console, each required value still missing. Exit code 2: entries changed on both sides; ask, then
    `--replace name,...`.
-4. `lv list`: entries still marked `Missing` are personal values to set with `lv set <name>`.
+4. `lv list`: entries still marked `Missing` are personal values to set with `lv set <name>`, or SSH
+   keys to set with `lv ssh-key new <name>`.
 
 ## Commands
 
@@ -166,13 +187,20 @@ Cmdlets: `Get-VaultEntryList`, `Get-VaultEntry`, `Copy-VaultEntry`, `Set-VaultEn
 `Remove-VaultEntry`, `Resolve-VaultEntry`, `Use-VaultEnv`, `Restore-VaultFile`, `Get-VaultHelloStatus`, `Export-Vault`,
 `Import-Vault`, `Clear-Vault`,
 `Export-VaultToStore`, `Import-VaultFromStore`, `Compare-VaultWithStore`, `Get-VaultStoreStatus`,
-`Copy-VaultToStore`, `Set-VaultProjectStore`, `Register-/Set-/Unregister-/Get-VaultStore`,
-`Add-/Update-/Write-/Clear-/Remove-/Get-VaultTemplate`.
+`Copy-VaultToStore`, `Set-VaultProjectStore`, `Register-VaultStore`, `Set-VaultStore`,
+`Unregister-VaultStore`, `Get-VaultStore`, `Add-VaultTemplate`, `Update-VaultTemplate`,
+`Write-VaultTemplate`, `Clear-VaultTemplate`, `Remove-VaultTemplate`, `Get-VaultTemplate`,
+`Initialize-Vault`, `Reset-VaultEntry`, `New-VaultSshKey`, `Set-VaultSshKeyHost`, `Get-VaultSshKey`,
+`Get-VaultSshKeyPath`, `Set-VaultSshTools`, `Invoke-VaultSsh`, `Invoke-VaultScp`,
+`Set-VaultSshInclude`, `Remove-VaultSshOrphan`, `Get-VaultUserSecretList`, `Set-VaultUserSecret`,
+`Get-VaultUserSecret`, `Remove-VaultUserSecret`, `Write-VaultUserSecret`, `Clear-VaultUserSecret`.
 
-`lv`: `start`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential] [--local] [--hello]`, `require [--credential | --file <path>] [--note] [--hello]`,
-`mark <name> shared|local|hello|nohello`, `hello`, `rm`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
+`lv`: `start`, `init`, `list`, `get [--show]`, `clip`, `set [--file <path> | --credential | --ref <group/title>] [--local] [--hello]`, `require [--credential | --file <path>] [--note] [--hello]`,
+`mark <name> shared|local|hello|nohello`, `hello`, `rm`, `reset [--no-ask]`, `env`, `restore [--overwrite]`, `clear`, `save`, `load`,
 `export [--overwrite]`, `import`,
 `store [list|add|set|rm|use|diff|copy]`, `template [add|update|render|clear|rm]`,
+`ssh-key [list|new|hosts|path|tools|include|clean]`, `ssh`, `scp`,
+`user-secrets [list|set|get|pick|untrack|load|clear]`,
 `run [VAR=name ...] [--stdin <name>] -- <command>`, `update [<tag>] [--downgrade]`, `--version`.
 `lv store set <name> --mirror` (or `--unlock-with <store>`, `--no-mirror`, `--no-unlock`, `--default`, `--personal`, `--no-personal`)
 changes one setting without retyping the target and key file.
