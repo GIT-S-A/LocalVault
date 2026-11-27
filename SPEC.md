@@ -584,7 +584,7 @@ T90|x|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V1
 T91|x|references resolved by module (`LocalVault.Ref`, kind `reference`), any PC store for personal values, shared refs into vault store | project `source` stores; `-ReferenceStore`/`--ref-store`, `-Source`/`--source`|I.References,V131,V132
 T92|x|`Reset-VaultEntry` / `lv reset`|V137
 T107|x|`Initialize-Vault` / `lv init`, create-time offer, `lv start` suggestion|V17,V74,V164
-T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset, .NET user secrets; beta19|C11
+T93|x|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset, .NET user secrets; beta19|C11
 T94|x|marker origin `""` ≠ URL; `lv start` shows adoption report & warning; `Get-VaultEntry` on ssh-key adopts first; tab completion ⊥ adopts|V126,V127,B30,B31
 T95|x|spike: NGC KSP → create OK (1 prompt); OAEP SHA-1/SHA-256 refused, PKCS#1 OK; AUTH_MANDATORY → 2nd decrypt on same handle prompts; `NgcKeyImplType` 0x21 = hardware; prompt shown w/ foreground hwnd when ⊥ console window|I.Hello
 T96|x|Core: `IHelloKey` + NGC impl + test impl, vault key pair, seal/unseal blob, body `hello`, `meta.hello`, schema 6 + xUnit (round trip, AAD swap fails, key missing, keyId mismatch, zeroing)|I.Hello,I.Entry,V144,V145,V148,V151
