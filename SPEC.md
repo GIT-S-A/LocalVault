@@ -582,7 +582,7 @@ T88|x|`lv load` prompt for missing personal key (adopt, agent, KeePass reference
 T89|x|`Invoke-VaultSsh`/`Invoke-VaultScp` w/ fallback, retirement test on load, Include opt-in & `lv.config`|V128,V129,V134,V136
 T90|x|`Clear-Vault` key cleanup, orphan warning, `Remove-VaultSshOrphan`|V130,V133
 T91|x|references resolved by module (`LocalVault.Ref`, kind `reference`), any PC store for personal values, shared refs into vault store | project `source` stores; `-ReferenceStore`/`--ref-store`, `-Source`/`--source`|I.References,V131,V132
-T92|.|`Reset-VaultEntry` / `lv reset`|V137
+T92|x|`Reset-VaultEntry` / `lv reset`|V137
 T107|.|`Initialize-Vault` / `lv init`, create-time offer, `lv start` suggestion|V17,V74,V164
 T93|.|help pages, `about_LocalVault`, SKILL.md, getting started guide for SSH keys, references, reset, .NET user secrets; beta19|C11
 T94|x|marker origin `""` ≠ URL; `lv start` shows adoption report & warning; `Get-VaultEntry` on ssh-key adopts first; tab completion ⊥ adopts|V126,V127,B30,B31
