@@ -108,6 +108,10 @@ Merges entries from an export, a backup or a `secrets.local.clixml` file into a 
 
 Loads the shared entries of the repository's vaults from their stores.
 
+### [Initialize-Vault](Initialize-Vault.md)
+
+Adds the repository's vaults and the files written from templates to `.gitignore`.
+
 ### [Invoke-LocalVault](Invoke-LocalVault.md)
 
 Runs a LocalVault command from a short command line.

@@ -93,6 +93,7 @@ public abstract partial class VaultCmdletBase : PSCmdlet, IVaultHost
             var confirmed = Location.Source != VaultPathSource.GitRoot
                 || (IsInteractive && Confirm($"There is no vault yet. Create '{Location.Path}'?"));
             Location.EnsureCanCreate(confirmed);
+            OfferGitIgnore();
             allowCreate = true;
         }
 
@@ -102,6 +103,21 @@ public abstract partial class VaultCmdletBase : PSCmdlet, IVaultHost
             ExpectedFingerprint = expectedFingerprint,
             IgnoreLegacy = ignoreLegacy,
         };
+    }
+
+    private void OfferGitIgnore()
+    {
+        if (Location.GitRoot is not { } gitRoot || !IsInteractive || GitIgnore.IsIgnored(Location.Path))
+        {
+            return;
+        }
+
+        var line = GitIgnoreFile.LineFor(Location);
+        if (Confirm($"git doesn't ignore '{Location.Path}'. Add '{line}' to {System.IO.Path.Combine(gitRoot, GitIgnoreFile.FileName)}?", defaultYes: true))
+        {
+            GitIgnoreFile.Append(gitRoot, [line]);
+            Say("Commit .gitignore.");
+        }
     }
 
     bool IVaultHost.CanPrompt => IsInteractive || Console.IsInputRedirected;

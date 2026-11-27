@@ -276,6 +276,25 @@ Describe 'Vault location' {
             Should -Throw '*does not ignore*'
     }
 
+    It 'adds the vault to .gitignore with lv init, ignoring a rule that is not committed' {
+        Remove-Item -LiteralPath (Join-Path $repo '.gitignore')
+        Set-Content -LiteralPath (Join-Path $repo '.git\info\exclude') -Value 'secrets.local.*'
+        $vault = Join-Path $repo 'secrets.local.lv'
+
+        $said = lv @('init', '--path', $vault) 6>&1 | Out-String
+
+        $said | Should -Match 'Commit \.gitignore\.'
+        Get-Content -LiteralPath (Join-Path $repo '.gitignore') | Should -Be @('# LocalVault', 'secrets.local.*')
+        lv @('init', '--path', $vault) 6>&1 | Out-String | Should -Match 'Nothing to add\.'
+    }
+
+    It 'names lv init when it refuses to create a vault git does not ignore' {
+        Remove-Item -LiteralPath (Join-Path $repo '.gitignore')
+
+        { Set-VaultEntry -Path (Join-Path $repo 'infra\team.lv') -Name 'a' -Value (ConvertTo-TestSecret '1') } |
+            Should -Throw "*Run lv init, or add '/infra/team.lv*' to .gitignore*"
+    }
+
     It 'creates further vaults only at an explicit path' {
         Set-VaultEntry -Path (Join-Path $repo 'infra/secrets.local.lv') -Name 'a' -Value (ConvertTo-TestSecret '1')
 

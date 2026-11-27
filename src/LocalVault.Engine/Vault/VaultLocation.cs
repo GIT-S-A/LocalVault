@@ -132,7 +132,7 @@ public sealed record VaultLocation(string Path, VaultPathSource Source, string? 
         if (GitRoot is not null && !GitIgnore.IsIgnored(Path))
         {
             throw new VaultException(
-                $"Not creating '{Path}': git does not ignore it. Add '{SideFilePattern}' to .gitignore first.");
+                $"Not creating '{Path}': git does not ignore it. Run lv init, or add '{GitIgnoreFile.LineFor(this)}' to .gitignore, first.");
         }
     }
 

@@ -32,6 +32,7 @@ The module requires Windows and PowerShell 7.6 or later. For concepts, see
 - [Get-VaultUserSecretList](#get-vaultusersecretlist): Gets the .NET user secrets of the repository and the state of each key.
 - [Import-Vault](#import-vault): Merges entries from an export, a backup or a `secrets.local.clixml` file into a vault.
 - [Import-VaultFromStore](#import-vaultfromstore): Loads the shared entries of the repository's vaults from their stores.
+- [Initialize-Vault](#initialize-vault): Adds the repository's vaults and the files written from templates to `.gitignore`.
 - [Invoke-LocalVault](#invoke-localvault): Runs a LocalVault command from a short command line.
 - [Invoke-VaultScp](#invoke-vaultscp): Runs scp with the key of an SSH key entry.
 - [Invoke-VaultSsh](#invoke-vaultssh): Runs ssh with the key of an SSH key entry.
@@ -2896,6 +2897,126 @@ In a console, a command that reads an entry or a vault this PC doesn't have yet 
 first, keeping the local value of every entry changed in both places. A command that reads a
 required value still missing asks for it, as this cmdlet does.
 
+## Initialize-Vault
+
+Adds the repository's vaults and the files written from templates to `.gitignore`.
+
+### Syntax
+
+```text
+Initialize-Vault [-Path <string>] [-WhatIf] [-Confirm] [<CommonParameters>]
+```
+
+### Description
+
+The `Initialize-Vault` cmdlet checks with `git check-ignore` that git ignores these files:
+
+- the vault named by `-Path`, `LOCALVAULT_PATH` or the default location;
+- `secrets.local.lv` at the root of the repository;
+- every vault listed in `localvault.json`;
+- every file that `Write-VaultTemplate` writes from a template.
+
+Only a rule in a `.gitignore` file of the repository counts, because that file is committed and
+applies to every clone. A rule in the global git ignore file or in `.git/info/exclude` applies to
+this PC only.
+
+For each file that isn't ignored, the cmdlet appends a line to `.gitignore` at the root of the
+repository, under a `# LocalVault` line. The `# LocalVault` line is written once; later lines are
+added below it.
+
+| File | Line |
+| --- | --- |
+| Vault named `secrets.local.lv` | `secrets.local.*` |
+| Other vault | `/<folder>/<file name>*` |
+| File written from a template | `/<folder>/<file name>` |
+
+Paths are relative to the root of the repository. The cmdlet creates `.gitignore` when it's
+missing, keeps its existing lines and line endings, and never commits. It doesn't create a vault.
+It ends with `Commit .gitignore.`, or `Nothing to add.` when every file is already ignored.
+
+The cmdlet fails outside a git repository.
+
+### Examples
+
+#### Example 1 - Prepare a repository for LocalVault
+
+```powershell
+Initialize-Vault
+```
+
+```Output
+Line            Path
+----            ----
+secrets.local.* C:\src\obs\secrets.local.lv
+Commit .gitignore.
+```
+
+#### Example 2 - Show the lines without writing them
+
+```powershell
+Initialize-Vault -WhatIf
+```
+
+### Parameters
+
+#### -Confirm
+
+Prompts you for confirmation before running the cmdlet.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | cf |
+
+#### -Path
+
+Specifies the path to the vault file. A relative path is resolved from the current location. If
+you omit this parameter, the cmdlet uses the `LOCALVAULT_PATH` environment variable, and then
+`secrets.local.lv` at the root of the git repository that contains the current location.
+
+| Property | Value |
+| --- | --- |
+| Type | System.String |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | None |
+| Aliases | None |
+
+#### -WhatIf
+
+Shows what would happen if the cmdlet runs. The cmdlet isn't run.
+
+| Property | Value |
+| --- | --- |
+| Type | System.Management.Automation.SwitchParameter |
+| Parameter sets | (All) |
+| Position | Named |
+| Required | False |
+| Pipeline input | False |
+| Default value | False |
+| Aliases | wi |
+
+### Inputs
+
+**None**: You can't pipe objects to this cmdlet.
+
+### Outputs
+
+**LocalVault.PowerShell.VaultGitIgnoreLine**: This cmdlet returns one object per line added, with the **Line** and the **Path** of the file it
+ignores.
+
+### Notes
+
+`lv init` runs this cmdlet. In a console, a command that creates a vault git doesn't ignore offers to
+add its line first.
+
 ## Invoke-LocalVault
 
 Runs a LocalVault command from a short command line.
@@ -2923,6 +3044,7 @@ it says that the vault is missing or empty.
 | --- | --- | --- |
 | `help` | | |
 | `start` | | where the project stands and the commands to run next |
+| `init` | | `Initialize-Vault` |
 | `list` | `[<scope>]` | `Get-VaultEntryList` |
 | `get` | `<name>[#<part>] [--show]` | `Get-VaultEntry -AsPlainText` |
 | `clip` | `<name>[#<part>]` | `Copy-VaultEntry` |

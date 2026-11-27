@@ -46,6 +46,7 @@ it says that the vault is missing or empty.
 | --- | --- | --- |
 | `help` | | |
 | `start` | | where the project stands and the commands to run next |
+| `init` | | `Initialize-Vault` |
 | `list` | `[<scope>]` | `Get-VaultEntryList` |
 | `get` | `<name>[#<part>] [--show]` | `Get-VaultEntry -AsPlainText` |
 | `clip` | `<name>[#<part>]` | `Copy-VaultEntry` |

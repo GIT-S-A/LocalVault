@@ -4,6 +4,7 @@ Set-StrictMode -Version Latest
 $script:LvSyntax = @{
     help    = @{ Usage = 'lv'; Min = 0; Max = 0; Options = @() }
     start   = @{ Usage = 'lv start [--path <vault>]'; Min = 0; Max = 0; Options = @() }
+    init    = @{ Usage = 'lv init [--path <vault>]'; Min = 0; Max = 0; Options = @() }
     list    = @{ Usage = 'lv list [<scope>]'; Min = 0; Max = 1; Options = @() }
     get     = @{ Usage = 'lv get <name>[#user|#totp|#url<n>] [--show]   (secrets without --show: into a pipe or a redirection only)'; Min = 1; Max = 1; Options = @('show') }
     clip    = @{ Usage = 'lv clip <name>[#user|#totp|#url<n>]'; Min = 1; Max = 1; Options = @() }
@@ -122,6 +123,7 @@ lv <command> [<words>] [--path <vault>]      lv --version: the installed release
 
 Entries
   start                                where this project stands, and what to run next
+  init                                 adds the vaults and the files written from templates to .gitignore
   list [<scope>]                       names, kind, store state, age; never a value
   get <name> [--show]                  prints a value into a pipe; --show prints it on screen
   clip <name>                          copies a value to the clipboard for 20 s
@@ -279,7 +281,7 @@ Details: Get-Help Invoke-LocalVault -Full
         }
         if ($Command -eq '-h') { $Command = 'help' }
         if (-not $syntax.ContainsKey($Command)) {
-            throw "Unknown command '$Command'. Commands: start list get clip set require mark rm reset env restore clear save load export import store template run ssh-key ssh scp user-secrets hello update. Run lv alone for details."
+            throw "Unknown command '$Command'. Commands: start init list get clip set require mark rm reset env restore clear save load export import store template run ssh-key ssh scp user-secrets hello update. Run lv alone for details."
         }
 
         $rule = $syntax[$Command]
@@ -340,7 +342,7 @@ Details: Get-Help Invoke-LocalVault -Full
                     })
                 $ignored = $true
                 if ($resolved.GitRoot) {
-                    try { $ignored = [LocalVault.Engine.GitIgnore]::IsIgnored($resolved.Path) } catch { $ignored = $false }
+                    try { $ignored = [LocalVault.Engine.GitIgnoreFile]::Missing($resolved).Count -eq 0 } catch { $ignored = $false }
                 }
 
                 $state = if ($exists) {
@@ -365,7 +367,7 @@ Details: Get-Help Invoke-LocalVault -Full
                 if ($stores.Count -gt 0 -and $unassigned.Count -gt 0) { $next.Add('lv store use <name>   choose the store of this repository''s vaults') }
                 elseif ($resolved.GitRoot -and $stores.Count -gt 0 -and -not (Test-Path -LiteralPath (Join-Path $resolved.GitRoot 'localvault.json'))) { $next.Add('lv store use <name>   name the store in localvault.json, then commit it') }
                 if (@($stores | Where-Object Scope -EQ 'Computer').Count -gt 1 -and -not $unlocked) { $next.Add('lv store add <name> <target> --unlock-with <your personal store>   optional: open that store with the password kept in your personal one') }
-                if (-not $ignored) { $next.Add("add the line secrets.local.* to $(Join-Path $resolved.GitRoot '.gitignore')   before anything else") }
+                if (-not $ignored) { $next.Add('lv init   adds the vaults to .gitignore; before anything else, then commit .gitignore') }
                 if (-not $exists -and $legacy) { $next.Add("lv list   reads $([LocalVault.Engine.VaultLocation]::LegacyFileName); the first change moves it into the vault") }
                 elseif (-not $exists -and $others.Count -gt 0 -and -not $options.ContainsKey('path')) {
                     $next.Add("lv start --path $($others[0])   the vault of this repository is in a subfolder")
@@ -468,6 +470,10 @@ Details: Get-Help Invoke-LocalVault -Full
                 Get-VaultEntry @vault -Name $words[0] -AsPlainText
             }
             'clip' { Copy-VaultEntry @vault -Name $words[0] }
+            'init' {
+                $added = @(Initialize-Vault @vault)
+                if ($added.Count -gt 0) { $added | Format-Table Line, Path -AutoSize }
+            }
             'rm' { Remove-VaultEntry @vault -Name $words[0] }
             'reset' { Reset-VaultEntry @vault -Name $words.ToArray() -NoPrompt:([bool]$options['no-ask']) }
             'env' {
